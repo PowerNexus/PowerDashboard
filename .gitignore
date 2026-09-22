@@ -6,12 +6,27 @@ dist/
 out/
 coverage/
 storybook-static/
+playwright-report/
+test-results/
 *.log
-.env
-.env.*
-!.env.example
 .DS_Store
 Thumbs.db
 
+# Environnement : jamais versionné, à aucun niveau de l'arbre. Seuls les
+# modèles `.env.example` le sont. Une clé poussée une fois est une clé à
+# révoquer, même si le commit est retiré ensuite.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Clés et certificats : aucun n'a sa place dans le dépôt.
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Contient le jeton du node : se télécharge depuis /admin/nodes.
 infra/docker/wings/config.yml
+
+# Réglages Claude Code propres à un poste (outils locaux, permissions).
+.claude/settings.local.json
