@@ -1,0 +1,4 @@
+@import "@gamedashboard/ui/styles.css";
+
+/* Tailwind doit scanner les sources du design system en plus de l'app. */
+@source "../../../../packages/ui/src";

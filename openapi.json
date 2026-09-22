@@ -1,0 +1,3051 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "API GameDashboard",
+    "version": "1.0.0",
+    "description": "Panel de gestion de serveurs de jeu. Les erreurs suivent Problem Details (RFC 9457) : un corps JSON portant `title`, `status` et `detail`, et non un simple texte."
+  },
+  "servers": [
+    {
+      "url": "https://panel.example",
+      "description": "Le panel, sur son domaine"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Audit"
+    },
+    {
+      "name": "Bases de données"
+    },
+    {
+      "name": "Catalogue"
+    },
+    {
+      "name": "Certificats"
+    },
+    {
+      "name": "Clés d'accès"
+    },
+    {
+      "name": "Compte"
+    },
+    {
+      "name": "Comptes"
+    },
+    {
+      "name": "Connexion"
+    },
+    {
+      "name": "Double authentification"
+    },
+    {
+      "name": "Fichiers"
+    },
+    {
+      "name": "Infrastructure"
+    },
+    {
+      "name": "Mise en service"
+    },
+    {
+      "name": "Planification"
+    },
+    {
+      "name": "Revendeurs"
+    },
+    {
+      "name": "Sauvegardes"
+    },
+    {
+      "name": "Serveurs"
+    },
+    {
+      "name": "Sessions"
+    }
+  ],
+  "paths": {
+    "/api/v1/auth/me": {
+      "get": {
+        "summary": "Profil du titulaire de la clé ou de la session.",
+        "description": "Session du panel.",
+        "tags": [
+          "Compte"
+        ],
+        "operationId": "session-get-auth-me",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "Mot de passe. Refusé quand l'authentification unique est active.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-login",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login/2fa": {
+      "post": {
+        "summary": "Second facteur : code TOTP ou code de secours.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-login-2fa",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login/2fa/passkey/options": {
+      "post": {
+        "summary": "Options de la cérémonie WebAuthn, à partir du défi de connexion.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-login-2fa-passkey-options",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login/2fa/passkey": {
+      "post": {
+        "summary": "Assertion d'une clé d'accès. Ouvre la session.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-login-2fa-passkey",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso": {
+      "get": {
+        "summary": "L'authentification unique est-elle active, et sous quel nom.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-get-auth-sso",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/start": {
+      "post": {
+        "summary": "Ouvre une cérémonie et rend l'URL du fournisseur, l'état et le vérificateur.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-sso-start",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/callback": {
+      "post": {
+        "summary": "Échange le code, reconnaît le compte, ouvre la session.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-sso-callback",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "summary": "Révoque la session courante et retire le cookie.",
+        "description": "Session du panel.",
+        "tags": [
+          "Connexion"
+        ],
+        "operationId": "session-post-auth-logout",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "summary": "Appareils connectés au compte, la dernière activité en tête.",
+        "description": "Session du panel.",
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "session-get-auth-sessions",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "delete": {
+        "summary": "Ferme toutes les autres sessions, en gardant celle qui le demande.",
+        "description": "Session du panel.",
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "session-delete-auth-sessions",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sessions/{session}": {
+      "delete": {
+        "summary": "Ferme une session. Sur la sienne, c'est une déconnexion.",
+        "description": "Session du panel.",
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "session-delete-auth-sessions-by-session",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "description": "Valeur de « session ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "summary": "Change le mot de passe. L'ancien est exigé ; les autres sessions tombent.",
+        "description": "Session du panel.",
+        "tags": [
+          "Compte"
+        ],
+        "operationId": "session-post-auth-password",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa": {
+      "get": {
+        "summary": "État : TOTP, nombre de clés d'accès, codes de secours restants.",
+        "description": "Session du panel.",
+        "tags": [
+          "Double authentification"
+        ],
+        "operationId": "session-get-auth-2fa",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "delete": {
+        "summary": "Retire le TOTP. Les clés d'accès ne sont pas touchées.",
+        "description": "Session du panel.",
+        "tags": [
+          "Double authentification"
+        ],
+        "operationId": "session-delete-auth-2fa",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/setup": {
+      "post": {
+        "summary": "Prépare un secret TOTP et rend son URI otpauth.",
+        "description": "Session du panel.",
+        "tags": [
+          "Double authentification"
+        ],
+        "operationId": "session-post-auth-2fa-setup",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/enable": {
+      "post": {
+        "summary": "Confirme le secret par un premier code et rend les codes de secours.",
+        "description": "Session du panel.",
+        "tags": [
+          "Double authentification"
+        ],
+        "operationId": "session-post-auth-2fa-enable",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/recovery-codes": {
+      "post": {
+        "summary": "Régénère les codes de secours. Mot de passe exigé.",
+        "description": "Session du panel.",
+        "tags": [
+          "Double authentification"
+        ],
+        "operationId": "session-post-auth-2fa-recovery-codes",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/passkeys": {
+      "get": {
+        "summary": "Clés d'accès enregistrées, sans leur clé publique.",
+        "description": "Session du panel.",
+        "tags": [
+          "Clés d'accès"
+        ],
+        "operationId": "session-get-auth-2fa-passkeys",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Vérifie l'enregistrement et range la clé.",
+        "description": "Session du panel.",
+        "tags": [
+          "Clés d'accès"
+        ],
+        "operationId": "session-post-auth-2fa-passkeys",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/passkeys/options": {
+      "post": {
+        "summary": "Options d'enregistrement WebAuthn et défi scellé.",
+        "description": "Session du panel.",
+        "tags": [
+          "Clés d'accès"
+        ],
+        "operationId": "session-post-auth-2fa-passkeys-options",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/auth/2fa/passkeys/{passkey}": {
+      "delete": {
+        "summary": "Supprime une clé d'accès. Mot de passe exigé.",
+        "description": "Session du panel.",
+        "tags": [
+          "Clés d'accès"
+        ],
+        "operationId": "session-delete-auth-2fa-passkeys-by-passkey",
+        "parameters": [
+          {
+            "name": "passkey",
+            "in": "path",
+            "required": true,
+            "description": "Valeur de « passkey ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers": {
+      "get": {
+        "summary": "Lister les serveurs auxquels la clé donne accès.",
+        "description": "Clé personnelle.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers",
+        "security": [
+          {
+            "clientKey": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}": {
+      "get": {
+        "summary": "Détail d'un serveur : limites, allocation, egg, état.",
+        "description": "Clé personnelle.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers-by-server",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/resources": {
+      "get": {
+        "summary": "Dernier relevé CPU, mémoire, disque, réseau et joueurs.",
+        "description": "Clé personnelle. Portée requise : `console.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers-by-server-resources",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "console.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "console.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « console.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/power": {
+      "post": {
+        "summary": "Envoyer un signal start, stop, restart ou kill.",
+        "description": "Clé personnelle. Portée requise : `power.*`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-post-servers-by-server-power",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "power.*"
+            ]
+          }
+        ],
+        "x-gd-scope": "power.*",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « power.* »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/command": {
+      "post": {
+        "summary": "Envoyer une commande à la console du serveur.",
+        "description": "Clé personnelle. Portée requise : `console.send`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-post-servers-by-server-command",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "console.send"
+            ]
+          }
+        ],
+        "x-gd-scope": "console.send",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « console.send »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/websocket": {
+      "post": {
+        "summary": "Obtenir un jeton websocket de cinq minutes pour la console.",
+        "description": "Clé personnelle. Portée requise : `console.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-post-servers-by-server-websocket",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "console.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "console.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « console.read »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files": {
+      "get": {
+        "summary": "Lister le contenu d'un répertoire.",
+        "description": "Clé personnelle. Portée requise : `files.read`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-get-servers-by-server-files",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "required": false,
+            "description": "Répertoire à lister, à partir de la racine du volume.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/contents": {
+      "get": {
+        "summary": "Lire le contenu brut d'un fichier.",
+        "description": "Clé personnelle. Portée requise : `files.read`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-get-servers-by-server-files-contents",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/download": {
+      "get": {
+        "summary": "Adresse de téléchargement d'un fichier, à usage unique. Les octets viennent du daemon, pas du panel.",
+        "description": "Clé personnelle. Portée requise : `files.read`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-get-servers-by-server-files-download",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": false,
+            "description": "Chemin du fichier, à partir de la racine du volume.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/upload-grant": {
+      "post": {
+        "summary": "Autorisation de déposer des fichiers. Rend une adresse et un jeton à présenter au daemon.",
+        "description": "Clé personnelle. Portée requise : `files.write`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-upload-grant",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/compress": {
+      "post": {
+        "summary": "Compresse une sélection en une archive, dans le dossier indiqué.",
+        "description": "Clé personnelle. Portée requise : `files.archive`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-compress",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.archive"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.archive",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.archive »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/decompress": {
+      "post": {
+        "summary": "Extrait une archive sur place.",
+        "description": "Clé personnelle. Portée requise : `files.archive`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-decompress",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.archive"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.archive",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.archive »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/write": {
+      "post": {
+        "summary": "Écrire un fichier. Le corps de la requête est le contenu brut.",
+        "description": "Clé personnelle. Portée requise : `files.write`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-write",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/rename": {
+      "post": {
+        "summary": "Renommer ou déplacer un fichier ou un dossier.",
+        "description": "Clé personnelle. Portée requise : `files.write`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-rename",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/delete": {
+      "post": {
+        "summary": "Supprimer définitivement des fichiers ou dossiers.",
+        "description": "Clé personnelle. Portée requise : `files.delete`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-delete",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.delete"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.delete",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.delete »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/backups": {
+      "get": {
+        "summary": "Lister les sauvegardes et le quota restant.",
+        "description": "Clé personnelle. Portée requise : `backups.read`.",
+        "tags": [
+          "Sauvegardes"
+        ],
+        "operationId": "client-get-servers-by-server-backups",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "backups.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "backups.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « backups.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Déclencher une sauvegarde. Accepte un en-tête d'idempotence.",
+        "description": "Clé personnelle. Portée requise : `backups.create`.",
+        "tags": [
+          "Sauvegardes"
+        ],
+        "operationId": "client-post-servers-by-server-backups",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "backups.create"
+            ]
+          }
+        ],
+        "x-gd-scope": "backups.create",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « backups.create »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/backups/{backup}/restore": {
+      "post": {
+        "summary": "Restaurer une sauvegarde sur le serveur.",
+        "description": "Clé personnelle. Portée requise : `backups.restore`.",
+        "tags": [
+          "Sauvegardes"
+        ],
+        "operationId": "client-post-servers-by-server-backups-by-backup-restore",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "backup",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant de la sauvegarde.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "backups.restore"
+            ]
+          }
+        ],
+        "x-gd-scope": "backups.restore",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « backups.restore »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/backups/{backup}": {
+      "delete": {
+        "summary": "Supprimer une sauvegarde non verrouillée.",
+        "description": "Clé personnelle. Portée requise : `backups.delete`.",
+        "tags": [
+          "Sauvegardes"
+        ],
+        "operationId": "client-delete-servers-by-server-backups-by-backup",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "backup",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant de la sauvegarde.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "backups.delete"
+            ]
+          }
+        ],
+        "x-gd-scope": "backups.delete",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « backups.delete »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/databases": {
+      "get": {
+        "summary": "Lister les bases de données du serveur.",
+        "description": "Clé personnelle. Portée requise : `databases.read`.",
+        "tags": [
+          "Bases de données"
+        ],
+        "operationId": "client-get-servers-by-server-databases",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "databases.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "databases.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « databases.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Créer une base et son utilisateur dédié.",
+        "description": "Clé personnelle. Portée requise : `databases.create`.",
+        "tags": [
+          "Bases de données"
+        ],
+        "operationId": "client-post-servers-by-server-databases",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "databases.create"
+            ]
+          }
+        ],
+        "x-gd-scope": "databases.create",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « databases.create »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/databases/{db}/rotate": {
+      "post": {
+        "summary": "Régénérer le mot de passe de la base.",
+        "description": "Clé personnelle. Portée requise : `databases.update`.",
+        "tags": [
+          "Bases de données"
+        ],
+        "operationId": "client-post-servers-by-server-databases-by-db-rotate",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "db",
+            "in": "path",
+            "required": true,
+            "description": "Valeur de « db ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "databases.update"
+            ]
+          }
+        ],
+        "x-gd-scope": "databases.update",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « databases.update »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/schedules": {
+      "get": {
+        "summary": "Lister les tâches planifiées et leur prochaine exécution.",
+        "description": "Clé personnelle. Portée requise : `schedules.read`.",
+        "tags": [
+          "Planification"
+        ],
+        "operationId": "client-get-servers-by-server-schedules",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "schedules.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "schedules.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « schedules.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/schedules/{schedule}/run": {
+      "post": {
+        "summary": "Exécuter une tâche immédiatement.",
+        "description": "Clé personnelle. Portée requise : `schedules.update`.",
+        "tags": [
+          "Planification"
+        ],
+        "operationId": "client-post-servers-by-server-schedules-by-schedule-run",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "schedule",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant de la tâche planifiée.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "schedules.update"
+            ]
+          }
+        ],
+        "x-gd-scope": "schedules.update",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « schedules.update »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/activity": {
+      "get": {
+        "summary": "Journal d'audit du serveur, paginé par curseur.",
+        "description": "Clé personnelle. Portée requise : `activity.read`.",
+        "tags": [
+          "Audit"
+        ],
+        "operationId": "client-get-servers-by-server-activity",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "activity.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "activity.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « activity.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/domains/certificates": {
+      "get": {
+        "summary": "Domaines vérifiés et état de leur certificat TLS. « pending » dit s'il y a quelque chose à faire : aucun certificat, expiration à moins de trente jours, ou échec vieux d'une heure.",
+        "description": "Clé de plateforme. Portée requise : `domains.certificates`.",
+        "tags": [
+          "Certificats"
+        ],
+        "operationId": "application-get-domains-certificates",
+        "security": [
+          {
+            "applicationKey": [
+              "domains.certificates"
+            ]
+          }
+        ],
+        "x-gd-scope": "domains.certificates",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « domains.certificates »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/domains/{domain}/certificate": {
+      "post": {
+        "summary": "Rendre compte d'une tentative. « issuedAt » et « expiresAt » à la réussite, « failure » à l'échec — et les deux ensemble quand un renouvellement échoue alors que l'ancien certificat tient encore.",
+        "description": "Clé de plateforme. Portée requise : `domains.certificates`.",
+        "tags": [
+          "Certificats"
+        ],
+        "operationId": "application-post-domains-by-domain-certificate",
+        "parameters": [
+          {
+            "name": "domain",
+            "in": "path",
+            "required": true,
+            "description": "Valeur de « domain ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "domains.certificates"
+            ]
+          }
+        ],
+        "x-gd-scope": "domains.certificates",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « domains.certificates »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/application/identity": {
+      "get": {
+        "summary": "Vérifier la clé, l'adresse IP et les portées accordées. Ne crée rien.",
+        "description": "Clé de plateforme.",
+        "tags": [
+          "Mise en service"
+        ],
+        "operationId": "application-get-identity",
+        "security": [
+          {
+            "applicationKey": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans le droit sur cette ressource."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/users": {
+      "get": {
+        "summary": "Retrouver un compte par identifiant externe, adresse e-mail ou identifiant local.",
+        "description": "Clé de plateforme. Portée requise : `users.read`.",
+        "tags": [
+          "Comptes"
+        ],
+        "operationId": "application-get-users",
+        "parameters": [
+          {
+            "name": "externalId",
+            "in": "query",
+            "required": false,
+            "description": "Valeur de « externalId ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "users.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "users.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « users.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Créer un compte client. Aucun mot de passe n'est accepté : la connexion passe par le SSO.",
+        "description": "Clé de plateforme. Portée requise : `users.write`.",
+        "tags": [
+          "Comptes"
+        ],
+        "operationId": "application-post-users",
+        "security": [
+          {
+            "applicationKey": [
+              "users.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "users.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « users.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/application/users/{user}": {
+      "get": {
+        "summary": "Détail d'un compte et nombre de serveurs possédés.",
+        "description": "Clé de plateforme. Portée requise : `users.read`.",
+        "tags": [
+          "Comptes"
+        ],
+        "operationId": "application-get-users-by-user",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du compte.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "users.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "users.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « users.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "patch": {
+        "summary": "Corriger nom, prénom ou identifiant externe. Ni rôle, ni adresse, ni mot de passe.",
+        "description": "Clé de plateforme. Portée requise : `users.write`.",
+        "tags": [
+          "Comptes"
+        ],
+        "operationId": "application-patch-users-by-user",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du compte.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "users.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "users.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « users.write »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "delete": {
+        "summary": "Supprimer un compte. Refusé tant qu'il possède des serveurs.",
+        "description": "Clé de plateforme. Portée requise : `users.delete`.",
+        "tags": [
+          "Comptes"
+        ],
+        "operationId": "application-delete-users-by-user",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du compte.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "users.delete"
+            ]
+          }
+        ],
+        "x-gd-scope": "users.delete",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « users.delete »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/servers": {
+      "get": {
+        "summary": "Lister les serveurs, éventuellement ceux d'un seul client.",
+        "description": "Clé de plateforme. Portée requise : `servers.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "application-get-servers",
+        "parameters": [
+          {
+            "name": "ownerId",
+            "in": "query",
+            "required": false,
+            "description": "Valeur de « ownerId ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "servers.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "servers.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « servers.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Créer un serveur pour un client, par offre + localisation ou par node + ressources. Accepte Idempotency-Key.",
+        "description": "Clé de plateforme. Portée requise : `servers.create`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "application-post-servers",
+        "security": [
+          {
+            "applicationKey": [
+              "servers.create"
+            ]
+          }
+        ],
+        "x-gd-scope": "servers.create",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « servers.create »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/application/servers/{server}": {
+      "get": {
+        "summary": "Détail d'un serveur : node, egg, ressources, état, motif de suspension.",
+        "description": "Clé de plateforme. Portée requise : `servers.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "application-get-servers-by-server",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "servers.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "servers.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « servers.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "delete": {
+        "summary": "Supprimer un serveur et son volume. Le node doit répondre.",
+        "description": "Clé de plateforme. Portée requise : `servers.delete`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "application-delete-servers-by-server",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "servers.delete"
+            ]
+          }
+        ],
+        "x-gd-scope": "servers.delete",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « servers.delete »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/servers/{server}/suspension": {
+      "post": {
+        "summary": "Suspendre sur impayé, ou rétablir après régularisation.",
+        "description": "Clé de plateforme. Portée requise : `servers.suspend`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "application-post-servers-by-server-suspension",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "servers.suspend"
+            ]
+          }
+        ],
+        "x-gd-scope": "servers.suspend",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « servers.suspend »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/application/resellers/{user}/quota": {
+      "get": {
+        "summary": "Enveloppe de ressources d'un revendeur et ce qu'il en consomme.",
+        "description": "Clé de plateforme. Portée requise : `resellers.read`.",
+        "tags": [
+          "Revendeurs"
+        ],
+        "operationId": "application-get-resellers-by-user-quota",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du compte.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "resellers.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "resellers.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « resellers.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "put": {
+        "summary": "Poser l'enveloppe d'un revendeur. `null` vaut sans limite, les trois champs sont exigés.",
+        "description": "Clé de plateforme. Portée requise : `resellers.write`.",
+        "tags": [
+          "Revendeurs"
+        ],
+        "operationId": "application-put-resellers-by-user-quota",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du compte.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "applicationKey": [
+              "resellers.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "resellers.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « resellers.write »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/nodes": {
+      "get": {
+        "summary": "Nodes de la plateforme et capacité restante. Les nodes des revendeurs en sont exclus.",
+        "description": "Clé de plateforme. Portée requise : `infrastructure.read`.",
+        "tags": [
+          "Infrastructure"
+        ],
+        "operationId": "application-get-nodes",
+        "security": [
+          {
+            "applicationKey": [
+              "infrastructure.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "infrastructure.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « infrastructure.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/locations": {
+      "get": {
+        "summary": "Localisations ouvertes à la commande, avec le stock de ports.",
+        "description": "Clé de plateforme. Portée requise : `infrastructure.read`.",
+        "tags": [
+          "Infrastructure"
+        ],
+        "operationId": "application-get-locations",
+        "security": [
+          {
+            "applicationKey": [
+              "infrastructure.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "infrastructure.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « infrastructure.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/plans": {
+      "get": {
+        "summary": "Offres du catalogue, telles que l'assistant du panel les propose.",
+        "description": "Clé de plateforme. Portée requise : `infrastructure.read`.",
+        "tags": [
+          "Catalogue"
+        ],
+        "operationId": "application-get-plans",
+        "security": [
+          {
+            "applicationKey": [
+              "infrastructure.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "infrastructure.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « infrastructure.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/application/eggs": {
+      "get": {
+        "summary": "Jeux activés, avec leur famille.",
+        "description": "Clé de plateforme. Portée requise : `infrastructure.read`.",
+        "tags": [
+          "Catalogue"
+        ],
+        "operationId": "application-get-eggs",
+        "security": [
+          {
+            "applicationKey": [
+              "infrastructure.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "infrastructure.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « infrastructure.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-gd_session",
+        "description": "Cookie de session du panel. Posé à la connexion, illisible par un script, et donc inutilisable depuis un client tiers."
+      },
+      "clientKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Clé personnelle, créée depuis « Compte → Clés d'API ». Elle agit au nom de son propriétaire et ne porte jamais plus que les portées qu'on lui a données."
+      },
+      "applicationKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Clé de plateforme, créée depuis l'administration. Elle n'agit au nom de personne : elle provisionne, suspend et résilie pour le compte d'un système tiers."
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "description": "Refus ou erreur, au format Problem Details (RFC 9457).",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Ce qui s'est passé, en une phrase."
+          },
+          "status": {
+            "type": "integer",
+            "description": "Le code HTTP, répété dans le corps."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Le détail utile, quand il y en a un."
+          }
+        },
+        "required": [
+          "title",
+          "status"
+        ]
+      }
+    }
+  }
+}

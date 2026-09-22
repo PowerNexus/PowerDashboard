@@ -1,0 +1,29 @@
+[Unit]
+Description=GameDashboard — certificats des domaines de revendeurs
+# nginx et le panel doivent répondre : sans le premier, aucun défi ACME
+# n'aboutit ; sans le second, on ne sait pas quoi demander.
+After=network-online.target nginx.service gamedashboard-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gamedashboard/app/infra/prod/certificates.sh
+
+# Root est nécessaire et assumé : certbot écrit dans /etc/letsencrypt, l'agent
+# pose un fichier dans sites-enabled et recharge nginx. Aucun de ces trois
+# gestes ne se délègue à l'utilisateur du panel — et c'est précisément pour
+# cela que le panel ne le fait pas lui-même.
+User=root
+
+# Une tentative ne doit jamais tenir la machine. Le tour entier est borné :
+# une dizaine de domaines, un aller-retour ACME chacun.
+TimeoutStartSec=900
+
+# Le script ne rend un code non nul que pour ses propres pannes — clé absente,
+# panel muet. Un domaine mal pointé par un revendeur n'est pas un incident
+# d'exploitation : le signaler ici ferait hurler systemd quatre fois par heure
+# jusqu'à ce que plus personne ne regarde.
+SuccessExitStatus=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+{
+  "extends": "@gamedashboard/config/tsconfig/react-library.json",
+  "comment": "La configuration Storybook est incluse : elle fait partie du paquet, une erreur de type y casse le design system comme ailleurs.",
+  "include": ["src", ".storybook"]
+}

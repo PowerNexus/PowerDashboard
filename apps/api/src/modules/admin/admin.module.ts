@@ -1,0 +1,98 @@
+import { Module } from "@nestjs/common";
+import { ActivityModule } from "../activity/activity.module";
+import { AuthModule } from "../auth/auth.module";
+import { ClientModule } from "../client/client.module";
+import { MailerService } from "../mail/mailer.service";
+import { NotificationsModule } from "../notifications/notifications.module";
+import { ResellerModule } from "../reseller/reseller.module";
+import { SchedulerModule } from "../scheduler/scheduler.module";
+import { WebhooksModule } from "../webhooks/webhooks.module";
+import { WingsModule } from "../wings/wings.module";
+import { AdminController } from "./admin.controller";
+import { AdminGuard } from "./admin.guard";
+import { AdminService } from "./admin.service";
+import { AdminActionsService } from "./admin-actions.service";
+import { AdminServerService } from "./admin-server.service";
+import { AdminWriteGuard } from "./admin-write.guard";
+import { AnnouncementsService } from "./announcements.service";
+import { DatabaseHostsService } from "./database-hosts.service";
+import { EggImportService } from "./egg-import.service";
+import { InfrastructureService } from "./infrastructure.service";
+import { MountsService } from "./mounts.service";
+import { NodeConfigurationService } from "./node-configuration.service";
+import { NodeLoadService } from "./node-load.service";
+import { PlatformSettingsService } from "./platform-settings.service";
+import { ServerTransferService } from "./server-transfer.service";
+import { StaffTwoFactorGuard } from "./staff-2fa.guard";
+
+@Module({
+  // `ResellerModule` pour poser les enveloppes : l'administration les décide,
+  // mais la règle qui les fait respecter vit avec le revendeur.
+  // `NotificationsModule` pour le transfert : un déménagement prévient le
+  // propriétaire, dont l'adresse de serveur vient de changer.
+  // `ActivityModule` pour la lecture du journal : il est écrit partout, et
+  // l'administration est le seul endroit d'où on puisse le lire en entier.
+  // `SchedulerModule` pour que l'administration puisse rendre compte de ce qui
+  // tourne sans elle : la rétention s'exécute à l'heure, et c'est ici qu'on
+  // vient vérifier qu'elle s'exécute bien.
+  imports: [
+    AuthModule,
+    WingsModule,
+    ResellerModule,
+    // Pour le redimensionnement des serveurs. Le module client n'importe pas
+    // celui-ci, donc l'import ne forme pas de cycle.
+    ClientModule,
+    WebhooksModule,
+    NotificationsModule,
+    ActivityModule,
+    SchedulerModule,
+  ],
+  controllers: [AdminController],
+  providers: [
+    AdminService,
+    // Fourni ici comme dans les autres modules qui envoient : le service ne
+    // dépend que des réglages, que ce module possède déjà. L'administration en
+    // a besoin pour éprouver le SMTP — seul moyen de savoir qu'il fonctionne
+    // avant qu'un client ne découvre le contraire en perdant son mot de passe.
+    MailerService,
+    AdminServerService,
+    AdminGuard,
+    AdminWriteGuard,
+    // Le réglage « 2FA obligatoire pour le personnel » existait sans que rien ne
+    // le lise : ce garde est ce qui le rend vrai.
+    StaffTwoFactorGuard,
+    AdminActionsService,
+    ServerTransferService,
+    // Sans hôte déclaré, la fonction « bases de données » de l'espace client
+    // est complète mais inutilisable : c'est cet écran qui la met en service.
+    DatabaseHostsService,
+    // Les tables `mounts` et `server_mounts` existaient sans que rien ne les
+    // serve : le daemon recevait une liste vide en dur.
+    MountsService,
+    NodeConfigurationService,
+    AnnouncementsService,
+    NodeLoadService,
+    PlatformSettingsService,
+    EggImportService,
+    InfrastructureService,
+  ],
+  // Sortent pour l'API applicative : la suspension, la suppression et les
+  // gardes d'administration y sont les mêmes, et une seconde implémentation
+  // finirait par diverger sur le contrôle qui compte.
+  // `ServerTransferService` sort pour le module remote : le compte rendu du
+  // daemon et la bascule en base sont deux moments du même acte, et une
+  // seconde implémentation finirait par les désaccorder.
+  exports: [
+    AdminActionsService,
+    // La coquille du panel lit les annonces en cours : elles s'affichent à
+    // tout le monde, pas seulement dans l'administration qui les rédige.
+    AnnouncementsService,
+    AdminGuard,
+    AdminWriteGuard,
+    ServerTransferService,
+    // Les contrôleurs de l'API applicative et des incidents l'emploient aussi :
+    // la règle vaut pour tout l'espace d'administration, pas pour un écran.
+    StaffTwoFactorGuard,
+  ],
+})
+export class AdminModule {}

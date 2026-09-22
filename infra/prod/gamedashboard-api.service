@@ -1,0 +1,54 @@
+# API GameDashboard — unité systemd.
+#
+# Elle n'écoute que sur la boucle locale (HOST dans api.env) : la machine est
+# partagée avec d'autres services publics, et rien ne doit pouvoir joindre les
+# routes d'administration sans passer par nginx.
+
+[Unit]
+Description=GameDashboard — API
+Documentation=https://yhbeta.matheol.fr
+# `postgresql.service` est une unité de synthèse ; l'instance réelle est
+# `postgresql@18-main`. Nommer la synthèse suffit pour l'ordre de démarrage.
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+# Au-delà de cinq relances en une minute, systemd cesse de relancer. Sans
+# cette borne, une API qui refuse de démarrer (clé absente, base injoignable)
+# relancerait indéfiniment et noierait le journal de la machine entière.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=gamedashboard
+Group=gamedashboard
+WorkingDirectory=/opt/gamedashboard/app/apps/api
+EnvironmentFile=/opt/gamedashboard/env/api.env
+# `tsx` et non un bundle compilé : l'API n'a pas d'étape de construction dans
+# ce dépôt. C'est un choix assumé pour la bêta — à remplacer par une sortie
+# compilée avant d'y mettre de vrais clients.
+#
+# Le chemin est celui du paquet et non celui de la racine : pnpm ne remonte à
+# la racine que les binaires des dépendances de la racine. `tsx` est une
+# dépendance de l'API, son relais est donc chez elle.
+ExecStart=/opt/gamedashboard/app/apps/api/node_modules/.bin/tsx src/main.ts
+
+Restart=always
+RestartSec=3
+# Confinement. La machine héberge aussi la messagerie et d'autres sites : ce
+# service ne doit pouvoir écrire que chez lui.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=/opt/gamedashboard/var
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gamedashboard-api
+
+[Install]
+WantedBy=multi-user.target

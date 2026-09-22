@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["mcp__codiax__linux_command_status"]
+  }
+}

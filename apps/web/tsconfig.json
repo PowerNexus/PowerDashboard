@@ -1,0 +1,12 @@
+{
+  "extends": "@gamedashboard/config/tsconfig/nextjs.json",
+  "compilerOptions": {
+    // TypeScript 7 a supprimé `baseUrl` : les chemins de `paths` sont
+    // désormais résolus relativement au tsconfig lui-même.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

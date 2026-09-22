@@ -1,0 +1,230 @@
+"use server";
+
+import { LOCALE_COOKIE } from "@gamedashboard/i18n";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { INITIAL_LOGIN_STATE, type LoginState } from "@/lib/login-state";
+import { SESSION_COOKIE } from "./client";
+import { forwardedIdentityHeaders } from "./forwarded";
+
+const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
+
+/**
+ * Connexion. Le mot de passe ne traverse que le serveur : le composant client
+ * soumet un formulaire, il n'appelle pas l'API lui-même.
+ */
+export async function login(_previous: LoginState, formData: FormData): Promise<LoginState> {
+  const response = await fetch(`${API_URL}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
+    body: JSON.stringify({
+      email: String(formData.get("email") ?? ""),
+      password: String(formData.get("password") ?? ""),
+      // Posé par le widget Turnstile dans le formulaire. Absent quand la
+      // plateforme n'exige aucun contrôle, auquel cas l'API ne le lit pas.
+      captchaToken: String(formData.get("captchaToken") ?? ""),
+    }),
+  });
+
+  if (!response.ok) {
+    // Le message vient de l'API et ne distingue pas compte inexistant de mot de
+    // passe faux : le formulaire ne doit pas devenir un outil d'énumération.
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    return {
+      ...INITIAL_LOGIN_STATE,
+      error: body.message ?? "Identifiants invalides.",
+    };
+  }
+
+  const body = (await response.json().catch(() => ({}))) as {
+    twoFactorRequired?: boolean;
+    challenge?: string;
+    methods?: { totp: boolean; passkeys: boolean };
+    remainingRecoveryCodes?: number;
+    user?: { locale?: unknown };
+  };
+
+  /**
+   * Le mot de passe est juste, mais l'API n'a posé aucun cookie.
+   *
+   * On rend la main au formulaire avec le défi, sans rien écrire : poser un
+   * cookie ici, puis « demander » un code à l'écran, laisserait le compte
+   * accessible à qui sait fermer une boîte de dialogue.
+   */
+  if (body.twoFactorRequired && body.challenge) {
+    return {
+      error: null,
+      challenge: body.challenge,
+      methods: body.methods ?? { totp: true, passkeys: false },
+      remainingRecoveryCodes: body.remainingRecoveryCodes ?? 0,
+    };
+  }
+
+  await adoptSession(response, body.user?.locale);
+  redirect("/");
+}
+
+/**
+ * Second facteur.
+ *
+ * Le défi voyage par un champ caché du formulaire plutôt que par un cookie :
+ * il ne vaut pas une session, et lui en donner les attributs inviterait à le
+ * traiter comme telle.
+ */
+export async function submitSecondFactor(
+  previous: LoginState,
+  formData: FormData,
+): Promise<LoginState> {
+  const challenge = String(formData.get("challenge") ?? "");
+  const code = String(formData.get("code") ?? "").trim();
+  const recoveryCode = String(formData.get("recoveryCode") ?? "").trim();
+
+  const response = await fetch(`${API_URL}/api/v1/auth/login/2fa`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
+    // L'API refuse les deux à la fois ; l'écran n'en propose qu'un.
+    body: JSON.stringify(recoveryCode ? { challenge, recoveryCode } : { challenge, code }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    return {
+      ...previous,
+      error: body.message ?? "Code invalide.",
+    };
+  }
+
+  await adoptSession(response, await localeOf(response));
+  redirect("/");
+}
+
+/**
+ * Options de la cérémonie WebAuthn, à partir du défi de connexion.
+ *
+ * Appelée impérativement par le composant client, et non comme action de
+ * formulaire : la cérémonie se déroule dans le navigateur, entre cet appel et
+ * le suivant.
+ */
+export async function passkeyLoginOptions(challenge: string): Promise<{
+  options: unknown;
+  challenge: string;
+  error: string | null;
+}> {
+  const response = await fetch(`${API_URL}/api/v1/auth/login/2fa/passkey/options`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
+    body: JSON.stringify({ challenge }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    return { options: null, challenge: "", error: body.message ?? "Demande expirée." };
+  }
+
+  const { data } = (await response.json()) as {
+    data: { options: unknown; challenge: string };
+  };
+  return { ...data, error: null };
+}
+
+/** Vérifie l'assertion et ouvre la session. */
+export async function submitPasskey(
+  challenge: string,
+  assertion: unknown,
+): Promise<{ error: string | null }> {
+  const response = await fetch(`${API_URL}/api/v1/auth/login/2fa/passkey`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
+    body: JSON.stringify({ challenge, response: assertion }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    return { error: body.message ?? "Clé refusée." };
+  }
+
+  await adoptSession(response, await localeOf(response));
+  redirect("/");
+}
+
+/**
+ * Consomme un lien de connexion venu du système de facturation.
+ *
+ * Le client n'a pas de mot de passe sur ce panel : il a cliqué « Gérer mon
+ * serveur » depuis son espace client, et le plugin l'a redirigé ici avec un
+ * jeton valable deux minutes et une seule fois.
+ *
+ * Posée dans ce fichier et non ailleurs pour une raison précise : c'est le seul
+ * endroit qui sache recopier vers le navigateur le cookie que l'API pose sur sa
+ * réponse à Next. Un second chemin d'ouverture de session finirait par oublier
+ * l'une des propriétés du cookie, ou la langue du compte.
+ */
+export async function consumeBillingLink(token: string): Promise<{ error: string | null }> {
+  const response = await fetch(`${API_URL}/api/v1/auth/billing/consume`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
+    body: JSON.stringify({ token }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    return { error: body.message ?? "Ce lien de connexion n'est plus valable." };
+  }
+
+  await adoptSession(response, await localeOf(response));
+  return { error: null };
+}
+
+/**
+ * Recopie le cookie posé par l'API sur la réponse de Next.
+ *
+ * L'API répond à Next, pas au navigateur : sans cette recopie, le cookie
+ * s'arrêterait au serveur de rendu et la connexion n'aurait aucun effet visible.
+ */
+async function adoptSession(response: Response, locale?: unknown): Promise<void> {
+  const setCookie = response.headers.get("set-cookie");
+  const token = setCookie?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
+  if (!token) return;
+
+  const store = await cookies();
+  store.set(SESSION_COOKIE, token, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 7 * 24 * 60 * 60,
+  });
+
+  /*
+   * La langue du compte suit la connexion.
+   *
+   * Le rendu côté serveur lit un cookie, pas la session : sans cette ligne,
+   * quelqu'un qui a choisi le français retrouverait le panel dans la langue de
+   * son navigateur à la première connexion depuis un nouvel appareil — alors
+   * que sa préférence est bien enregistrée, et que rien à l'écran ne dirait
+   * pourquoi elle n'est pas respectée.
+   *
+   * La langue est reçue en argument plutôt que relue ici : la réponse a déjà
+   * été lue par l'appelant, et un corps de réponse ne se lit qu'une fois.
+   */
+  if (typeof locale === "string" && locale !== "") {
+    store.set(LOCALE_COOKIE, locale, { path: "/", maxAge: 365 * 24 * 60 * 60, sameSite: "lax" });
+  }
+}
+
+/**
+ * Langue du profil rendu par l'API, quand on peut encore la lire.
+ *
+ * Un corps de réponse ne se lit qu'une fois : sur les chemins où l'appelant
+ * l'a déjà consommé, la lecture échoue et on rend `undefined`. C'est sans
+ * conséquence — le compte garde sa préférence, seul le cookie attendra le
+ * prochain changement de langue pour se mettre au diapason.
+ */
+async function localeOf(response: Response): Promise<unknown> {
+  try {
+    const body = (await response.json()) as { user?: { locale?: unknown } };
+    return body.user?.locale;
+  } catch {
+    return undefined;
+  }
+}

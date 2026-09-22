@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Une seule exécution par branche : un nouveau push annule la précédente.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Turbo télémétrie désactivée : rien ne sort de la CI sans raison.
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  verify:
+    name: Lint, types, tests et build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # --frozen-lockfile : la CI échoue si le lockfile ne correspond pas au
+      # package.json, plutôt que de résoudre silencieusement d'autres versions.
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      # Le build a besoin des variables d'environnement, mais aucun secret
+      # n'est requis pour compiler : les clés ne sont lues qu'à l'exécution.
+      - name: Build
+        run: pnpm build
+
+      # Storybook est la référence visuelle de l'équipe : une histoire qui ne
+      # compile plus doit se voir ici, pas le jour où quelqu'un veut consulter
+      # un composant.
+      - name: Build Storybook
+        run: pnpm --filter @gamedashboard/ui build-storybook
+
+      # Le schéma Drizzle et les migrations doivent rester en phase. Sans cette
+      # vérification, une colonne ajoutée au schéma sans migration ne se verrait
+      # qu'au déploiement, face à une base qui ne la possède pas.
+      - name: Migrations à jour
+        run: |
+          pnpm --filter @gamedashboard/db db:generate
+          git diff --exit-code packages/db/migrations \
+            || { echo "::error::Schéma modifié sans migration générée. Lancez pnpm --filter @gamedashboard/db db:generate."; exit 1; }
+
+      # Même raison, pour l'autre contrat : une route ajoutée au catalogue sans
+      # régénérer la spécification donnerait un `openapi.json` qui décrit une
+      # API d'hier. Ceux qui en génèrent leur client ne le verraient jamais —
+      # ils obtiendraient simplement un client sans la nouvelle route.
+      - name: Spécification OpenAPI à jour
+        run: |
+          pnpm openapi
+          git diff --exit-code openapi.json \
+            || { echo "::error::Catalogue de routes modifié sans régénérer la spécification. Lancez pnpm openapi."; exit 1; }
+
+  audit:
+    name: Audit de sécurité des dépendances
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      # Bloquant dès le niveau « low » : le projet part propre, autant le
+      # garder ainsi plutôt que d'accumuler une dette qu'on cessera de lire.
+      - name: pnpm audit
+        run: pnpm audit --audit-level low
+
+      # Informe sans bloquer : une nouvelle version sortie le matin même ne
+      # doit pas empêcher de livrer, mais elle doit se voir.
+      - name: Versions en retard
+        continue-on-error: true
+        run: pnpm outdated -r
+
+      # Trivy lit le système de fichiers : dépendances **et** fichiers de
+      # configuration. `pnpm audit` ne connaît que le registre npm — il ne voit
+      # ni un Dockerfile qui tourne en root, ni un secret laissé dans un
+      # fichier d'exemple, ni une image de base périmée.
+      - name: Trivy — dépendances et configuration
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          skip-dirs: node_modules,.next,.turbo
+
+      # Semgrep cherche des motifs dans **notre** code, là où les deux autres
+      # regardent ce qu'on importe. C'est le seul des trois qui puisse voir une
+      # requête concaténée ou une comparaison de secret non constante.
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/typescript p/nodejs p/secrets p/owasp-top-ten
+
+  e2e:
+    name: Parcours critiques et accessibilité
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Une vraie base : l'interface est éprouvée contre l'API réelle, qui parle
+    # à PostgreSQL. Une API simulée validerait le panel contre une fiction.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: gamedashboard
+          POSTGRES_PASSWORD: gamedashboard
+          POSTGRES_DB: gamedashboard
+          TZ: UTC
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gamedashboard"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://gamedashboard:gamedashboard@127.0.0.1:5432/gamedashboard
+      # Clé d'essai, valable pour cette exécution seule. Elle ne déchiffre rien
+      # d'autre que ce que la même exécution vient d'écrire.
+      APP_SECRET_KEY: cle-de-test-ci-0123456789abcdef0123456789abcdef
+      E2E_EMAIL: e2e@gamedashboard.test
+      E2E_PASSWORD: Essai-E2E-2026!motdepasse
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      - name: Installer le navigateur
+        run: pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+
+      - name: Migrations
+        run: pnpm --filter @gamedashboard/db db:migrate
+
+      # Le compte d'essai est créé par le **vrai** chemin de création : c'est
+      # le code de l'application qui hache le mot de passe, et non un condensat
+      # fabriqué à côté qui pourrait diverger de ce que la connexion attend.
+      - name: Compte d'essai
+        run: |
+          pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
+            "$E2E_EMAIL" Essai CI
+          GD_PASSWORD="$E2E_PASSWORD" \
+            pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
+
+      - name: Construire
+        run: pnpm build
+
+      - name: Parcours et accessibilité
+        run: pnpm e2e
+
+      # Gardé même en cas d'échec : c'est précisément quand la suite est rouge
+      # qu'on a besoin des traces et des captures.
+      - name: Rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

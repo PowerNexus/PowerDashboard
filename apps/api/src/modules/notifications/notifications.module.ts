@@ -1,0 +1,31 @@
+import { Module } from "@nestjs/common";
+import { databaseProvider } from "../../common/database.provider";
+import { PlatformSettingsService } from "../admin/platform-settings.service";
+import { MailerService } from "../mail/mailer.service";
+import { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
+import { NotificationPreferencesRepository } from "./notification-preferences.repository";
+import { NotificationsService } from "./notifications.service";
+
+/**
+ * Les notifications persistantes.
+ *
+ * Module partagé : elles sont lues par le module client et **écrites** par le
+ * module remote, puisque les événements qui méritent une cloche — installation
+ * terminée, sauvegarde échouée — viennent du daemon.
+ */
+@Module({
+  providers: [
+    databaseProvider,
+    NotificationsService,
+    NotificationPreferencesRepository,
+    // Le mailer est fourni ici plutôt qu'importé : le module qui le porte
+    // importe déjà celui-ci, et un import en retour formerait un cycle.
+    MailerService,
+    PlatformSettingsService,
+    // Fourni ici, comme le mailer et pour la même raison : le module des
+    // rappels importe déjà celui-ci, et un import en retour formerait un cycle.
+    ClientWebhookEmitterService,
+  ],
+  exports: [NotificationsService, NotificationPreferencesRepository],
+})
+export class NotificationsModule {}

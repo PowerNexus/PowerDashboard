@@ -1,0 +1,1 @@
+ALTER TABLE "nodes" ADD COLUMN "unreachable_since" timestamp with time zone;

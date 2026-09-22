@@ -1,0 +1,524 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Expose les tokens comme utilitaires Tailwind (bg-surface, text-muted, border-border…). */
+@theme inline {
+  --color-accent: var(--gd-accent-500);
+  --color-accent-400: var(--gd-accent-400);
+  --color-accent-600: var(--gd-accent-600);
+  --color-accent-soft: var(--gd-accent-soft);
+  --color-accent-fg: var(--gd-accent-fg);
+
+  --color-bg: var(--gd-bg);
+  --color-surface: var(--gd-surface);
+  --color-surface-2: var(--gd-surface-2);
+  --color-surface-3: var(--gd-surface-3);
+  --color-border: var(--gd-border);
+  --color-border-strong: var(--gd-border-strong);
+
+  --color-fg: var(--gd-text);
+  --color-muted: var(--gd-text-muted);
+  --color-faint: var(--gd-text-faint);
+
+  /* Le ton vif pour ce qui se voit — pastille, bordure, barre — et le ton
+     `-ink` pour ce qui se lit. Voir tokens.css : le premier sur le fond
+     doux donnait 2,07:1. */
+  --color-success: var(--gd-success);
+  --color-success-soft: var(--gd-success-soft);
+  --color-success-ink: var(--gd-success-ink);
+  --color-warning: var(--gd-warning);
+  --color-warning-soft: var(--gd-warning-soft);
+  --color-warning-ink: var(--gd-warning-ink);
+  --color-danger: var(--gd-danger);
+  --color-danger-soft: var(--gd-danger-soft);
+  --color-danger-ink: var(--gd-danger-ink);
+  --color-info: var(--gd-info);
+  --color-info-soft: var(--gd-info-soft);
+  --color-info-ink: var(--gd-info-ink);
+
+  --color-console-bg: var(--gd-console-bg);
+  --color-console-fg: var(--gd-console-fg);
+
+  --radius-card: var(--gd-radius);
+  --radius-field: var(--gd-radius-sm);
+  --radius-xs: var(--gd-radius-xs);
+
+  --shadow-card: var(--gd-shadow);
+  --shadow-lg: var(--gd-shadow-lg);
+
+  --font-sans: var(--gd-font-sans);
+  --font-mono: var(--gd-font-mono);
+}
+
+@layer base {
+  * {
+    border-color: var(--gd-border);
+  }
+  html {
+    font-family: var(--gd-font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background: var(--gd-bg);
+    color: var(--gd-text);
+    margin: 0;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--gd-accent-500) 30%, transparent);
+  }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--gd-ring);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--gd-border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+@layer utilities {
+  /* Label de section en capitales espacées avec le petit trait accent (cf. sidebar). */
+  .gd-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gd-text-muted);
+    position: relative;
+    padding-bottom: 6px;
+  }
+  .gd-section-label::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 24px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--gd-accent-500);
+  }
+  .gd-mono {
+    font-family: var(--gd-font-mono);
+    font-variant-ligatures: none;
+  }
+}
+
+/*
+ * Écran de démarrage.
+ *
+ * **Tout le mouvement est ici**, et plus dans un fichier d'images. L'animation
+ * était livrée sous forme de WebP animé aux couleurs de GameDashboard : elle
+ * imposait un fond noir, résistait à `prefers-reduced-motion`, et surtout elle
+ * ne connaissait qu'une marque. Un revendeur avait beau régler son logo, son
+ * nom et sa couleur, son client voyait d'abord le phénix violet du produit.
+ *
+ * Les trois éléments d'ici ne portent donc aucune couleur en propre : ils
+ * descendent tous de `--gd-accent-500`, que la racine pose avant la première
+ * peinture, et le signe vient de `/brand/logo`, qui résout le logo du domaine
+ * d'arrivée. Régler la marque suffit à changer l'écran.
+ *
+ * Le rythme vient de `--gd-splash-cycle`, posé par le composant : chaque étape
+ * est un pourcentage de ce cycle, si bien qu'une seule valeur commande à la
+ * fois l'animation et la tenue de l'écran.
+ */
+@layer components {
+  /*
+   * Fond sombre, **teinté de la marque**.
+   *
+   * Presque noir plutôt que noir pur : la couleur d'accent n'y est mêlée qu'à
+   * quelques pour cent, assez pour que l'écran appartienne visiblement à la
+   * marque, trop peu pour éclaircir le fond et faire pâlir le signe.
+   *
+   * Imposé quel que soit le thème, et réservé au premier affichage : ailleurs,
+   * cet éclair sombre se lirait comme une panne.
+   */
+  .gd-splash-cover {
+    background:
+      radial-gradient(
+        ellipse 80% 60% at 50% 42%,
+        color-mix(in srgb, var(--gd-accent-500) 18%, transparent),
+        transparent 70%
+      ),
+      color-mix(in srgb, var(--gd-accent-500) 6%, #07060c);
+  }
+
+  /* Sur le fond sombre imposé, le gris « muted » du thème clair deviendrait
+     illisible : la teinte du texte suit le fond, pas le thème. */
+  .gd-splash-cover .gd-splash-label {
+    color: color-mix(in srgb, #ffffff 70%, transparent);
+  }
+  .gd-splash-cover .gd-splash-name {
+    color: #ffffff;
+  }
+
+  /*
+   * Le calque de démarrage, par-dessus la page qui se rend derrière.
+   *
+   * Il s'efface au lieu de disparaître : une page qui apparaît d'un coup se
+   * lit comme un saut, alors qu'un fondu se lit comme une arrivée. La durée
+   * est celle annoncée par `SplashGate` — les deux doivent rester d'accord,
+   * sinon le calque part avant d'être devenu transparent.
+   */
+  .gd-splash-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    opacity: 1;
+    transition: opacity 160ms ease-out;
+  }
+  .gd-splash-gate--leaving {
+    opacity: 0;
+    /* Dès que le fondu commence, les clics traversent : l'interface est
+       utilisable avant même que le calque n'ait fini de s'effacer. */
+    pointer-events: none;
+  }
+
+  /*
+   * Scène du signe : un carré, comme le logo.
+   *
+   * La taille est bornée plutôt que fixée — sur un téléphone, une scène de
+   * 160 px fixes tiendrait, mais le halo qui la déborde sortirait de l'écran.
+   */
+  .gd-splash-stage {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: min(160px, 40vw);
+    aspect-ratio: 1;
+  }
+
+  /*
+   * Le halo : la couleur de la marque, diffuse, derrière le signe.
+   *
+   * Il éclot puis se retire à demi, ce qui donne l'impression que le signe
+   * « s'allume ». Un halo qui resterait à pleine intensité ferait un rond
+   * lumineux fixe — joli une seconde, pesant la suivante.
+   */
+  .gd-splash-halo {
+    position: absolute;
+    inset: -30%;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--gd-accent-500) 55%, transparent),
+      transparent 68%
+    );
+    filter: blur(14px);
+    opacity: 0;
+    transform: scale(0.6);
+    animation: gd-splash-halo var(--gd-splash-cycle) ease-out both;
+  }
+
+  .gd-splash-mark {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    user-select: none;
+    animation: gd-splash-mark var(--gd-splash-cycle) cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+
+  /*
+   * Le nom, en lettres qui se resserrent.
+   *
+   * L'interlettrage part large et se referme : le nom semble se poser plutôt
+   * qu'apparaître. C'est le seul mouvement du texte — le faire aussi monter ou
+   * grandir donnerait trois choses à suivre pour un seul mot.
+   */
+  .gd-splash-name {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--gd-fg);
+    animation: gd-splash-name var(--gd-splash-cycle) ease-out both;
+  }
+
+  /*
+   * Le trait qui balaie, aux couleurs de la marque.
+   *
+   * Dégradé qui s'éteint aux deux bouts : un trait à bords nets se lirait
+   * comme une barre de progression, donc comme une mesure — alors que rien
+   * n'est mesuré ici.
+   */
+  .gd-splash-sweep {
+    width: min(150px, 38vw);
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--gd-accent-500),
+      color-mix(in srgb, var(--gd-accent-500) 40%, white),
+      var(--gd-accent-500),
+      transparent
+    );
+    background-size: 220% 100%;
+    opacity: 0;
+    animation: gd-splash-sweep var(--gd-splash-cycle) ease-in-out both;
+  }
+
+  .gd-splash-label {
+    animation: gd-splash-pulse 4.3s ease-in-out infinite;
+  }
+
+  /*
+   * Les quatre mouvements, exprimés en pourcentage du cycle.
+   *
+   * Ils se chevauchent volontiers : le signe commence à paraître pendant que
+   * le halo éclot, le nom pendant que le signe finit de se poser. Une
+   * succession stricte donnerait quatre temps distincts, et un écran de
+   * chargement qui dure quatre fois plus longtemps qu'il ne devrait.
+   */
+  @keyframes gd-splash-halo {
+    0% {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    30% {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+    100% {
+      opacity: 0.55;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes gd-splash-mark {
+    0% {
+      opacity: 0;
+      transform: scale(0.82) translateY(6px);
+    }
+    35% {
+      opacity: 1;
+    }
+    45% {
+      transform: scale(1) translateY(0);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes gd-splash-name {
+    0%,
+    28% {
+      opacity: 0;
+      letter-spacing: 0.5em;
+    }
+    100% {
+      opacity: 1;
+      letter-spacing: 0.18em;
+    }
+  }
+
+  @keyframes gd-splash-sweep {
+    0%,
+    38% {
+      opacity: 0;
+      background-position: 120% 0;
+    }
+    55% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.9;
+      background-position: -20% 0;
+    }
+  }
+
+  /* La légende respire doucement : elle signale l'attente sans la commenter. */
+  @keyframes gd-splash-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /*
+   * Qui a demandé l'arrêt des animations n'en veut pas non plus au démarrage.
+   *
+   * Et c'est ici que la reconstruction se paie : une animation en CSS **se
+   * neutralise**. Le WebP animé, lui, ignorait `animation: none`, et il fallait
+   * rendre un second logo fixe, masqué en temps normal, pour avoir quelque
+   * chose à montrer à sa place. Cette image en double n'existe plus : les
+   * éléments sont les mêmes, ils ne bougent simplement pas.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .gd-splash-halo,
+    .gd-splash-mark,
+    .gd-splash-name,
+    .gd-splash-sweep,
+    .gd-splash-label {
+      animation: none;
+    }
+    .gd-splash-halo {
+      opacity: 0.55;
+      transform: scale(1);
+    }
+    .gd-splash-mark {
+      opacity: 1;
+      transform: none;
+    }
+    .gd-splash-name {
+      opacity: 1;
+      letter-spacing: 0.18em;
+    }
+    .gd-splash-sweep {
+      opacity: 0.9;
+    }
+  }
+
+  /* ==========================================================================
+   * Barre de navigation en cours, sur le bord bas du header.
+   * ======================================================================= */
+
+  /*
+   * Elle se pose *sur* la bordure du header plutôt qu'au-dessus.
+   *
+   * `bottom: -1px` la fait couvrir exactement le trait de `border-b` : rien ne
+   * bouge quand elle apparaît. Une barre ajoutée en hauteur décalerait toute la
+   * page d'un ou deux pixels à chaque navigation — un tressautement permanent,
+   * pour un signal censé rassurer.
+   */
+  .gd-navprogress {
+    position: absolute;
+    inset-inline: 0;
+    bottom: -1px;
+    height: 2px;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    /* Sortie plus lente que l'entrée : une navigation instantanée ne doit pas
+       produire un clignotement, mais une brève lueur qui s'éteint. */
+    transition: opacity 260ms ease-out;
+  }
+
+  .gd-navprogress--active {
+    opacity: 1;
+    transition: opacity 90ms ease-in;
+  }
+
+  .gd-navprogress > span {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    display: block;
+  }
+
+  /*
+   * Le fond : les couleurs du panel, en retrait.
+   *
+   * Ce sont les teintes d'état de l'interface — accent, information, succès,
+   * avertissement, danger — et non un arc-en-ciel générique : la barre reste de
+   * la même famille que le reste de l'écran. Tenue à faible opacité pour qu'on
+   * la sente sans la lire ; c'est un décor, pas un message.
+   *
+   * Le dégradé fait deux fois la largeur et se translate d'une moitié : la fin
+   * du motif rejoint exactement son début, donc la boucle ne se voit pas.
+   */
+  .gd-navprogress-rainbow {
+    left: 0;
+    width: 200%;
+    background: linear-gradient(
+      90deg,
+      var(--gd-accent-500),
+      var(--gd-info),
+      var(--gd-success),
+      var(--gd-warning),
+      var(--gd-danger),
+      var(--gd-accent-500),
+      var(--gd-info),
+      var(--gd-success),
+      var(--gd-warning),
+      var(--gd-danger),
+      var(--gd-accent-500)
+    );
+    opacity: 0.38;
+    animation: gd-navprogress-drift 3.2s linear infinite;
+  }
+
+  /*
+   * Le passage : la couleur principale, elle bien visible.
+   *
+   * C'est lui qui porte le mouvement — le fond ne fait que glisser. Sa course
+   * dépasse les deux bords (`-40%` → `140%`) pour qu'il entre et sorte du
+   * champ au lieu d'apparaître et disparaître sur place.
+   */
+  .gd-navprogress-comet {
+    width: 38%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--gd-accent-400) 45%,
+      #ffffff 50%,
+      var(--gd-accent-400) 55%,
+      transparent
+    );
+    /* La lueur déborde des deux pixels de la barre et la rend perceptible du
+       coin de l'œil, ce qui est tout ce qu'on lui demande. */
+    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--gd-accent-400) 65%, transparent);
+    animation: gd-navprogress-sweep 1.15s cubic-bezier(0.55, 0, 0.35, 1) infinite;
+  }
+
+  @keyframes gd-navprogress-drift {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes gd-navprogress-sweep {
+    from {
+      transform: translateX(-140%);
+    }
+    to {
+      transform: translateX(400%);
+    }
+  }
+
+  /*
+   * Mouvement réduit : la barre reste, le défilement s'arrête.
+   *
+   * La supprimer priverait du seul signal disant que le panel travaille. Elle
+   * pulse doucement à la place — une variation d'opacité ne provoque pas le
+   * malaise que provoque un déplacement.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    .gd-navprogress-rainbow {
+      animation: none;
+      width: 100%;
+      opacity: 0.5;
+    }
+    .gd-navprogress-comet {
+      animation: gd-navprogress-breathe 1.8s ease-in-out infinite;
+      width: 100%;
+      transform: none;
+      background: var(--gd-accent-400);
+      box-shadow: none;
+    }
+    @keyframes gd-navprogress-breathe {
+      0%,
+      100% {
+        opacity: 0.35;
+      }
+      50% {
+        opacity: 0.9;
+      }
+    }
+  }
+}

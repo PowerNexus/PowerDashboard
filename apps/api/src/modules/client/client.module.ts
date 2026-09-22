@@ -1,0 +1,121 @@
+import { Module } from "@nestjs/common";
+import { ActivityModule } from "../activity/activity.module";
+import { AnnouncementsService } from "../admin/announcements.service";
+import { PlatformSettingsService } from "../admin/platform-settings.service";
+import { AuthModule } from "../auth/auth.module";
+import { MailerService } from "../mail/mailer.service";
+import { MarketplaceModule } from "../marketplace/marketplace.module";
+import { NotificationsModule } from "../notifications/notifications.module";
+import { ResellerModule } from "../reseller/reseller.module";
+import { StorageModule } from "../storage/storage.module";
+import { WebhooksModule } from "../webhooks/webhooks.module";
+import { WingsModule } from "../wings/wings.module";
+import { AccountController } from "./account.controller";
+import { AccountPreferencesService } from "./account-preferences.service";
+import { AllocationsService } from "./allocations.service";
+import { ApiKeysService } from "./api-keys.service";
+import { BackupsService } from "./backups.service";
+import { CatalogueService } from "./catalogue.service";
+import { ClientController } from "./client.controller";
+import { ClientNodesService } from "./client-nodes.service";
+import { ClientServersService } from "./client-servers.service";
+import { DatabasesService } from "./databases.service";
+import { FileUploadService } from "./file-upload.service";
+import { HostbillService } from "./hostbill.service";
+import { InvitationsController } from "./invitations.controller";
+import { MysqlProvisionerService } from "./mysql-provisioner.service";
+import { NotificationsController } from "./notifications.controller";
+import { SchedulesService } from "./schedules.service";
+import { ServerAccessService } from "./server-access.service";
+import { ServerFeaturesController } from "./server-features.controller";
+import { ServerInvitesService } from "./server-invites.service";
+import { ServerProvisioningService } from "./server-provisioning.service";
+import { ServerResizeService } from "./server-resize.service";
+import { ServerRuntimeController } from "./server-runtime.controller";
+import { ServerSettingsService } from "./server-settings.service";
+import { ServerWebhooksService } from "./server-webhooks.service";
+import { SubusersService } from "./subusers.service";
+
+@Module({
+  imports: [
+    AuthModule,
+    WingsModule,
+    ActivityModule,
+    MarketplaceModule,
+    NotificationsModule,
+    // Les rappels sortants : une création faite ici doit parvenir au tiers,
+    // quelle que soit la porte par laquelle elle est entrée.
+    WebhooksModule,
+    // Pour l'enveloppe des revendeurs, que la création de serveur doit faire
+    // respecter. Le module n'expose que ce service.
+    ResellerModule,
+    // Pour rendre une adresse signée vers une archive déposée sur le
+    // compartiment : le panel ne relaie pas les octets.
+    StorageModule,
+  ],
+  controllers: [
+    ClientController,
+    ServerRuntimeController,
+    ServerFeaturesController,
+    AccountController,
+    NotificationsController,
+    // Le bout du lien d'invitation. Sans garde de serveur, puisqu'à cet instant
+    // celui qui l'ouvre n'y a précisément aucun accès — et souvent pas encore
+    // de compte.
+    InvitationsController,
+  ],
+  providers: [
+    ClientServersService,
+    HostbillService,
+    ClientNodesService,
+    ServerAccessService,
+    // L'assemblage des envois reprenables. Il vit côté panel parce que Wings,
+    // non modifié, ne sait pas compléter un fichier déjà commencé.
+    FileUploadService,
+    // Les rappels sortants que le client déclare sur son serveur.
+    ServerWebhooksService,
+    BackupsService,
+    DatabasesService,
+    MysqlProvisionerService,
+    AllocationsService,
+    SubusersService,
+    // Les invitations par courriel, pour les adresses sans compte : le seul
+    // chemin où un pouvoir sur un serveur transite par une boîte aux lettres.
+    ServerInvitesService,
+    SchedulesService,
+    ApiKeysService,
+    AccountPreferencesService,
+    ServerSettingsService,
+    CatalogueService,
+    ServerProvisioningService,
+    ServerResizeService,
+    // Pour le défaut du tueur de mémoire, décidé par la plateforme.
+    PlatformSettingsService,
+    // L'écran des notifications doit pouvoir dire si le courriel partira :
+    // proposer une case qui n'enverra rien fait attendre des messages qui ne
+    // viendront jamais.
+    MailerService,
+    // Fourni ici plutôt qu'importé du module d'administration : celui-ci importe
+    // déjà le module client pour la création de serveurs, et un import en retour
+    // formerait un cycle. Les deux instances lisent la même table.
+    AnnouncementsService,
+  ],
+  // Sortent pour l'API applicative : une commande passée par la boutique doit
+  // suivre le même chemin de création qu'un serveur créé depuis le panel.
+  // `BackupsService` sort pour le planificateur : une sauvegarde planifiée doit
+  // emprunter la même porte qu'une sauvegarde demandée, contrôle de quota
+  // compris. Deux chemins d'écriture vers la même table finissent toujours par
+  // diverger, et c'est celui qu'on regarde le moins qui diverge.
+  exports: [
+    CatalogueService,
+    ServerProvisioningService,
+    // Sort pour l'administration et pour l'API applicative : changer les
+    // limites d'un serveur doit emprunter la même porte, quel qu'en soit le
+    // demandeur, sinon le quota se ferait contourner par la porte la moins
+    // regardée.
+    ServerResizeService,
+    HostbillService,
+    BackupsService,
+  ],
+})
+export class ClientModule {}

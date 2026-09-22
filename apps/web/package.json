@@ -1,0 +1,40 @@
+{
+  "name": "@gamedashboard/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@gamedashboard/contracts": "workspace:*",
+    "@gamedashboard/i18n": "workspace:*",
+    "@gamedashboard/ui": "workspace:*",
+    "lucide-react": "^1.46.0",
+    "next": "^16.3.5",
+    "next-intl": "^4.14.5",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.56.1",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^26.5.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@gamedashboard/config": "workspace:*",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^7.0.2"
+  }
+}

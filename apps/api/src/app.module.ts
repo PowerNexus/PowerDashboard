@@ -1,0 +1,32 @@
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { AdminModule } from "./modules/admin/admin.module";
+import { ApplicationModule } from "./modules/application/application.module";
+import { AuthModule } from "./modules/auth/auth.module";
+import { ClientModule } from "./modules/client/client.module";
+import { HealthModule } from "./modules/health/health.module";
+import { RemoteModule } from "./modules/remote/remote.module";
+import { ResellerModule } from "./modules/reseller/reseller.module";
+import { SchedulerModule } from "./modules/scheduler/scheduler.module";
+import { StatusModule } from "./modules/status/status.module";
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    // En premier : ce module doit répondre même si un autre refuse de
+    // s'initialiser, puisque c'est lui qu'on interroge alors.
+    HealthModule,
+    AuthModule,
+    ClientModule,
+    AdminModule,
+    ResellerModule,
+    // API des systèmes tiers : la facturation vit hors de ce projet et pilote
+    // le panel par ici, avec ses propres clés et ses propres portées.
+    ApplicationModule,
+    RemoteModule,
+    SchedulerModule,
+    // Page de statut : lecture publique sans compte, rédaction réservée.
+    StatusModule,
+  ],
+})
+export class AppModule {}

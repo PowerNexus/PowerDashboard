@@ -1,0 +1,17 @@
+node_modules/
+.pnpm-store/
+.turbo/
+.next/
+dist/
+out/
+coverage/
+storybook-static/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+
+# Contient le jeton du node : se télécharge depuis /admin/nodes.
+infra/docker/wings/config.yml

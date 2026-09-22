@@ -1,0 +1,32 @@
+{
+  "name": "gamedashboard",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "pnpm --filter @gamedashboard/web dev",
+    "build": "turbo run build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "openapi": "pnpm --filter @gamedashboard/contracts openapi",
+    "eggs:build": "pnpm --filter @gamedashboard/api exec tsx ../../infra/eggs/build.mts",
+    "e2e": "pnpm --filter @gamedashboard/web e2e",
+    "storybook": "pnpm --filter @gamedashboard/ui storybook",
+    "services:up": "docker compose -f infra/docker/compose.dev.yml up -d",
+    "services:down": "docker compose -f infra/docker/compose.dev.yml down",
+    "services:logs": "docker compose -f infra/docker/compose.dev.yml logs -f",
+    "db:generate": "pnpm --filter @gamedashboard/db db:generate",
+    "db:migrate": "pnpm --filter @gamedashboard/db db:migrate",
+    "db:studio": "pnpm --filter @gamedashboard/db db:studio"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.0",
+    "turbo": "^2.10.13",
+    "typescript": "^7.0.2"
+  }
+}

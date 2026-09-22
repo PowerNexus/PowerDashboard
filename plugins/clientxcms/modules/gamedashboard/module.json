@@ -1,0 +1,11 @@
+{
+  "name": "GameDashboard",
+  "description": "Vendez et livrez automatiquement des serveurs de jeu GameDashboard.",
+  "uuid": "gamedashboard",
+  "version": "1.0.0",
+  "author": {
+    "name": "GameDashboard",
+    "email": "support@gamedashboard.fr"
+  },
+  "providers": ["App\\Modules\\GameDashboard\\GameDashboardServiceProvider"]
+}

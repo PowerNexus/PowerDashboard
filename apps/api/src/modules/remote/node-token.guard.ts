@@ -1,0 +1,91 @@
+import { decryptSecret, tokensMatch } from "@gamedashboard/auth";
+import { parseWingsAuthorization } from "@gamedashboard/contracts";
+import { type CanActivate, type ExecutionContext, Inject, Injectable } from "@nestjs/common";
+import { type NodeIdentity, NodeRepository } from "./node.repository";
+
+/**
+ * Authentification des routes `/api/remote/*`.
+ *
+ * Ces routes sont appelées par Wings, jamais par un navigateur. Le garde est
+ * donc entièrement distinct de celui des sessions utilisateur — les mélanger
+ * ferait qu'un intergiciel de session s'appliquerait ici et répondrait par une
+ * redirection vers `/login`, que le daemon traite comme une panne du panel et
+ * non comme une redirection à suivre.
+ *
+ * Le secret est **chiffré** en base et non haché, contrairement à un mot de
+ * passe. La raison n'est pas un relâchement : Wings emploie le même jeton dans
+ * les deux sens, et le panel doit pouvoir le lui présenter à son tour (§7.4).
+ * Un condensat rendrait tout appel sortant impossible.
+ *
+ * Le jeton vaut un pouvoir total sur le node (§5.5). Deux conséquences ici :
+ * aucune information n'est renvoyée sur la raison d'un refus, et la comparaison
+ * est à durée constante.
+ */
+@Injectable()
+export class NodeTokenGuard implements CanActivate {
+  constructor(@Inject(NodeRepository) private readonly nodes: NodeRepository) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<{
+      headers: Record<string, string | string[] | undefined>;
+      node?: NodeIdentity;
+    }>();
+
+    const header = request.headers.authorization;
+    const token = parseWingsAuthorization(typeof header === "string" ? header : undefined);
+    if (!token) return false;
+
+    const node = await this.nodes.findByTokenId(token.id);
+
+    // Un identifiant inconnu et un secret faux doivent coûter le même temps :
+    // sans cela, la durée de réponse révèle quels identifiants existent, et il
+    // devient possible de les énumérer avant d'attaquer le secret.
+    const expected = node ? safeDecrypt(node.tokenSecret) : "";
+    const matches = tokensMatch(expected, token.secret);
+
+    if (!node || !matches) return false;
+
+    /*
+     * Tout appel authentifié vaut signe de vie.
+     *
+     * Le heartbeat ne se déduisait que de l'inventaire des serveurs, que Wings
+     * ne demande qu'à son démarrage. Un daemon parfaitement vivant passait donc
+     * « en retard » au bout de deux minutes, puis « injoignable », pendant
+     * qu'il continuait d'envoyer ses relevés d'activité et de SFTP toutes les
+     * minutes. Le panel concluait à une panne sur son propre silence.
+     *
+     * La garde est le seul point par lequel passent **toutes** les routes du
+     * daemon : c'est donc ici que la question « ce node parle-t-il encore ? »
+     * a une réponse complète. La version, elle, reste lue par la route
+     * d'inventaire — elle ne change qu'au redémarrage du daemon.
+     *
+     * Sans attendre : l'horodatage sert à repérer un node muet, pas à dater la
+     * requête en cours. Une écriture lente ne doit pas retarder la réponse.
+     */
+    // Le rejet est absorbé : une écriture ratée ne doit pas faire tomber le
+    // processus en promesse non gérée, encore moins refuser la requête.
+    void this.nodes.touch(node.id).catch(() => undefined);
+
+    // Le node authentifié est attaché à la requête : les contrôleurs n'ont
+    // ainsi aucune raison de relire l'en-tête, donc aucune occasion de refaire
+    // la vérification à moitié.
+    request.node = node;
+    return true;
+  }
+}
+
+/**
+ * Déchiffre sans propager l'échec.
+ *
+ * Une valeur illisible — clé changée, colonne corrompue — doit refuser la
+ * connexion, pas faire tomber la requête avec une erreur 500 que le daemon
+ * réessaierait indéfiniment (§7.4). La chaîne vide ne correspondra à aucun
+ * jeton présenté, `parseWingsAuthorization` en refusant déjà les secrets vides.
+ */
+function safeDecrypt(value: string): string {
+  try {
+    return decryptSecret(value);
+  } catch {
+    return "";
+  }
+}

@@ -1,0 +1,224 @@
+# GameDashboard Game Dashboard
+
+Panel de gestion de serveurs de jeu basé sur Docker. Voir [PLAN.md](./PLAN.md) pour l'architecture complète.
+
+## Structure
+
+```
+apps/web            Next.js 16 (client + admin)
+packages/ui         Design system (@gamedashboard/ui)
+packages/contracts  Schémas Zod + types partagés (@gamedashboard/contracts)
+packages/db         Schéma Drizzle + migrations PostgreSQL (@gamedashboard/db)
+packages/auth       Primitives d'authentification (@gamedashboard/auth)
+packages/i18n       Catalogues FR/EN et choix de langue (@gamedashboard/i18n)
+packages/config     Presets TypeScript partagés
+infra/docker        Services de développement (compose)
+```
+
+## Démarrer
+
+L'interface seule ne demande rien d'autre — les données sont encore simulées :
+
+```bash
+pnpm install
+pnpm dev:web        # http://localhost:3000
+```
+
+Pour travailler sur la base de données :
+
+```bash
+pnpm services:up    # PostgreSQL, Redis, MinIO, Mailpit
+pnpm db:migrate     # applique le schéma
+```
+
+`pnpm services:down` arrête les conteneurs **en conservant les données**. Pour
+repartir d'une base vierge, il faut ajouter `-v` à la main : effacer des volumes
+ne doit pas être ce qui arrive quand on se trompe de commande.
+
+Détails et identifiants : [infra/docker/README.md](./infra/docker/README.md).
+
+## Le daemon n'est pas réécrit
+
+Wings est conservé tel quel, en binaire amont non forké. Le périmètre réécrit
+s'arrête à l'interface, à l'API et à l'identité : l'isolation des conteneurs —
+traversée de chemin, symlinks, extraction d'archive, évasion — reste celle qui a
+été éprouvée pendant dix ans. Voir §4.3 de [PLAN.md](./PLAN.md) pour le
+raisonnement, et §5.5 pour le modèle de confiance que cela impose (jeton de node,
+pas mTLS).
+
+## État d'avancement
+
+**Phase 0 terminée. Interface client complète en maquette navigable.**
+
+| Route | Contenu |
+|---|---|
+| `/dashboard` | KPIs, bandeau d'annonce, grille de cartes serveur |
+| `/servers` | Liste des serveurs |
+| `/login` | Authentification (Google, e-mail, captcha) |
+| `/design` | Vitrine de tous les composants, dans les deux thèmes |
+| `/account` | Profil, thème, langue, préférences de notification |
+| `/account/security` | Mot de passe, passkeys, TOTP, sessions actives |
+| `/account/api-keys` | Clés API avec matrice de portées |
+| `/api` | Référence API : routes par clé, événements temps réel, SSO OAuth 2.0 |
+| `/status` | État des nodes et incidents en cours |
+| `/servers/new` | Assistant de création en quatre étapes |
+| `/server/[id]` | Console live, barre d'état dépliable, alimentation, graphes |
+| `/server/[id]/files` | Navigateur de fichiers avec fil d'Ariane et actions |
+| `/server/[id]/backups` | Sauvegardes, quota, progression, verrouillage |
+| `/server/[id]/databases` | Bases MySQL et quota |
+| `/server/[id]/users` | Sous-utilisateurs, invitation, matrice de permissions |
+| `/server/[id]/schedules` | Tâches planifiées avec constructeur cron |
+| `/server/[id]/network` | Allocations de ports |
+| `/server/[id]/settings` | Identité, variables d'egg, SFTP, zone de danger |
+| `/server/[id]/activity` | Journal d'audit filtrable |
+| `/server/[id]/marketplace` | Plugins et mods, compatibilité et mises à jour |
+| `/server/[id]/files/edit` | Éditeur Monaco avec détection de langage |
+| `/admin` | Santé de l'infrastructure, capacité par node, derniers serveurs |
+| `/admin/nodes` | Nodes, capacité, maintenance, heartbeat |
+| `/admin/servers` | Tous les serveurs, recherche et filtres node/état |
+| `/admin/users` | Comptes, rôles, état 2FA |
+| `/admin/eggs` | Catalogue par famille de jeu, import/export JSON |
+| `/admin/settings` | Marque, SMTP, stockage S3, sécurité, feature flags |
+
+La palette de commandes s'ouvre avec `Ctrl+K` depuis n'importe quelle page : navigation,
+changement de serveur, recherche. Le centre de notifications est dans le header.
+
+Les données viennent de `apps/web/src/lib/mock.ts` et `mock-server.ts`. Elles seront
+remplacées par le SDK et le websocket quand l'API existera. Aucun backend n'est
+nécessaire pour lancer l'app.
+
+### Composants de `@gamedashboard/ui`
+
+**Atomes** `Button`, `Badge`, `StatusDot`, `Avatar`, `Input`, `PasswordInput`, `FormField`,
+`Select`, `Switch`, `Progress`, `Skeleton`, `Brand`, `LogoMark`
+
+**Molécules** `Card`, `KeyValueGrid`, `PageHeader`, `AlertBanner`, `Tabs`, `EmptyState`,
+`StatTile`, `MetricBar`, `ThemeToggle`, `Dialog`, `ConfirmDialog`, `Dropdown`, `RowActions`,
+`SettingToggle`
+
+**Organismes** `DataTable`, `AppShell`, `AppHeader`, `SidebarNav`, `ServerCard`,
+`ServerStatusBar`, `AuthCard`, `PowerControls`, `ConsoleView`, `SparkChart`, `FileBrowser`,
+`PermissionMatrix`, `CronBuilder`, `CommandPalette`, `NotificationCenter`, `SelectMenu`,
+`RelativeTime`, `Wizard`, `OptionCard`, `CodeBlock`, `CopyButton`, `MethodBadge`
+
+### Règles métier partagées
+
+`@gamedashboard/contracts` porte les règles qui doivent être identiques partout, pas seulement
+les types. En particulier `nodeStatus()` déduit l'état d'un node de l'âge de son heartbeat
+plutôt que d'un booléen stocké à côté, qui finirait par le contredire. Les mesures d'un
+node injoignable sont absentes, jamais à zéro : `MetricBar` accepte une valeur nulle et
+la rend en hachures.
+
+### Notes d'implémentation
+
+- **`SelectMenu` plutôt que `Select`.** Le `<select>` natif fait rendre sa liste par le
+  système d'exploitation, qui ignore le thème sombre. `SelectMenu` (Radix) est entièrement
+  soumis aux tokens et gère groupes, descriptions et options désactivées.
+- **`RelativeTime` pour toute date affichée en relatif.** Le serveur et le client rendent à
+  des instants différents, donc « il y a 12 minutes » diffère forcément entre les deux.
+  Le composant pose `suppressHydrationWarning` pour que React garde la valeur client.
+- **Le logo vit dans `apps/web/public/brand/`.** `LogoMark` accepte une prop `src` pour la
+  marque blanche.
+
+**Gabarits** `PageTemplate`, `SettingsSection`
+
+## Langues
+
+Français et anglais, via next-intl. **Aucun préfixe de langue dans l'URL** : le
+panel est entièrement authentifié, donc la langue appartient au compte et non à
+l'adresse. Un lien vers un serveur partagé entre collègues s'ouvre ainsi dans la
+langue de celui qui clique, et non dans celle de qui a copié l'URL.
+
+L'ordre de préférence est : compte, puis cookie `NEXT_LOCALE`, puis
+`Accept-Language`, puis français.
+
+Les catalogues vivent dans `packages/i18n/src/messages/`. Le français fait foi :
+les clés y sont créées, et `messages.test.ts` vérifie que l'anglais ne manque
+aucune clé, n'en garde aucune orpheline, et emploie les mêmes variables. Une
+traduction manquante ne lève jamais d'erreur — elle affiche du français à un
+anglophone, ce que seul un test peut rattraper.
+
+**État de la migration.** La coquille de l'application est traduite (navigation
+du panel, de l'administration et d'un serveur, langue du document, métadonnées).
+**Le contenu des pages reste en français en dur** : les 30 routes sont à
+reprendre une par une. Le motif à suivre est celui des layouts —
+`await getTranslations("nav")` dans un composant serveur, `useTranslations` dans
+un composant client.
+
+## Configuration
+
+Copiez `apps/api/.env.example` en `apps/api/.env` et `apps/web/.env.example` en
+`apps/web/.env.local`, puis renseignez les valeurs.
+
+| Variable (API) | Rôle |
+|---|---|
+| `APP_SECRET_KEY` | Clé maître des secrets chiffrés. Sans elle, l'API refuse de démarrer. |
+| `HOST`, `TRUSTED_PROXIES` | Interface d'écoute et intermédiaires crus pour l'adresse cliente. |
+| `CURSEFORGE_API_KEY` | Recherche CurseForge. Obligatoire pour cette source. |
+| `CURSEFORGE_API_URL` | Base de l'API CurseForge. |
+| `MODRINTH_API_URL` | Base de l'API Modrinth. Aucune clé requise. |
+| `MODRINTH_USER_AGENT` | Modrinth exige un agent identifiant l'appelant. |
+
+| Variable (web) | Rôle |
+|---|---|
+| `API_URL` | Adresse interne de l'API. |
+| `PANEL_ORIGIN` | Origine publique du panel. |
+
+Les clés de catalogue vivent dans l'**API**, pas dans l'interface, et aucune
+variable ne porte le préfixe `NEXT_PUBLIC_` : le navigateur passe par l'API, qui
+ajoute la clé côté serveur. Une clé exposée au client serait lisible dans les
+outils réseau de n'importe quel visiteur.
+
+## Dépendances
+
+Le projet suit les dernières versions stables, pour limiter la surface d'attaque.
+Vérifier régulièrement :
+
+```bash
+pnpm outdated -r
+pnpm audit --audit-level low
+```
+
+Les overrides de version vivent dans `pnpm-workspace.yaml`, et non dans `package.json` :
+pnpm 11 ne lit plus le champ `pnpm` du fichier de paquet. Deux sont en place — `dompurify`,
+que Monaco embarque en version vulnérable, et `esbuild`, que drizzle-kit tire via un
+chargeur déprécié.
+
+Le même fichier porte `allowBuilds`, la liste des paquets autorisés à exécuter un script
+d'installation. pnpm les bloque par défaut, et c'est justifié : un `postinstall` s'exécute
+avant la première ligne du projet, ce qui en fait la voie d'entrée classique d'une
+compromission de chaîne d'approvisionnement. Chaque ligne y est une exception motivée.
+
+**Turbopack.** Next 16 l'active par défaut. Une configuration `webpack` résiduelle fait
+échouer le build, d'où la section `turbopack` vide dans `next.config.ts`, qui vaut adhésion
+explicite. Conséquence : le contournement de scrutation que webpack permettait n'existe plus,
+et c'est la raison pour laquelle **le dépôt vit dans le système de fichiers de WSL**
+(`/root/workspace/GameDashboard`) et non sur `/mnt/c`. Le montage `drvfs` n'émet aucun
+événement `inotify` : un fichier édité depuis Windows change bien sur le disque, et le veilleur
+Linux ne l'apprend jamais. Le rechargement à chaud ne fonctionne alors pas, sans que rien ne le
+signale — l'erreur qu'on finit par lire accuse le code, sur un export pourtant bien présent,
+parce que le graphe de modules date du démarrage du serveur. `watchOptions: { pollIntervalMs }`
+ne rattrape pas : essayé, mesuré, sans effet sur le web.
+
+## Vérifications
+
+```bash
+pnpm test        # Vitest : 173 tests sur la logique métier
+pnpm typecheck   # TypeScript strict sur les six paquets
+pnpm lint        # Biome
+pnpm db:generate # doit ne rien produire si le schéma et les migrations sont en phase
+```
+
+Les tests couvrent ce qui a des règles, pas le rendu : seuils de heartbeat et
+précédence entre maintenance et injoignabilité, comparaison de versions du daemon,
+compatibilité des plugins avec le chargeur et la version de jeu, presets de
+permissions, formatage des tailles et des durées, expressions cron.
+
+Le rendu sera couvert par Storybook et Playwright quand l'API existera.
+
+## Conventions
+
+- Une page = template + hooks + organismes, moins de 80 lignes.
+- Aucun composant de `packages/ui` n'importe de logique métier.
+- Tokens de design dans `packages/ui/src/styles/tokens.css`, jamais de couleur en dur.
+- Lint et format : `pnpm lint` (Biome).

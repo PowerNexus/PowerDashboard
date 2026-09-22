@@ -1,0 +1,1 @@
+ALTER TABLE "user_credentials_totp" ADD COLUMN "last_used_step" bigint;

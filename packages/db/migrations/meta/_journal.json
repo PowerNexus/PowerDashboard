@@ -1,0 +1,272 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789501014766,
+      "tag": "0000_familiar_scorpion",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789507174305,
+      "tag": "0001_mushy_garia",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789572895242,
+      "tag": "0002_milky_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789574616187,
+      "tag": "0003_warm_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789577693338,
+      "tag": "0004_abnormal_justin_hammer",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789583969906,
+      "tag": "0005_odd_king_cobra",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789586125760,
+      "tag": "0006_naive_thanos",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789587342531,
+      "tag": "0007_fancy_red_shift",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789588268742,
+      "tag": "0008_smooth_red_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789588923031,
+      "tag": "0009_prime_unreachable_nodes",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789647304193,
+      "tag": "0010_bumpy_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789648170145,
+      "tag": "0011_bumpy_sandman",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789648183278,
+      "tag": "0012_seed_node_taxonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789649921152,
+      "tag": "0013_brief_morbius",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1789650068661,
+      "tag": "0014_flimsy_mother_askani",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1789650074735,
+      "tag": "0015_backfill_server_reseller",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789655900000,
+      "tag": "0016_application_key_bootstrap",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789680900000,
+      "tag": "0017_session_auth_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789682400000,
+      "tag": "0018_auth_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789683200000,
+      "tag": "0019_backup_upload_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789727900000,
+      "tag": "0020_reseller_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789733000000,
+      "tag": "0021_ssh_key_last_used",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789742600000,
+      "tag": "0022_session_impersonator",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789767320820,
+      "tag": "0023_drop_webhook_delivery_attempt",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789767358331,
+      "tag": "0024_client_webhook_delivery_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789768836000,
+      "tag": "0025_activity_logs_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789769751000,
+      "tag": "0026_invite_token_hash_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789830000000,
+      "tag": "0027_invite_invited_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1789833000000,
+      "tag": "0028_schedule_last_run_failure",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789834000000,
+      "tag": "0029_drop_dead_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1789834500000,
+      "tag": "0030_oauth_identity_split",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789835000000,
+      "tag": "0031_billing_settings_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789835500000,
+      "tag": "0032_activity_logs_allow_actor_detach",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789837000000,
+      "tag": "0033_application_key_reseller_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789849000000,
+      "tag": "0034_repair_server_reseller",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1789849500000,
+      "tag": "0035_activity_logs_allow_any_detach",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1789905000000,
+      "tag": "0036_domain_certificates",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1789909500000,
+      "tag": "0037_platform_access_levels",
+      "breakpoints": true
+    }
+  ]
+}

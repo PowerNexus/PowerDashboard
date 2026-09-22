@@ -1,0 +1,24 @@
+{
+  "name": "@gamedashboard/auth",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@gamedashboard/contracts": "workspace:*",
+    "@node-rs/argon2": "^2.2.1",
+    "bcryptjs": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@gamedashboard/config": "workspace:*",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

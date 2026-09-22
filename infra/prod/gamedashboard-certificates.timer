@@ -1,0 +1,21 @@
+[Unit]
+Description=GameDashboard — tour de délivrance des certificats
+
+[Timer]
+# Un quart d'heure : assez court pour qu'un revendeur qui vient de pointer sa
+# zone n'attende pas, assez long pour ne pas marteler l'autorité. La retenue
+# réelle n'est de toute façon pas ici — c'est le panel qui décide qu'un domaine
+# est « en attente », et il laisse une heure après un échec.
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+# Sans cela, tous les tours de la machine se déclenchent à la même seconde.
+RandomizedDelaySec=2min
+
+# Un tour manqué (machine éteinte) est rattrapé au démarrage plutôt qu'ignoré :
+# un certificat qui expire n'attend pas que la machine soit allumée aux bonnes
+# heures.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

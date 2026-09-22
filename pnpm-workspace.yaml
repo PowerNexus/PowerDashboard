@@ -1,0 +1,35 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Scripts d'installation autorisés, un par un. pnpm les bloque par défaut : un
+# « postinstall » s'exécute avec les droits de l'utilisateur dès l'installation,
+# avant même que la moindre ligne du projet ne tourne. C'est la voie d'entrée
+# classique d'une compromission de chaîne d'approvisionnement.
+#
+# Toute ligne ajoutée ici est une exception motivée, jamais un réflexe pour
+# faire taire un avertissement.
+allowBuilds:
+  # Amené par drizzle-kit. Son script résout le binaire natif correspondant à
+  # la plateforme ; sans lui, drizzle-kit ne démarre pas.
+  esbuild: true
+
+  # Amenés tous deux par next-intl : compilation des messages et surveillance
+  # des catalogues en développement. Modules natifs, dont le script
+  # d'installation met en place le binaire de la plateforme.
+  '@swc/core': true
+  '@parcel/watcher': true
+
+# Versions imposées à tout l'arbre de dépendances.
+# pnpm 11 ne lit plus le champ « pnpm » de package.json : les overrides vivent ici.
+overrides:
+  # Monaco embarque un dompurify vulnérable, dont une XSS par suppression de
+  # hook IN_PLACE qui laisse un sous-arbre détaché exécutable. Monaco ne l'a pas
+  # encore relevé. À retirer quand monaco-editor le fera lui-même.
+  dompurify: ">=3.4.13"
+
+  # drizzle-kit passe encore par @esbuild-kit/esm-loader, déprécié, qui épingle
+  # un esbuild dont le serveur de développement accepte les requêtes de
+  # n'importe quel site (GHSA-67mh-4wv8-2f99). Uniquement exploitable en
+  # développement, mais la correction ne coûte rien.
+  esbuild: ">=0.25.0"

@@ -1,0 +1,29 @@
+-- L'identité SSO quitte `users.external_id`.
+--
+-- Cette colonne porte **deux métiers incompatibles**, sous une contrainte
+-- d'unicité qui rend la collision fatale :
+--
+-- * le schéma la décrit comme « identifiant sur le site client, pour le SSO »,
+--   et `SsoService` y écrivait le `sub` du fournisseur d'identité ;
+-- * l'API applicative la cherche comme l'identifiant du client **chez le
+--   système de facturation** — c'est même la recherche qui sert vraiment, le
+--   facturier connaissant ses propres clients et pas les identifiants du panel.
+--
+-- Un compte connecté par SSO puis rattaché à une facture n'aurait donc pas pu
+-- porter les deux : la seconde écriture aurait écrasé la première, ou échoué
+-- sur l'index unique. Et une recherche par identifiant de facturation pouvait
+-- tomber sur un compte apparié par son `sub` OIDC.
+--
+-- `user_oauth_accounts` existait depuis le premier schéma, prévue au plan pour
+-- plusieurs fournisseurs, et vide : c'est l'implémentation qui avait divergé.
+-- L'identité SSO y va, `external_id` reste à la facturation.
+--
+-- Aucune donnée à reprendre : aucun compte ne portait d'`external_id`, et pour
+-- cause — les deux usages ne s'étaient encore jamais rencontrés. Le faire plus
+-- tard aurait demandé de deviner, ligne par ligne, lequel des deux métiers
+-- avait écrit la valeur.
+--
+-- La valeur « oidc » rejoint l'énumération : le fournisseur configurable du
+-- panel n'est ni Google ni Discord, il est quelconque. Les deux autres restent
+-- pour les boutons dédiés prévus au plan.
+ALTER TYPE "oauth_provider" ADD VALUE IF NOT EXISTS 'oidc';

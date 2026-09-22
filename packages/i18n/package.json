@@ -1,0 +1,21 @@
+{
+  "name": "@gamedashboard/i18n",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./locale": "./src/locale.ts",
+    "./messages/*": "./src/messages/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@gamedashboard/config": "workspace:*",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

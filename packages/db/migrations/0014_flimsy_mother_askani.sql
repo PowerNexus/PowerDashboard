@@ -1,0 +1,2 @@
+ALTER TABLE "servers" ADD COLUMN "reseller_id" uuid;--> statement-breakpoint
+ALTER TABLE "servers" ADD CONSTRAINT "servers_reseller_id_users_id_fk" FOREIGN KEY ("reseller_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;

@@ -1,0 +1,159 @@
+# Environnement de développement : état persistant uniquement.
+#
+# Le panel (web, api, worker) tourne sur la machine via `pnpm dev`, pas ici :
+# le rechargement à chaud à travers un montage de volume est lent et capricieux,
+# et déboguer un processus conteneurisé coûte plus qu'il ne rapporte en dev.
+# Ce fichier ne fournit donc que ce qu'on ne veut pas installer sur son poste.
+#
+#   docker compose -f infra/docker/compose.dev.yml up -d
+#
+# Le daemon Wings vit dans le profil « daemon », inactif par défaut (voir plus bas).
+
+name: gamedashboard-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gamedashboard
+      POSTGRES_PASSWORD: gamedashboard
+      POSTGRES_DB: gamedashboard
+      # Le fuseau de la base ne doit jamais influencer une lecture : toutes les
+      # colonnes sont en timestamptz et la session est en UTC.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Les services qui en dépendent attendent une base qui répond, et non un
+      # conteneur démarré : PostgreSQL accepte les connexions plusieurs secondes
+      # après le lancement.
+      test: ["CMD-SHELL", "pg_isready -U gamedashboard -d gamedashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # Les sessions vivent ici (§5.1) : sans persistance, chaque redémarrage
+    # déconnecterait tout le monde et masquerait les bogues d'expiration.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    # Sur quay.io et non sur Docker Hub : MinIO n'y publie plus, et le tirage
+    # depuis `minio/minio` échoue avec un « repository does not exist » qui
+    # ressemble à tort à un problème d'authentification.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: gamedashboard
+      MINIO_ROOT_PASSWORD: gamedashboard-dev-secret
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Hôte de bases de données proposé aux serveurs de jeu (§6.5).
+  #
+  # Distinct de `postgres`, et pas seulement parce que c'est un autre moteur :
+  # le panel s'y connecte avec un compte administrateur pour créer des bases
+  # *pour ses clients*. Les deux ne doivent jamais partager une instance — une
+  # évasion depuis une base de client donnerait sinon accès aux sessions, aux
+  # empreintes de mots de passe et aux jetons de nodes.
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: gamedashboard-dev-root
+      # Ouvert à `%` : le panel s'y connecte depuis la machine hôte, et les
+      # serveurs de jeu depuis leurs conteneurs. Acceptable parce que le port
+      # n'est publié que sur la boucle locale.
+      MYSQL_ROOT_HOST: "%"
+      TZ: UTC
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    # Capture tous les envois. En développement, un SMTP réel finirait par
+    # écrire à une vraie adresse depuis un jeu de données de test.
+    image: axllent/mailpit:v1.31.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+  # ---------------------------------------------------------------------------
+  # Daemon Wings — profil « daemon », à activer à partir de la phase 1.
+  #
+  #   docker compose -f infra/docker/compose.dev.yml --profile daemon up -d
+  #
+  # Inactif par défaut pour une raison de fond : Wings interroge le panel au
+  # démarrage (`/api/remote/servers`, §7.5). Tant que l'API ne sert pas ces
+  # routes, il redémarre en boucle et noie les journaux des autres services.
+  #
+  # Quand il tournera, il devra le faire contre un Wings réel et non un
+  # simulacre : notre couche de compatibilité n'a de valeur que validée contre
+  # le vrai daemon (§4.4).
+  # ---------------------------------------------------------------------------
+  wings:
+    profiles: ["daemon"]
+    image: ghcr.io/pterodactyl/wings:v1.11.13
+    restart: unless-stopped
+    # Wings pilote Docker : il lui faut le socket de l'hôte. C'est un accès
+    # équivalent à root sur la machine — acceptable sur un poste de
+    # développement, jamais sur un hôte partagé.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # En écriture, et non en lecture seule : Wings normalise sa configuration
+      # au démarrage et la réécrit sur le disque. Monté en `:ro`, il s'arrête
+      # sur « failed to write configuration to disk ». Conséquence à connaître :
+      # le fichier est modifié par le daemon, il n'est donc pas la source de
+      # vérité mais une copie de travail — l'original se régénère depuis
+      # /admin/nodes.
+      - ./wings/config.yml:/etc/pterodactyl/config.yml
+      # Chemin identique à la production : le daemon étant inchangé, les volumes
+      # d'un serveur restent là où Pterodactyl les plaçait (annexe C du plan).
+      - /var/lib/pterodactyl:/var/lib/pterodactyl
+      - /tmp/pterodactyl:/tmp/pterodactyl
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:2022:2022"
+    # L'API tourne sur la machine, pas dans le compose : le conteneur a besoin
+    # d'un nom pour joindre son hôte. Sur Docker Linux, `host-gateway` le
+    # fournit ; sans cette ligne, `host.docker.internal` ne résout pas et le
+    # daemon conclut que le panel est injoignable.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  postgres-data:
+  mysql-data:
+  redis-data:
+  minio-data:

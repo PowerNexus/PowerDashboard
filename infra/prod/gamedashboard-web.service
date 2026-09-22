@@ -1,0 +1,51 @@
+# Interface GameDashboard — unité systemd.
+#
+# Ce processus n'a **ni identifiants de base de données, ni clé de
+# chiffrement** : son fichier d'environnement ne les contient pas. Il lit tout
+# par l'API, avec le cookie de l'utilisateur. Une faille de rendu ne donne donc
+# pas la base.
+
+[Unit]
+Description=GameDashboard — Interface
+Documentation=https://yhbeta.matheol.fr
+After=network-online.target gamedashboard-api.service
+# `Wants` et non `Requires` : si l'API tombe, l'interface doit rester debout
+# pour afficher l'écran « API injoignable » plutôt que de disparaître avec elle.
+Wants=network-online.target gamedashboard-api.service
+
+# Au-delà de cinq relances en une minute, systemd cesse de relancer. Sans
+# cette borne, une API qui refuse de démarrer (clé absente, base injoignable)
+# relancerait indéfiniment et noierait le journal de la machine entière.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=gamedashboard
+Group=gamedashboard
+WorkingDirectory=/opt/gamedashboard/app/apps/web
+EnvironmentFile=/opt/gamedashboard/env/web.env
+ExecStart=/opt/gamedashboard/app/apps/web/node_modules/.bin/next start --port ${PORT} --hostname ${HOSTNAME_BIND}
+
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# Next écrit son cache de rendu sous `.next/cache` pendant l'exécution :
+# sans cette exception, `ProtectSystem=strict` le fait échouer à la première
+# page rendue.
+ReadWritePaths=/opt/gamedashboard/app/apps/web/.next
+ReadWritePaths=/opt/gamedashboard/var
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gamedashboard-web
+
+[Install]
+WantedBy=multi-user.target

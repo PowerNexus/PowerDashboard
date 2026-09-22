@@ -1,0 +1,29 @@
+{
+  "name": "@gamedashboard/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@gamedashboard/contracts": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@gamedashboard/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "^0.31.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

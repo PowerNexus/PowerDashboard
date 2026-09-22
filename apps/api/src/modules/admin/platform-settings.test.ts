@@ -1,0 +1,125 @@
+import type { Database } from "@gamedashboard/db";
+import { BadRequestException } from "@nestjs/common";
+import { beforeEach, describe, expect, it } from "vitest";
+import { PlatformSettingsService } from "./platform-settings.service";
+
+/**
+ * Base simulée : `written` garde ce qui aurait été enregistré, `stored` ce que
+ * la lecture renvoie.
+ */
+function service(stored: { key: string; value: unknown; isSecret: boolean }[] = []) {
+  const written: { key: string; value: unknown; isSecret: boolean }[] = [];
+
+  /**
+   * `from()` doit être **à la fois** awaitable et porteur de `.where()` :
+   * `all()` filtre par clé, `flags()` lit la table entière. Un double qui ne
+   * gère qu'une des deux formes échoue sur l'autre — c'est exactement ce qui
+   * est arrivé au premier jet.
+   */
+  const from = () => Object.assign(Promise.resolve([] as unknown[]), { where: async () => stored });
+
+  const db = {
+    select: () => ({ from }),
+    insert: () => ({
+      values: (row: { key: string; value: unknown; isSecret: boolean }) => ({
+        onConflictDoUpdate: async () => {
+          written.push(row);
+        },
+      }),
+    }),
+  } as unknown as Database;
+
+  return { svc: new PlatformSettingsService(db), written };
+}
+
+describe("écriture des réglages", () => {
+  it("refuse une clé absente du catalogue", async () => {
+    // La table accepterait n'importe quoi : une faute de frappe produirait un
+    // réglage écrit, jamais lu, impossible à distinguer d'un réglage cassé.
+    const { svc } = service();
+    await expect(svc.save({ "smtp.hots": "x" })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("chiffre un secret avant de l'écrire", async () => {
+    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue";
+    const { svc, written } = service();
+    await svc.save({ "smtp.password": "mon-mot-de-passe" });
+
+    expect(written).toHaveLength(1);
+    expect(written[0]?.isSecret).toBe(true);
+    // Le contenu ne doit jamais apparaître tel quel dans la colonne.
+    expect(String(written[0]?.value)).not.toContain("mon-mot-de-passe");
+  });
+
+  it("ignore un secret reçu vide plutôt que d'effacer", async () => {
+    // Le champ est toujours vide à l'écran, puisqu'on ne relit jamais un
+    // secret. Sans cette règle, enregistrer la marque effacerait le SMTP.
+    const { svc, written } = service();
+    await svc.save({ "smtp.password": "" });
+    expect(written).toEqual([]);
+  });
+
+  it("convertit une valeur numérique reçue en texte", async () => {
+    // `jsonb` accepte une chaîne là où on attend un nombre : la mauvaise
+    // valeur ne se découvrirait qu'à l'envoi d'un e-mail.
+    const { svc, written } = service();
+    await svc.save({ "smtp.port": "2525" });
+    expect(written[0]?.value).toBe(2525);
+  });
+
+  it("refuse un nombre inexploitable", async () => {
+    const { svc } = service();
+    await expect(svc.save({ "smtp.port": "deux mille" })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it("refuse un drapeau inconnu", async () => {
+    const { svc } = service();
+    await expect(svc.setFlag("teleportation", true)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe("lecture des réglages", () => {
+  beforeEach(() => {
+    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue";
+  });
+
+  it("ne rend jamais la valeur d'un secret", async () => {
+    const { svc } = service([
+      { key: "smtp.password", value: "peu-importe-le-contenu", isSecret: true },
+    ]);
+    const { values } = await svc.all();
+    const secret = values.find((v) => v.key === "smtp.password");
+
+    expect(secret).toEqual({ key: "smtp.password", kind: "secret", isConfigured: true });
+    // Aucune trace du contenu, où que ce soit dans la réponse.
+    expect(JSON.stringify(values)).not.toContain("peu-importe-le-contenu");
+  });
+
+  it("dit qu'un secret n'est pas configuré plutôt que de l'omettre", async () => {
+    // L'omettre ferait disparaître le champ de l'écran, et on ne saurait pas
+    // qu'il existe à renseigner.
+    const { svc } = service();
+    const { values } = await svc.all();
+    expect(values.find((v) => v.key === "s3.secretKey")).toEqual({
+      key: "s3.secretKey",
+      kind: "secret",
+      isConfigured: false,
+    });
+  });
+
+  it("sert le repli déclaré quand rien n'est enregistré", async () => {
+    const { svc } = service();
+    const { values } = await svc.all();
+    expect(values.find((v) => v.key === "smtp.port")).toMatchObject({ value: 587 });
+    expect(values.find((v) => v.key === "brand.name")).toMatchObject({ value: "GameDashboard" });
+  });
+
+  it("ignore une clé en base absente du catalogue", async () => {
+    // Un vestige que personne ne lit ne doit pas laisser croire qu'il sert.
+    const { svc } = service([{ key: "vestige.oublie", value: "x", isSecret: false }]);
+    const { values } = await svc.all();
+    expect(values.some((v) => v.key === "vestige.oublie")).toBe(false);
+  });
+});

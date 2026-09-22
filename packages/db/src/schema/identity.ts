@@ -1,0 +1,676 @@
+import { relations } from "drizzle-orm";
+import {
+  bigint,
+  boolean,
+  index,
+  inet,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
+import { id, moment, timestamps } from "../columns";
+import { oauthProvider, userRole } from "./enums";
+
+/** §6.1 — Identité & accès. */
+
+export const users = pgTable(
+  "users",
+  {
+    id: id(),
+    email: varchar("email", { length: 255 }).notNull(),
+    /**
+     * Nul pour un compte créé par OAuth ou SSO qui n'a jamais défini de mot de
+     * passe. Une chaîne vide serait un condensat valide au sens du type et
+     * ouvrirait la porte à une connexion sans secret.
+     */
+    passwordHash: text("password_hash"),
+    nameFirst: varchar("name_first", { length: 100 }).notNull(),
+    nameLast: varchar("name_last", { length: 100 }).notNull(),
+    locale: varchar("locale", { length: 10 }).notNull().default("fr"),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("Europe/Paris"),
+    role: userRole("role").notNull().default("user"),
+    /**
+     * Un revendeur autorise-t-il l'administration à créer des serveurs sur ses
+     * comptes clients ?
+     *
+     * Faux par défaut, et ce défaut est le sujet : un revendeur loue son propre
+     * matériel et répond de ce qui y tourne. Laisser l'administration de la
+     * plateforme y provisionner sans qu'il l'ait demandé reviendrait à disposer
+     * de sa capacité et à engager sa responsabilité à sa place.
+     *
+     * Ne concerne que les comptes `reseller` ; la colonne est ignorée ailleurs.
+     */
+    /**
+     * Ce que ce revendeur laisse la plateforme faire sur son parc.
+     *
+     * Remplace un booléen qui ne bloquait que la création : un administrateur
+     * gardait malgré lui la console, les fichiers et la suppression de tous
+     * ses serveurs. Voir `PLATFORM_ACCESS_LEVELS`.
+     *
+     * `read_only` par défaut, ici comme à la reprise : regarder sans agir est
+     * le seul état qu'on puisse accorder sans que personne ne l'ait demandé.
+     */
+    platformAccess: varchar("platform_access", { length: 16 })
+      .notNull()
+      .default("read_only")
+      .$type<"provision" | "read_only" | "none">(),
+    isTwoFactorEnabled: boolean("is_2fa_enabled").notNull().default(false),
+    /**
+     * Identifiant de ce client **chez le système de facturation**.
+     *
+     * C'est la clé par laquelle l'API applicative retrouve un compte : le
+     * facturier connaît ses propres clients, pas les identifiants du panel, et
+     * le forcer à tenir une table de correspondance la ferait désynchroniser.
+     *
+     * Le SSO y écrivait aussi son `sub`, ce qui faisait **deux métiers sur une
+     * colonne unique** : une facture rattachée après une connexion SSO aurait
+     * écrasé l'identité, ou échoué sur l'index. L'identité des fournisseurs vit
+     * désormais dans `user_oauth_accounts` (migration 0030).
+     */
+    externalId: varchar("external_id", { length: 255 }),
+    avatarUrl: text("avatar_url"),
+    emailVerifiedAt: moment("email_verified_at"),
+    lastLoginAt: moment("last_login_at"),
+    ...timestamps,
+  },
+  (table) => [
+    // L'unicité est insensible à la casse : « Paul@ex.fr » et « paul@ex.fr »
+    // désignent la même boîte, et deux comptes pour une même adresse
+    // rendraient le rapprochement SSO ambigu.
+    uniqueIndex("users_email_unique").on(table.email),
+    uniqueIndex("users_external_id_unique").on(table.externalId),
+  ],
+);
+
+export const userOauthAccounts = pgTable(
+  "user_oauth_accounts",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: oauthProvider("provider").notNull(),
+    providerUserId: varchar("provider_user_id", { length: 255 }).notNull(),
+    email: varchar("email", { length: 255 }).notNull(),
+    linkedAt: moment("linked_at"),
+    ...timestamps,
+  },
+  (table) => [
+    // Un compte distant ne peut être rattaché qu'à un seul compte local :
+    // sans cela, deux utilisateurs pourraient se connecter avec le même Google.
+    uniqueIndex("oauth_provider_identity_unique").on(table.provider, table.providerUserId),
+    index("oauth_user_idx").on(table.userId),
+  ],
+);
+
+export const userTotpCredentials = pgTable("user_credentials_totp", {
+  id: id(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** Chiffré AES-256-GCM (§5.4) : un secret TOTP en clair vaut le mot de passe. */
+  secretEnc: text("secret_enc").notNull(),
+  verifiedAt: moment("verified_at"),
+  /**
+   * Dernier pas de trente secondes consommé, pour interdire le rejeu.
+   *
+   * Sans lui, un code intercepté — épaule, hameçonnage, journal mal configuré —
+   * reste utilisable pendant toute la fenêtre de tolérance. Or c'est
+   * exactement ce contre quoi une seconde preuve d'identité doit protéger :
+   * elle n'a d'intérêt que si le code ne sert qu'une fois.
+   *
+   * `bigint` en mode nombre : un pas tient dans un entier sûr jusqu'en l'an
+   * 6000, mais `integer` déborderait en 2038, comme le temps Unix sur 32 bits.
+   */
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  ...timestamps,
+});
+
+export const userPasskeys = pgTable(
+  "user_passkeys",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    credentialId: text("credential_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    /**
+     * Compteur anti-rejeu WebAuthn : une valeur reçue inférieure ou égale à la
+     * valeur stockée signale un clonage de l'authentifiant.
+     */
+    counter: integer("counter").notNull().default(0),
+    transports: text("transports").array().notNull().default([]),
+    label: varchar("label", { length: 100 }).notNull(),
+    lastUsedAt: moment("last_used_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("passkey_credential_unique").on(table.credentialId),
+    index("passkey_user_idx").on(table.userId),
+  ],
+);
+
+export const userRecoveryCodes = pgTable(
+  "user_recovery_codes",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Stocké haché : un code de secours est un mot de passe à usage unique. */
+    codeHash: text("code_hash").notNull(),
+    usedAt: moment("used_at"),
+    ...timestamps,
+  },
+  (table) => [index("recovery_code_user_idx").on(table.userId)],
+);
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Condensat SHA-256 du jeton de session, jamais le jeton lui-même.
+     *
+     * Le jeton est une valeur aléatoire distincte de `id`, et c'est délibéré :
+     * si l'identifiant primaire servait de jeton, il circulerait dans les
+     * cookies, apparaîtrait dans les journaux et les exports, et une fuite de
+     * la table suffirait à ouvrir toutes les sessions en cours.
+     */
+    tokenHash: text("token_hash").notNull(),
+    ip: inet("ip"),
+    userAgent: text("user_agent"),
+    deviceLabel: varchar("device_label", { length: 120 }),
+    /**
+     * Par quel chemin cette session a été ouverte : `password`, `passkey`,
+     * `sso`, ou le nom d'un fournisseur OAuth.
+     *
+     * Consigné à l'ouverture parce que c'est le seul moment où on le sait. Le
+     * déduire après coup — « le compte a un identifiant externe, donc c'est du
+     * SSO » — dirait faux de quiconque a lié un compte Google et se connecte
+     * pourtant par mot de passe.
+     */
+    authMethod: varchar("auth_method", { length: 32 }).notNull().default("password"),
+    expiresAt: moment("expires_at").notNull(),
+    /**
+     * Dernière requête servie avec cette session.
+     *
+     * Colonne distincte de `updated_at`, et non un réemploi de celle-ci : une
+     * révocation écrit `updated_at`, si bien qu'une session fermée
+     * apparaîtrait comme la plus récemment active de la liste — exactement
+     * l'inverse de ce qui s'est passé.
+     *
+     * L'écriture est volontairement grossière (cf. `LAST_SEEN_PRECISION_MS`) :
+     * la valeur sert à reconnaître une session oubliée, pas à chronométrer.
+     */
+    lastSeenAt: moment("last_seen_at"),
+    /**
+     * Une session révoquée est conservée, pas supprimée : l'utilisateur doit
+     * pouvoir constater depuis /account/security qu'une session a bien été
+     * fermée, et à quel moment.
+     */
+    revokedAt: moment("revoked_at"),
+    /**
+     * Membre du personnel qui a ouvert cette session pour le compte d'un
+     * client, ou nul — ce qui est le cas de toutes les sessions ordinaires.
+     *
+     * `user_id` reste **celui du client** : tout le contrôle d'accès existant
+     * s'applique donc sans qu'une seule route ait à connaître la prise en main.
+     * C'est ce qui rend le mécanisme sûr, en évitant un second chemin
+     * d'autorisation à tenir à jour.
+     */
+    impersonatorId: uuid("impersonator_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (table) => [
+    // La recherche se fait toujours par condensat : c'est la valeur présentée
+    // par le navigateur. L'unicité empêche deux sessions de se confondre.
+    uniqueIndex("session_token_hash_unique").on(table.tokenHash),
+    index("session_user_idx").on(table.userId),
+    index("session_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    /** Partie visible (`gd_live_a1b2c3`) : sert à identifier la clé sans la révéler. */
+    prefix: varchar("prefix", { length: 32 }).notNull(),
+    keyHash: text("key_hash").notNull(),
+    scopes: text("scopes").array().notNull().default([]),
+    allowedIps: text("allowed_ips").array().notNull().default([]),
+    expiresAt: moment("expires_at"),
+    lastUsedAt: moment("last_used_at"),
+    revokedAt: moment("revoked_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("api_key_prefix_unique").on(table.prefix),
+    index("api_key_user_idx").on(table.userId),
+  ],
+);
+
+export const sshKeys = pgTable(
+  "ssh_keys",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    publicKey: text("public_key").notNull(),
+    fingerprint: varchar("fingerprint", { length: 128 }).notNull(),
+    /** Dernière connexion SFTP acceptée grâce à cette clé. */
+    lastUsedAt: moment("last_used_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("ssh_key_fingerprint_unique").on(table.userId, table.fingerprint),
+    index("ssh_key_user_idx").on(table.userId),
+  ],
+);
+
+/**
+ * Tentatives de connexion, pour le rate-limit et l'alerte à la 5ᵉ (§5.1).
+ *
+ * Les échecs sont enregistrés par e-mail *et* par IP : limiter uniquement par
+ * IP laisse passer une attaque distribuée, limiter uniquement par compte permet
+ * de verrouiller n'importe qui en le ciblant.
+ */
+export const loginAttempts = pgTable(
+  "login_attempts",
+  {
+    id: id(),
+    email: varchar("email", { length: 255 }).notNull(),
+    ip: inet("ip").notNull(),
+    success: boolean("success").notNull(),
+    at: moment("at").notNull(),
+  },
+  (table) => [
+    index("login_attempt_email_idx").on(table.email, table.at),
+    index("login_attempt_ip_idx").on(table.ip, table.at),
+  ],
+);
+
+/**
+ * Jetons envoyés par courrier.
+ *
+ * Une table plutôt qu'un jeton signé auto-porteur : un jeton signé ne se
+ * révoque pas. Celui qui réinitialise un mot de passe doit cesser de valoir dès
+ * qu'il a servi — sinon un courriel oublié dans une boîte reste une clé du
+ * compte pendant des mois — et doit tomber en même temps que ses frères quand
+ * on en redemande un.
+ */
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `password_reset` ou `email_verify`. Scellé avec le reste : un jeton de
+     * vérification d'adresse ne doit pas pouvoir changer un mot de passe. */
+    purpose: varchar("purpose", { length: 32 }).notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: moment("expires_at").notNull(),
+    /** Non nul dès qu'il a servi. La ligne reste : « déjà utilisé » et « jamais
+     * existé » appellent deux messages différents. */
+    consumedAt: moment("consumed_at"),
+    requestedIp: inet("requested_ip"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("auth_tokens_hash_unique").on(table.tokenHash),
+    index("auth_tokens_user_idx").on(table.userId, table.purpose),
+  ],
+);
+
+export const usersRelations = relations(users, ({ many }) => ({
+  oauthAccounts: many(userOauthAccounts),
+  passkeys: many(userPasskeys),
+  sessions: many(sessions),
+  apiKeys: many(apiKeys),
+  sshKeys: many(sshKeys),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, { fields: [sessions.userId], references: [users.id] }),
+}));
+
+/**
+ * Enveloppe de ressources d'un revendeur.
+ *
+ * Plafond **global** : il compte tout ce que le revendeur fait tourner, ses
+ * propres machines comprises. Un revendeur disposant de 64 Go de matériel et
+ * d'un quota de 32 Go n'exploite que la moitié de sa machine, et c'est voulu —
+ * la plateforme facture ce qui est revendu, pas ce qui est branché.
+ *
+ * Table dédiée plutôt que colonnes sur `users` : ces valeurs ne concernent
+ * qu'un rôle, et les poser sur `users` obligerait chaque lecture de compte à
+ * les traîner. L'absence de ligne a un sens précis — voir ci-dessous.
+ */
+export const resellerQuotas = pgTable("reseller_quotas", {
+  /**
+   * Un quota par compte, d'où la clé primaire sur `user_id`.
+   *
+   * `cascade` : un compte supprimé n'a plus d'enveloppe à faire respecter.
+   */
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /**
+   * `null` signifie **sans limite** sur cette dimension, jamais zéro.
+   *
+   * La distinction décide de tout : à la mise en service, aucun revendeur n'a
+   * de ligne, et interpréter l'absence comme zéro les bloquerait tous d'un
+   * coup. Zéro reste disponible et veut dire « plus aucune création », ce qui
+   * est une décision qu'on prend, pas un état par défaut.
+   */
+  memoryMb: integer("memory_mb"),
+  diskMb: integer("disk_mb"),
+  serversMax: integer("servers_max"),
+  ...timestamps,
+});
+
+/**
+ * Clés de l'API applicative (§5.2).
+ *
+ * Table distincte d'`api_keys`, et non une colonne « type » sur celle-ci : les
+ * deux natures de clés n'ont pas le même sujet. Une clé personnelle appartient
+ * à quelqu'un et ne peut jamais dépasser ses droits ; une clé applicative
+ * n'appartient à personne et ses portées **sont** ses droits.
+ *
+ * Les fondre obligerait `user_id` à devenir nul, et chaque requête existante
+ * sur les clés personnelles à se souvenir d'exclure les autres. Le jour où
+ * l'une l'oublie, une clé de machine apparaît dans l'espace d'un client, ou
+ * une clé de client gagne les pouvoirs d'une machine.
+ */
+export const applicationKeys = pgTable(
+  "application_keys",
+  {
+    id: id(),
+    /** À quoi sert cette clé. « Boutique WHMCS », « Espace client ». */
+    name: varchar("name", { length: 120 }).notNull(),
+    /** Partie visible (`gd_app_a1b2c3`), pour retrouver la ligne sans révéler le secret. */
+    prefix: varchar("prefix", { length: 32 }).notNull(),
+    keyHash: text("key_hash").notNull(),
+    scopes: text("scopes").array().notNull().default([]),
+    /**
+     * Adresses autorisées. Vide vaut « toutes », comme pour une clé personnelle.
+     *
+     * Le défaut ouvert se justifie ici aussi : une clé inutilisable à la
+     * création se contourne en désactivant la restriction, ce qui est pire que
+     * de la proposer clairement.
+     */
+    allowedIps: text("allowed_ips").array().notNull().default([]),
+    /**
+     * Revendeur auquel cette clé est bornée. `null` = toute la plateforme.
+     *
+     * Une clé portait jusqu'ici des **portées sans périmètre** : elle disait ce
+     * qu'on pouvait faire, jamais sur qui. La confier à un revendeur pour qu'il
+     * branche sa propre boutique lui donnait donc la main sur les clients des
+     * autres revendeurs — et, avec `users.sso`, le moyen d'ouvrir une session
+     * au nom de n'importe lequel d'entre eux.
+     *
+     * Renseignée, la clé ne voit que ce qui relève de ce revendeur : les
+     * serveurs qu'il héberge, et les comptes qui en possèdent au moins un. Le
+     * rattachement se lit sur les serveurs parce que c'est là qu'il vit — un
+     * compte n'appartient à personne.
+     *
+     * `cascade` : un revendeur supprimé emporte ses clés. Les laisser vivre
+     * ferait des jetons dont le périmètre ne désigne plus personne, ce qui se
+     * lit « aucun client » ou « tous » selon le bout de code — et c'est la
+     * seconde lecture qui fait les incidents.
+     */
+    resellerId: uuid("reseller_id").references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Qui a créé cette clé. Conservé même si le compte disparaît (`set null`) :
+     * savoir qu'une clé existe sans savoir qui l'a émise reste utile, et la
+     * supprimer avec son auteur couperait un système tiers en service.
+     */
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * Node auquel cette clé est bornée, ou `null` pour l'ensemble du parc.
+     *
+     * Renseigné par les clés d'amorçage émises pour `wings configure` : une
+     * telle clé passe par un presse-papiers et un historique de shell, et
+     * restreindre sa portée à la seule machine qu'elle sert change ce qu'une
+     * fuite coûte — un node, et pas le parc entier.
+     *
+     * **Sans clé étrangère, délibérément.** `nodes` vit dans un module qui
+     * importe déjà celui-ci ; la référence croisée ferait un cycle entre les
+     * deux schémas. Une ligne orpheline reste bornée par la durée de vie de
+     * ces clés, qui se comptent en minutes, et la route vérifie de toute façon
+     * que le node existe avant de répondre.
+     */
+    nodeId: uuid("node_id"),
+    /**
+     * La clé meurt-elle à son premier usage réussi ?
+     *
+     * C'est ce qui distingue une clé d'amorçage d'une clé d'intégration. Un
+     * système de facturation appelle tous les jours ; `wings configure`
+     * appelle une fois, et tout ce qui reste valable après cet appel est une
+     * fenêtre ouverte que personne ne surveille.
+     */
+    singleUse: boolean("single_use").notNull().default(false),
+    /**
+     * Instant du premier usage réussi d'une clé à usage unique.
+     *
+     * Distinct de `revokedAt`, qui dit qu'un humain l'a retirée : on veut
+     * pouvoir lire qu'une clé d'amorçage a **servi**, plutôt que de la voir
+     * disparaître sans qu'on sache si le daemon l'a consommée ou si elle a
+     * simplement expiré.
+     */
+    consumedAt: moment("consumed_at"),
+    expiresAt: moment("expires_at"),
+    lastUsedAt: moment("last_used_at"),
+    revokedAt: moment("revoked_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("application_key_prefix_unique").on(table.prefix),
+    // Émettre une clé d'amorçage retire la précédente du même node : la
+    // recherche se fait à chaque ouverture de la fenêtre de configuration.
+    index("application_key_node_idx").on(table.nodeId),
+  ],
+);
+
+/**
+ * Réponses déjà rendues à une requête de création, par clé d'idempotence.
+ *
+ * Indispensable dès lors que la facturation vit ailleurs : un encaissement qui
+ * retente son appel — parce que la réponse s'est perdue, parce qu'une file l'a
+ * rejoué — ne doit pas créer un second serveur facturé une fois. La table rend
+ * la reprise sûre : la même clé renvoie la même réponse, sans rien refaire.
+ */
+export const idempotencyRecords = pgTable(
+  "idempotency_records",
+  {
+    id: id(),
+    /**
+     * Clé fournie par l'appelant, portée par chaque clé applicative séparément.
+     *
+     * L'unicité est sur le couple (clé applicative, clé d'idempotence) : deux
+     * intégrations distinctes peuvent numéroter leurs commandes à partir de 1
+     * sans se voler leurs réponses.
+     */
+    applicationKeyId: uuid("application_key_id")
+      .notNull()
+      .references(() => applicationKeys.id, { onDelete: "cascade" }),
+    idempotencyKey: varchar("idempotency_key", { length: 200 }).notNull(),
+    /** Route visée, pour refuser de rejouer une clé sur une autre opération. */
+    endpoint: varchar("endpoint", { length: 200 }).notNull(),
+    /**
+     * Condensat du corps de la requête.
+     *
+     * Une même clé présentée avec un corps différent est un bogue chez
+     * l'appelant, pas une reprise : lui rendre la première réponse lui ferait
+     * croire que sa seconde demande a été prise en compte.
+     */
+    requestHash: text("request_hash").notNull(),
+    /** Réponse rendue la première fois, restituée telle quelle ensuite. */
+    response: jsonb("response").notNull().$type<Record<string, unknown>>(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("idempotency_scope_unique").on(table.applicationKeyId, table.idempotencyKey),
+  ],
+);
+
+/**
+ * Point d'entrée de rappel d'un système tiers.
+ *
+ * Rattaché à une **clé applicative** et non à un compte : c'est la boutique
+ * qu'on prévient, pas une personne. La conséquence est voulue — révoquer la
+ * clé emporte ses rappels, et il n'existe pas d'état où un système coupé
+ * continuerait d'être appelé.
+ *
+ * Distinct de la table `webhooks`, qui appartient à un client du panel pour
+ * ses propres serveurs : son `owner_id` est obligatoire, et le rendre nul pour
+ * loger les rappels de plateforme obligerait chaque lecture existante à se
+ * souvenir d'exclure les autres.
+ */
+export const applicationWebhooks = pgTable(
+  "application_webhooks",
+  {
+    id: id(),
+    applicationKeyId: uuid("application_key_id")
+      .notNull()
+      .references(() => applicationKeys.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    /**
+     * Secret de signature, **chiffré** et non haché.
+     *
+     * Toute la différence avec une clé d'API : celle-ci est présentée puis
+     * comparée, donc un condensat suffit. Un secret de signature doit être
+     * relu à chaque envoi pour calculer le HMAC — il ne peut donc pas être
+     * haché, et le chiffrement est la meilleure protection possible (§5.4).
+     */
+    secretEnc: text("secret_enc").notNull(),
+    events: text("events").array().notNull().default([]),
+    isActive: boolean("is_active").notNull().default(true),
+    lastSuccessAt: moment("last_success_at"),
+    lastFailureAt: moment("last_failure_at"),
+    ...timestamps,
+  },
+  (table) => [index("application_webhook_key_idx").on(table.applicationKeyId)],
+);
+
+/**
+ * File des livraisons, avec leur historique de tentatives.
+ *
+ * Une table plutôt qu'une file en mémoire : un rappel perdu parce que l'API a
+ * redémarré entre l'événement et l'envoi est un rappel que personne ne réclame
+ * — le tiers ignore qu'il devait le recevoir. Ce qui est écrit survit au
+ * redémarrage et repart tout seul.
+ */
+export const applicationWebhookDeliveries = pgTable(
+  "application_webhook_deliveries",
+  {
+    id: id(),
+    webhookId: uuid("webhook_id")
+      .notNull()
+      .references(() => applicationWebhooks.id, { onDelete: "cascade" }),
+    event: varchar("event", { length: 120 }).notNull(),
+    payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
+    /**
+     * Nombre de tentatives **effectuées**. Zéro tant que rien n'est parti.
+     *
+     * Distinct du numéro de la tentative en cours, que rien ne stocke : compter
+     * ce qui a eu lieu se relit sans ambiguïté après un redémarrage.
+     */
+    attempts: integer("attempts").notNull().default(0),
+    /**
+     * Quand tenter. `null` signifie « plus jamais » — livré, ou abandonné.
+     *
+     * C'est cette colonne qui fait la file : le répartiteur ne lit que les
+     * lignes dont l'heure est venue, ce qui rend l'attente gratuite.
+     */
+    nextAttemptAt: moment("next_attempt_at"),
+    /** Nul tant qu'aucune réponse n'est parvenue : distinct d'un échec HTTP. */
+    responseStatus: integer("response_status"),
+    /** Tronquée : on garde de quoi diagnostiquer, pas la page d'erreur entière. */
+    responseBody: text("response_body"),
+    deliveredAt: moment("delivered_at"),
+    /** Renseigné quand on renonce, avec la raison du dernier échec. */
+    abandonedAt: moment("abandoned_at"),
+    ...timestamps,
+  },
+  (table) => [
+    index("application_webhook_delivery_due_idx").on(table.nextAttemptAt),
+    index("application_webhook_delivery_hook_idx").on(table.webhookId, table.createdAt),
+  ],
+);
+
+/**
+ * Marque blanche d'un revendeur, et son domaine propre.
+ *
+ * Une ligne par revendeur, créée à la première personnalisation. L'absence de
+ * ligne n'est pas un défaut : elle veut dire « ce revendeur emploie la marque
+ * de la plateforme », qui reste le cas le plus courant.
+ *
+ * Chaque champ vide retombe sur celui de la plateforme, **champ par champ** :
+ * changer une couleur ne doit pas obliger à redéclarer un logo et des
+ * mentions légales.
+ */
+export const resellerBrandings = pgTable(
+  "reseller_brandings",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 120 }).notNull().default(""),
+    logoUrl: text("logo_url").notNull().default(""),
+    faviconUrl: text("favicon_url").notNull().default(""),
+    accent: varchar("accent", { length: 9 }).notNull().default(""),
+    supportUrl: text("support_url").notNull().default(""),
+    termsUrl: text("terms_url").notNull().default(""),
+    footerText: varchar("footer_text", { length: 255 }).notNull().default(""),
+    loginTagline: varchar("login_tagline", { length: 255 }).notNull().default(""),
+    /** Domaine propre. Unique : deux revendeurs ne peuvent pas le revendiquer. */
+    domain: varchar("domain", { length: 255 }).unique(),
+    /** Preuve de possession, publiée en TXT sur `_gamedashboard.<domaine>`. */
+    domainToken: varchar("domain_token", { length: 64 }),
+    /**
+     * Non nul quand **les deux** vérifications ont abouti : possession et
+     * acheminement. Tant qu'il est nul, le domaine n'est servi à personne.
+     */
+    domainVerifiedAt: moment("domain_verified_at"),
+    domainCheckedAt: moment("domain_checked_at"),
+    /** Dernier motif d'échec : « CNAME absent » et « TXT introuvable » ne se
+     * corrigent pas au même endroit. */
+    domainFailure: text("domain_failure"),
+    /**
+     * Où en est le certificat TLS de ce domaine.
+     *
+     * Rempli par l'agent de certificats, qui tourne sur le serveur web : le
+     * panel n'a ni les droits ni l'accès pour délivrer un TLS lui-même.
+     *
+     * Un certificat **et** un échec peuvent coexister : le renouvellement a
+     * échoué mais l'ancien tient encore. C'est précisément le moment où il faut
+     * prévenir, et les mêler ferait perdre l'un des deux.
+     */
+    certificateIssuedAt: moment("certificate_issued_at"),
+    certificateExpiresAt: moment("certificate_expires_at"),
+    certificateAttemptedAt: moment("certificate_attempted_at"),
+    /** Une phrase qui dit à qui est le problème, pas un journal ACME. */
+    certificateFailure: text("certificate_failure"),
+    ...timestamps,
+  },
+  (table) => [index("reseller_branding_domain_idx").on(table.domain)],
+);

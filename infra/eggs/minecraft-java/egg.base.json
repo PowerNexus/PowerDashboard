@@ -1,0 +1,68 @@
+{
+  "_comment": "Définition de l'egg, sans son script d'installation. Celui-ci vit dans install.sh et y est inséré par `pnpm eggs:build`, qui produit egg.json. Deux fichiers plutôt qu'un parce qu'un script shell noyé dans une chaîne JSON ne se relit pas, ne se colore pas et ne se vérifie pas.",
+  "meta": { "version": "PTDL_v2", "update_url": null },
+  "exported_at": "2026-09-22T00:00:00+00:00",
+  "name": "Minecraft Java",
+  "author": "contact@gamedashboard.fr",
+  "description": "Serveur Minecraft Java, tous chargeurs confondus : Vanilla, Paper, Purpur, Folia, Spigot, Fabric, Forge, NeoForge et Quilt. Changer de moteur se fait en changeant la variable « Chargeur » puis en réinstallant — le serveur garde son identifiant, ses sous-utilisateurs, ses planifications, ses mondes et ses plugins.",
+  "features": ["eula", "java_version", "pid_limit"],
+  "docker_images": {
+    "Java 21": "ghcr.io/pterodactyl/yolks:java_21",
+    "Java 17": "ghcr.io/pterodactyl/yolks:java_17",
+    "Java 11": "ghcr.io/pterodactyl/yolks:java_11",
+    "Java 8": "ghcr.io/pterodactyl/yolks:java_8"
+  },
+  "file_denylist": [],
+  "startup": "bash gd-run.sh",
+  "config": {
+    "files": "{\"server.properties\":{\"parser\":\"properties\",\"find\":{\"server-ip\":\"0.0.0.0\",\"server-port\":\"{{server.build.default.port}}\",\"query.port\":\"{{server.build.default.port}}\"}}}",
+    "startup": "{\"done\":\")! For help, type \"}",
+    "logs": "{}",
+    "stop": "stop"
+  },
+  "scripts": {
+    "installation": {
+      "script": "@@INSTALL@@",
+      "container": "eclipse-temurin:21-jdk",
+      "entrypoint": "bash"
+    }
+  },
+  "variables": [
+    {
+      "name": "Chargeur",
+      "description": "Ce qui fait tourner le serveur : vanilla, paper, purpur, folia, spigot, fabric, forge, neoforge ou quilt. C'est la seule variable à changer pour changer de moteur — réinstallez ensuite, et vos mondes, plugins et mods restent en place.",
+      "env_variable": "LOADER",
+      "default_value": "paper",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|in:vanilla,paper,purpur,folia,spigot,fabric,forge,neoforge,quilt"
+    },
+    {
+      "name": "Version de Minecraft",
+      "description": "Numéro de version, ou « latest » pour la dernière publiée par Mojang. Attention : une version ≥ 1.17 demande Java 17, et ≥ 1.20.5 demande Java 21 — l'image du conteneur se choisit à part.",
+      "env_variable": "MINECRAFT_VERSION",
+      "default_value": "latest",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:20"
+    },
+    {
+      "name": "Version du chargeur",
+      "description": "Version ou numéro de construction du chargeur, ou « latest ». Laissez « latest » sauf si un mod exige une construction précise.",
+      "env_variable": "LOADER_VERSION",
+      "default_value": "latest",
+      "user_viewable": true,
+      "user_editable": true,
+      "rules": "required|string|max:40"
+    },
+    {
+      "name": "Fichier du serveur",
+      "description": "Nom du jar installé. Sans effet sur Forge et NeoForge ≥ 1.17, qui ne produisent pas de jar lançable mais un fichier d'arguments.",
+      "env_variable": "SERVER_JARFILE",
+      "default_value": "server.jar",
+      "user_viewable": true,
+      "user_editable": false,
+      "rules": "required|string|regex:/^[\\w\\d.-]+\\.jar$/"
+    }
+  ]
+}

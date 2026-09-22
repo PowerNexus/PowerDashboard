@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+#
+# GameDashboard — contrôle de la production locale.
+#
+#   panel start | stop | restart | status | logs [api|web|nginx]
+#
+# Pourquoi un script plutôt que systemd : **WSL n'a pas de systemd**. Les
+# unités de `infra/prod` ne peuvent donc pas servir ici, et il fallait bien
+# quelque chose qui démarre trois processus, les arrête proprement et dise
+# lesquels tournent. C'est la seule divergence de fond avec la production.
+#
+# Les processus sont détachés avec `setsid` : sans cela, ils meurent avec le
+# terminal qui les a lancés — et il n'y a rien de plus déroutant qu'une
+# « production » qui s'éteint quand on ferme une fenêtre.
+
+set -uo pipefail
+
+# nginx et ss vivent dans /usr/sbin, absent du PATH d'un shell non interactif.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ROOT=/opt/gamedashboard
+APP=$ROOT/app
+ENVDIR=$ROOT/env
+RUN=$ROOT/run
+LOGS=$ROOT/logs
+DOMAIN=gamedashboard.local
+
+install -d "$RUN" "$LOGS"
+
+vert()  { printf '\033[32m%s\033[0m' "$1"; }
+rouge() { printf '\033[31m%s\033[0m' "$1"; }
+
+# Vivant ? Le fichier de PID ne suffit pas : un redémarrage de WSL le laisse
+# derrière lui, et un PID recyclé désignerait un processus étranger qu'on
+# tuerait ensuite. On vérifie donc le PID **et** ce qu'il exécute.
+vivant() { # nom -> 0 si le processus tourne
+  local pid_file=$RUN/$1.pid pid
+  [ -f "$pid_file" ] || return 1
+  pid=$(cat "$pid_file" 2>/dev/null) || return 1
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+port_ouvert() { # port -> 0 si quelque chose écoute
+  ss -ltn "sport = :$1" 2>/dev/null | grep -q LISTEN
+}
+
+attendre() { # port nom — jusqu'à 45 s
+  local i
+  for i in $(seq 1 45); do
+    port_ouvert "$1" && { printf '  %s écoute (après %ss)\n' "$2" "$((i - 1))"; return 0; }
+    sleep 1
+  done
+  printf '  %s %s\n' "$2" "$(rouge 'n écoute toujours pas après 45 s')"
+  return 1
+}
+
+lancer() { # nom répertoire fichier-env commande...
+  local nom=$1 dir=$2 env_file=$3; shift 3
+  if vivant "$nom"; then
+    echo "  $nom tourne déjà (pid $(cat "$RUN/$nom.pid"))"
+    return 0
+  fi
+  # L'environnement est chargé dans un sous-shell : la clé de chiffrement ne
+  # doit pas rester dans celui qui pilote, ni passer aux autres processus.
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+    cd "$dir" || exit 1
+    exec setsid "$@" >>"$LOGS/$nom.log" 2>&1 &
+    echo $! > "$RUN/$nom.pid"
+  )
+}
+
+demarrer() {
+  echo "== Bases"
+  service postgresql start >/dev/null 2>&1
+  port_ouvert 5432 && echo "  postgresql écoute" || echo "  $(rouge 'postgresql ne répond pas')"
+
+  echo "== Application"
+  lancer api "$APP/apps/api" "$ENVDIR/api.env" \
+    "$APP/apps/api/node_modules/.bin/tsx" src/main.ts
+  lancer web "$APP/apps/web" "$ENVDIR/web.env" \
+    "$APP/apps/web/node_modules/.bin/next" start --port 3210 --hostname 127.0.0.1
+  attendre 3211 API
+  attendre 3210 interface
+
+  echo "== nginx"
+  # nginx se démonise lui-même et n'a pas de script SysV utilisable sans
+  # systemd : on le pilote directement, et `-t` d'abord parce qu'une
+  # configuration fautive fait échouer le démarrage sans rien dire d'utile.
+  if nginx -t >/dev/null 2>&1; then
+    if port_ouvert 80; then nginx -s reload && echo "  nginx rechargé"
+    else nginx && echo "  nginx démarré"; fi
+  else
+    echo "  $(rouge 'configuration nginx invalide :')"
+    nginx -t 2>&1 | sed 's/^/    /'
+  fi
+
+  echo
+  echo "  Ouvre https://$DOMAIN"
+}
+
+arreter() {
+  for nom in web api; do
+    if vivant "$nom"; then
+      local pid; pid=$(cat "$RUN/$nom.pid")
+      # Le groupe entier : `next start` et `tsx` lancent des enfants qui
+      # survivraient au père et garderaient le port occupé.
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null
+      rm -f "$RUN/$nom.pid"
+      echo "  $nom arrêté"
+    else
+      echo "  $nom était déjà arrêté"
+    fi
+  done
+  port_ouvert 80 && { nginx -s quit 2>/dev/null && echo "  nginx arrêté"; }
+  # PostgreSQL reste debout : c'est la base, pas l'application. L'arrêter
+  # ferait perdre du temps au prochain démarrage sans rien libérer d'utile.
+  echo "  postgresql laissé en marche (c'est la base, pas l'application)"
+}
+
+etat() {
+  printf '  %-12s %s\n' postgresql "$(port_ouvert 5432 && vert actif || rouge arrêté)"
+  for nom in api web; do
+    if vivant "$nom"; then
+      printf '  %-12s %s (pid %s)\n' "$nom" "$(vert actif)" "$(cat "$RUN/$nom.pid")"
+    else
+      printf '  %-12s %s\n' "$nom" "$(rouge arrêté)"
+    fi
+  done
+  printf '  %-12s %s\n' nginx "$(port_ouvert 80 && vert actif || rouge arrêté)"
+  echo
+  printf '  %-12s %s\n' "domaine" "https://$DOMAIN"
+  local code
+  # `--cacert` et non `-k` : un certificat expiré ou émis pour un autre nom
+  # doit se voir ici, pas le jour où le navigateur refusera d'ouvrir la page.
+  code=$(curl -s --cacert "$(mkcert -CAROOT)/rootCA.pem" -o /dev/null -w '%{http_code}' \
+    --max-time 5 "https://$DOMAIN/api/v1/status" 2>/dev/null) || code=000
+  printf '  %-12s %s\n' "statut" "$([ "$code" = "200" ] && vert "$code" || rouge "$code")"
+}
+
+case "${1:-status}" in
+  start)   demarrer ;;
+  stop)    arreter ;;
+  restart) arreter; echo; demarrer ;;
+  status)  etat ;;
+  logs)    tail -n 60 -f "$LOGS/${2:-api}.log" ;;
+  *)       echo "usage : panel start|stop|restart|status|logs [api|web]"; exit 2 ;;
+esac

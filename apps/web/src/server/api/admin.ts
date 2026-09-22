@@ -1,0 +1,296 @@
+import type { PlatformAccess } from "@gamedashboard/contracts";
+import { notFound } from "next/navigation";
+import { ApiError, apiFetch } from "./client";
+
+/**
+ * Lectures de l'espace d'administration.
+ *
+ * Aucune n'est mise en cache : `apiFetch` impose `no-store`. Une page
+ * d'administration servie depuis un cache montrerait l'infrastructure telle
+ * qu'elle était, ce qui est exactement l'inverse de son usage — on l'ouvre
+ * quand quelque chose ne va pas.
+ */
+
+export interface AdminNode {
+  id: string;
+  name: string;
+  category: string | null;
+  subcategory: string | null;
+  location: string;
+  fqdn: string;
+  memoryMb: number;
+  diskMb: number;
+  cpuCores: number;
+  maintenance: boolean;
+  wingsVersion: string | null;
+  lastHeartbeatAt: string | null;
+  /** Revendeur propriétaire. `null` vaut « la plateforme », pas « personne ». */
+  ownerId: string | null;
+  ownerName: string | null;
+  servers: number;
+  /**
+   * Ce qui est **accordé** aux serveurs de la machine.
+   *
+   * Exact en toutes circonstances : il ne dépend d'aucun relevé, seulement de
+   * ce que le panel a promis. C'est le chiffre qui répond à « puis-je en
+   * placer un de plus ? », et zéro sur un node vide est une vérité.
+   */
+  allocatedMemoryMb: number;
+  allocatedDiskMb: number;
+  /**
+   * Ce qui est **réellement consommé**, quand on a pu le relever.
+   *
+   * `null` tant qu'aucun serveur de la machine n'a de mesure fraîche. Distinct
+   * de l'allocation, et les deux comptent : on vend des limites, les clients
+   * en consomment une fraction.
+   */
+  measuredMemoryMb: number | null;
+  measuredDiskMb: number | null;
+  /** Combien de serveurs de la machine ont un relevé récent. */
+  measuredServers: number;
+}
+
+export interface AdminServer {
+  id: string;
+  shortId: string;
+  name: string;
+  owner: string;
+  ownerEmail: string;
+  node: string;
+  egg: string;
+  /** État de gestion : installation, suspension, transfert. Nul en marche normale. */
+  state: string | null;
+  /**
+   * État du conteneur au dernier relevé frais, ou `null` si aucun.
+   *
+   * Séparé de `state` parce que les deux répondent à deux questions : « que
+   * fait le panel de ce serveur » et « que fait le serveur ». Les confondre
+   * faisait afficher « État inconnu » sur un serveur mesuré chaque minute.
+   */
+  runtimeState: string | null;
+  memoryMb: number;
+  createdAt: string;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "support" | "reseller" | "user";
+  is2faEnabled: boolean;
+  /**
+   * Un revendeur autorise-t-il l'administration à créer des serveurs chez lui ?
+   *
+   * Sans objet pour les autres rôles, où la valeur ne décide de rien.
+   */
+  allowsPlatformProvisioning: boolean;
+  lastLoginAt: string | null;
+  servers: number;
+  /**
+   * Enveloppe du revendeur. `null` veut dire **sans limite** sur cette
+   * dimension, jamais zéro — et zéro, posé sciemment, interdit toute création.
+   *
+   * Sans objet pour les autres rôles : l'API refuse d'en poser une.
+   */
+  /**
+   * Ce que ce revendeur laisse la plateforme faire sur son parc. Sans objet
+   * pour les autres rôles, où la valeur n'est pas lue.
+   */
+  platformAccess: PlatformAccess;
+  quotaMemoryMb: number | null;
+  quotaDiskMb: number | null;
+  quotaServersMax: number | null;
+}
+
+export interface AdminEgg {
+  id: string;
+  name: string;
+  nest: string;
+  description: string | null;
+  image: string;
+  enabled: boolean;
+  updatedAt: string;
+  servers: number;
+}
+
+/**
+ * Classement des nodes, tel qu'il est déclaré en base.
+ *
+ * `nodes` compte les machines réellement rangées sous cet intitulé : c'est la
+ * question qu'on se pose avant de supprimer une catégorie.
+ */
+export interface AdminNodeCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  position: number;
+  nodes: number;
+}
+
+export interface AdminNodeSubcategory {
+  id: string;
+  categoryId: string;
+  name: string;
+  position: number;
+  nodes: number;
+}
+
+export interface AdminNodeTaxonomy {
+  categories: AdminNodeCategory[];
+  subcategories: AdminNodeSubcategory[];
+}
+
+export const fetchNodeTaxonomy = () => unwrap<AdminNodeTaxonomy>("/api/v1/admin/node-taxonomy");
+
+/**
+ * Part d'un revendeur sur une machine, avec ce qu'elle occupe réellement.
+ *
+ * `usage.basis` dit d'où vient le chiffre : relevé sur les serveurs, ou majoré
+ * par leurs limites faute de mesure. L'écran doit pouvoir le signaler — un
+ * plafond comparé à une estimation n'autorise pas les mêmes décisions.
+ */
+export interface AdminNodeShare {
+  id: string;
+  nodeId: string;
+  nodeName: string;
+  resellerId: string;
+  resellerName: string;
+  memoryMb: number;
+  diskMb: number;
+  serversMax: number | null;
+  usage: {
+    memoryMb: number;
+    diskMb: number;
+    servers: number;
+    basis: "measured" | "estimated" | "partial";
+    unmeasured: number;
+  };
+}
+
+export const fetchNodeShares = (nodeId: string) =>
+  unwrap<AdminNodeShare[]>(`/api/v1/admin/nodes/${nodeId}/shares`);
+
+export interface AdminLocation {
+  id: string;
+  short: string;
+  long: string;
+  countryCode: string;
+}
+
+export const fetchLocations = () => unwrap<AdminLocation[]>("/api/v1/admin/locations");
+
+/**
+ * Le dépôt suivi, et ce qu'il propose.
+ *
+ * `installedId` non nul : l'egg est déjà dans le catalogue local. Le dire évite
+ * de proposer un import qui ne ferait que réécrire ce qui est là.
+ */
+export interface EggCatalogueSource {
+  id: string;
+  name: string;
+  url: string;
+  branch: string;
+}
+
+export interface EggCatalogueEntry {
+  path: string;
+  name: string;
+  group: string;
+  installedId: string | null;
+  enabled: boolean;
+}
+
+export const fetchEggCatalogue = () =>
+  unwrap<{ source: EggCatalogueSource; entries: EggCatalogueEntry[] }>(
+    "/api/v1/admin/egg-catalogue",
+  );
+
+export interface AdminOverview {
+  servers: number;
+  users: number;
+  nodes: number;
+  allocationsFree: number;
+}
+
+/**
+ * Lecture d'une route d'administration, **avec la conclusion du refus**.
+ *
+ * Toutes les routes de ce fichier sont gardées côté API. Un refus ne dit donc
+ * qu'une chose : la session n'est pas, ou n'est plus, celle d'un membre du
+ * personnel. La coquille en tire déjà cette conclusion et rend un 404 — mais
+ * une page et sa mise en page se rendent **en parallèle** dans Next, si bien
+ * que le chargement partait quand même et échouait sur une exception brute.
+ *
+ * C'est ce qui se voyait à la prise en main : au moment où l'agent devient son
+ * client, la page d'administration encore affichée refait son appel, et
+ * l'écran d'erreur arrivait avant la redirection. Les deux disent désormais la
+ * même chose, et l'espace cesse simplement d'exister pour qui n'y a plus droit.
+ */
+const unwrap = async <T>(path: string): Promise<T> => {
+  try {
+    return (await apiFetch<{ data: T }>(path)).data;
+  } catch (error) {
+    // 401, 403, 404 : trois façons de dire « pas pour vous ». Les autres pannes
+    // — API éteinte, erreur interne — doivent rester visibles, elles appellent
+    // un diagnostic et non une page introuvable.
+    if (error instanceof ApiError && [401, 403, 404].includes(error.status)) notFound();
+    throw error;
+  }
+};
+
+export const fetchAdminOverview = () => unwrap<AdminOverview>("/api/v1/admin/overview");
+export const fetchAdminNodes = () => unwrap<AdminNode[]>("/api/v1/admin/nodes");
+export const fetchAdminServers = () => unwrap<AdminServer[]>("/api/v1/admin/servers");
+export const fetchAdminUsers = () => unwrap<AdminUser[]>("/api/v1/admin/users");
+export const fetchAdminEggs = () => unwrap<AdminEgg[]>("/api/v1/admin/eggs");
+
+/**
+ * Un secret n'a pas de `value` : l'API ne renvoie qu'un « configuré ou non ».
+ * Le type le rend impossible à oublier — il n'existe aucun champ où la valeur
+ * pourrait se glisser par mégarde.
+ */
+export type SettingValue =
+  | { key: string; kind: "text" | "number" | "boolean"; value: string | number | boolean }
+  | { key: string; kind: "secret"; isConfigured: boolean };
+
+export interface FeatureFlagValue {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface PlatformSettings {
+  values: SettingValue[];
+  flags: FeatureFlagValue[];
+}
+
+export const fetchPlatformSettings = () => unwrap<PlatformSettings>("/api/v1/admin/settings");
+
+/** Ce qu'une table a rendu au dernier tour de rétention. */
+export interface RetentionTableReport {
+  table: string;
+  rows: number;
+  days: number;
+  reason: string;
+}
+
+/**
+ * État du service de rétention.
+ *
+ * Lu pour une seule raison : **un service muet ne se distingue pas d'un service
+ * mort**. Celui-ci n'écrivait au journal que lorsqu'il effaçait quelque chose,
+ * donc jamais sur une plateforme jeune.
+ */
+export interface RetentionReport {
+  lastRunAt: string | null;
+  lastSuccessAt: string | null;
+  durationMs: number | null;
+  nextRunAt: string | null;
+  tables: RetentionTableReport[];
+  lastRemoved: number;
+  totalRemoved: number;
+  failure: { message: string; consecutive: number } | null;
+}
+
+export const fetchRetention = () => unwrap<RetentionReport>("/api/v1/admin/maintenance/retention");

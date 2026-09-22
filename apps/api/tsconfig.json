@@ -1,0 +1,13 @@
+{
+  "extends": "@gamedashboard/config/tsconfig/base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2023"],
+    // NestJS s'appuie sur les décorateurs et sur les métadonnées de type émises
+    // à la compilation : sans ces deux options, l'injection de dépendances n'a
+    // rien à lire et ne trouve rien à injecter.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false
+  },
+  "include": ["src"]
+}

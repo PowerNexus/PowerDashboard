@@ -1,0 +1,169 @@
+/*
+ * Design tokens GameDashboard. Source de vérité des couleurs, rayons et polices.
+ * Le thème clair est défini sur :root, le sombre via [data-theme="dark"]
+ * ou prefers-color-scheme quand aucun choix explicite n'est stampé.
+ * Voir PLAN.md §2 et §9.1.
+ */
+:root {
+  color-scheme: light;
+
+  /* Accent (violet GameDashboard) */
+  --gd-accent-400: #8b5cf6;
+  --gd-accent-500: #7c3aed;
+  --gd-accent-600: #6d28d9;
+  --gd-accent-soft: #eee9fb;
+  --gd-accent-fg: #ffffff;
+
+  /* Surfaces */
+  --gd-bg: #f5f6fa;
+  --gd-surface: #ffffff;
+  --gd-surface-2: #f1f2f6;
+  --gd-surface-3: #e9eaf0;
+  --gd-border: #e5e7eb;
+  --gd-border-strong: #d1d5db;
+
+  /*
+   * Texte — trois niveaux, tous au-dessus du contraste AA.
+   *
+   * **Les deux gris secondaires ont été assombris.** `faint` valait `#9ca3af`,
+   * soit **2,5:1** sur le blanc : très en dessous des 4,5:1 exigés par
+   * WCAG 2.1 AA, et illisible pour beaucoup de gens bien avant d'être
+   * « discret ». Il servait aux horodatages, aux aides de champ et aux
+   * libellés de tableau — c'est-à-dire précisément au texte qu'on cherche
+   * quand on ne connaît pas déjà la page.
+   *
+   * `muted` a suivi, faute de place : entre 4,5:1 et l'ancien `muted`
+   * (4,8:1 sur blanc) il n'y avait pas de quoi loger un troisième niveau
+   * visiblement distinct. Il descend donc à 5,9:1, ce qui rend la hiérarchie
+   * de nouveau lisible — et meilleure qu'avant pour tout le monde.
+   *
+   * **Mesuré sur `--gd-bg` et non sur `--gd-surface`.** Le fond de page vaut
+   * `#f5f6fa`, pas du blanc : un gris calculé contre le blanc passe de
+   * justesse sur une carte et échoue sur la page. C'est arrivé — `#6b7280`
+   * donnait 4,8:1 sur blanc et 4,47:1 sur le fond, donc sous le seuil, dans
+   * une différence trop petite pour se voir à l'œil.
+   *
+   * Rapports mesurés sur `--gd-bg` (#f5f6fa), le pire des deux :
+   *   text 15,4:1 · muted 6,2:1 · faint 5,0:1
+   */
+  --gd-text: #111827;
+  --gd-text-muted: #525b69;
+  --gd-text-faint: #646b78;
+
+  /*
+   * Sémantique — une couleur de **pastille** et une couleur de **texte**.
+   *
+   * Elles étaient confondues, et c'était la faute la plus coûteuse de la
+   * palette : « opérationnel » s'écrivait en `#22c55e` sur `#dcfce7`, soit
+   * **2,07:1**. Un vert vif sur un vert pâle se voit très bien tant qu'on
+   * regarde la couleur ; il devient illisible dès qu'on doit lire le mot, et
+   * c'est le cas de tous les badges d'état du panel.
+   *
+   * Les tons vifs restent ce qu'ils sont — un point d'état, une bordure, une
+   * barre de graphe n'ont pas de texte à porter. Les variantes `-ink` sont
+   * les seules employées pour écrire, et elles sont toutes au-dessus de
+   * 5:1 sur leur fond.
+   */
+  --gd-success: #22c55e;
+  --gd-success-soft: #dcfce7;
+  --gd-success-ink: #15803d;
+  --gd-warning: #f59e0b;
+  --gd-warning-soft: #fef3c7;
+  --gd-warning-ink: #b45309;
+  --gd-danger: #ef4444;
+  --gd-danger-soft: #fee2e2;
+  --gd-danger-ink: #b91c1c;
+  --gd-info: #3b82f6;
+  --gd-info-soft: #dbeafe;
+  --gd-info-ink: #1d4ed8;
+
+  /* Console */
+  --gd-console-bg: #0b0d13;
+  --gd-console-fg: #d1d5db;
+
+  /* Forme */
+  --gd-radius: 12px;
+  --gd-radius-sm: 8px;
+  --gd-radius-xs: 6px;
+  --gd-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
+  --gd-shadow-lg: 0 8px 24px rgb(16 24 40 / 0.08);
+  --gd-ring: 0 0 0 3px color-mix(in srgb, var(--gd-accent-500) 25%, transparent);
+
+  /* Typo */
+  --gd-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --gd-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Densité (multiplicateur d'espacement) */
+  --gd-density: 1;
+
+  /* Layout */
+  --gd-sidebar-w: 270px;
+  --gd-header-h: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --gd-accent-soft: #2a2440;
+    --gd-bg: #0f1117;
+    --gd-surface: #161922;
+    --gd-surface-2: #1e2230;
+    --gd-surface-3: #262a37;
+    --gd-border: #262a37;
+    --gd-border-strong: #343948;
+    --gd-text: #f3f4f6;
+    /*
+     * `faint` valait #6b7280, soit **3,6:1** sur la surface sombre : sous le
+     * seuil AA, et c'est en thème sombre que ce gris servait le plus — la
+     * console, les journaux, les horodatages.
+     *
+     * Rapports mesurés sur `--gd-surface` (#161922) :
+     *   text 15,7:1 · muted 7,0:1 · faint 5,7:1
+     */
+    --gd-text-muted: #9ca3af;
+    --gd-text-faint: #8b93a1;
+    /* En thème sombre, les fonds « soft » sont sombres : le texte y reprend le
+       ton vif, qui y est parfaitement lisible. Ces quatre lignes le rendent
+       explicite plutôt que de laisser la valeur claire traverser. */
+    --gd-success-soft: #14532d;
+    --gd-success-ink: #4ade80;
+    --gd-warning-soft: #451a03;
+    --gd-warning-ink: #fbbf24;
+    --gd-danger-soft: #450a0a;
+    --gd-danger-ink: #f87171;
+    --gd-info-soft: #172554;
+    --gd-info-ink: #93c5fd;
+    --gd-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+    --gd-shadow-lg: 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --gd-accent-soft: #2a2440;
+  --gd-bg: #0f1117;
+  --gd-surface: #161922;
+  --gd-surface-2: #1e2230;
+  --gd-surface-3: #262a37;
+  --gd-border: #262a37;
+  --gd-border-strong: #343948;
+  --gd-text: #f3f4f6;
+  /* Mêmes valeurs que le bloc `prefers-color-scheme` ci-dessus, et pour les
+     mêmes raisons de contraste : les deux doivent bouger ensemble, sinon le
+     thème choisi à la main dirait autre chose que le thème du système. */
+  --gd-text-muted: #9ca3af;
+  --gd-text-faint: #8b93a1;
+  /* En thème sombre, les fonds « soft » sont sombres : le texte y reprend le
+     ton vif, qui y est parfaitement lisible. Ces quatre lignes le rendent
+     explicite plutôt que de laisser la valeur claire traverser. */
+  --gd-success-soft: #14532d;
+  --gd-success-ink: #4ade80;
+  --gd-warning-soft: #451a03;
+  --gd-warning-ink: #fbbf24;
+  --gd-danger-soft: #450a0a;
+  --gd-danger-ink: #f87171;
+  --gd-info-soft: #172554;
+  --gd-info-ink: #93c5fd;
+  --gd-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --gd-shadow-lg: 0 8px 24px rgb(0 0 0 / 0.5);
+}
