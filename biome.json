@@ -9,7 +9,11 @@
       "!**/dist",
       "!**/.turbo",
       "!**/storybook-static",
-      "!packages/db/migrations"
+      "!packages/db/migrations",
+      "!**/test-results",
+      "!**/playwright-report",
+      "!openapi.json",
+      "!infra/eggs/*/egg.json"
     ]
   },
   "formatter": {

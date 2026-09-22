@@ -21,7 +21,7 @@ import {
 import { Megaphone, Pencil, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import {
   type Announcement,
   deleteAnnouncement,
@@ -65,12 +65,15 @@ export function AnnouncementsWorkspace({ announcements }: { announcements: Annou
       }
     });
 
-  const remove = (id: string) =>
-    startTransition(async () => {
-      const result = await deleteAnnouncement(id);
-      setError(result.error);
-      if (!result.error) router.refresh();
-    });
+  const remove = useCallback(
+    (id: string) =>
+      startTransition(async () => {
+        const result = await deleteAnnouncement(id);
+        setError(result.error);
+        if (!result.error) router.refresh();
+      }),
+    [router],
+  );
 
   const columns = useMemo<ColumnDef<Announcement, unknown>[]>(
     () => [

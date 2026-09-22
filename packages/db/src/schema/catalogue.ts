@@ -10,7 +10,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { id, moment, timestamps } from "../columns";
-import { eggSourceType, marketplaceSource } from "./enums";
+import { eggSourceType } from "./enums";
 
 /** §6.3 — Catalogue : familles de jeux, eggs, sources. */
 

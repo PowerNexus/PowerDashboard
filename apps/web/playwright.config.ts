@@ -78,24 +78,24 @@ export default defineConfig({
   webServer: EXISTANT
     ? undefined
     : [
-    {
-      command: `pnpm --filter @gamedashboard/api start`,
-      port: API_PORT,
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-      env: {
-        PORT: String(API_PORT),
-        HOST: "127.0.0.1",
-        PANEL_ORIGIN: BASE_URL,
-        NODE_ENV: "production",
-      },
-    },
-    {
-      command: `pnpm --filter @gamedashboard/web start --port ${WEB_PORT}`,
-      port: WEB_PORT,
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-      env: { API_URL, PORT: String(WEB_PORT), NODE_ENV: "production" },
-    },
+        {
+          command: `pnpm --filter @gamedashboard/api start`,
+          port: API_PORT,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+          env: {
+            PORT: String(API_PORT),
+            HOST: "127.0.0.1",
+            PANEL_ORIGIN: BASE_URL,
+            NODE_ENV: "production",
+          },
+        },
+        {
+          command: `pnpm --filter @gamedashboard/web start --port ${WEB_PORT}`,
+          port: WEB_PORT,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+          env: { API_URL, PORT: String(WEB_PORT), NODE_ENV: "production" },
+        },
       ],
 });

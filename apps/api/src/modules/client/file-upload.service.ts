@@ -317,7 +317,15 @@ function tailleAttendue(meta: SessionMeta, index: number): number {
  */
 function nomDeFichier(brut: string): string {
   const base = brut.split(/[/\\]/).pop() ?? "";
-  const propre = base.replace(/[ -]/g, "").trim();
+  // Caractères de contrôle retirés par leur code plutôt que par une classe
+  // d'expression régulière qui les contiendrait littéralement, invisibles.
+  const propre = Array.from(base)
+    .filter((c) => {
+      const code = c.charCodeAt(0);
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join("")
+    .trim();
   if (propre === "" || propre === "." || propre === "..") {
     throw new BadRequestException("Nom de fichier invalide.");
   }

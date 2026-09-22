@@ -53,8 +53,8 @@ import {
   schedules,
   scheduleTasks,
   serverSubusers,
-  serverVariables,
   servers,
+  serverVariables,
   users,
 } from "@gamedashboard/db";
 import { and, eq } from "drizzle-orm";
@@ -406,12 +406,18 @@ async function importerEggs(
   source: mysql.Connection,
   options: Options,
 ): Promise<Map<number, string>> {
-  const [nids] = await source.query<mysql.RowDataPacket[]>("select id, name, description from nests");
+  const [nids] = await source.query<mysql.RowDataPacket[]>(
+    "select id, name, description from nests",
+  );
   const nidsCorrespondance = new Map<number, string>();
 
   for (const nid of nids) {
     const nom = String(nid.name);
-    const [existant] = await db.select({ id: nests.id }).from(nests).where(eq(nests.name, nom)).limit(1);
+    const [existant] = await db
+      .select({ id: nests.id })
+      .from(nests)
+      .where(eq(nests.name, nom))
+      .limit(1);
     if (existant) {
       nidsCorrespondance.set(Number(nid.id), existant.id);
       noter("nids", "ignore");
@@ -437,7 +443,11 @@ async function importerEggs(
 
   for (const ligne of lignes) {
     const nom = String(ligne.name);
-    const [existant] = await db.select({ id: eggs.id }).from(eggs).where(eq(eggs.name, nom)).limit(1);
+    const [existant] = await db
+      .select({ id: eggs.id })
+      .from(eggs)
+      .where(eq(eggs.name, nom))
+      .limit(1);
     if (existant) {
       correspondance.set(Number(ligne.id), existant.id);
       noter("eggs", "ignore");
@@ -617,9 +627,11 @@ async function importerServeurs(
         )
         .limit(1);
       if (!variable) continue;
-      await db
-        .insert(serverVariables)
-        .values({ serverId: uuid, eggVariableId: variable.id, value: String(valeur.variable_value ?? "") });
+      await db.insert(serverVariables).values({
+        serverId: uuid,
+        eggVariableId: variable.id,
+        value: String(valeur.variable_value ?? ""),
+      });
     }
   }
 

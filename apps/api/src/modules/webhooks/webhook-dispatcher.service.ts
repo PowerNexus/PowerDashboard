@@ -71,7 +71,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private readonly queues: WebhookQueue[];
 
-  constructor(@Inject(DATABASE) private readonly db: Database) {
+  constructor(@Inject(DATABASE) db: Database) {
     this.queues = [applicationQueue(db), clientQueue(db)];
   }
 

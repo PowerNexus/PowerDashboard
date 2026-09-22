@@ -49,11 +49,10 @@ export function setup() {
 }
 
 export default function () {
-  const reponse = http.post(
-    `${BASE}/api/v1/client/servers/${SERVEUR}/websocket`,
-    null,
-    { headers: { Authorization: `Bearer ${TOKEN}` }, tags: { route: "jeton-console" } },
-  );
+  const reponse = http.post(`${BASE}/api/v1/client/servers/${SERVEUR}/websocket`, null, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+    tags: { route: "jeton-console" },
+  });
 
   check(reponse, {
     "jeton : 2xx": (r) => r.status >= 200 && r.status < 300,
