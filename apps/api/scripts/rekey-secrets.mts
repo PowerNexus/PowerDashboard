@@ -30,9 +30,9 @@
  * quelques minutes dans le navigateur. Au pire, une connexion en cours au
  * moment de la bascule est à recommencer.
  */
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 import { createClient } from "@gamedashboard/db";
 import { sql } from "drizzle-orm";
+import { ciphertextParts, createRekeyer } from "../src/common/rekey";
 
 /**
  * D'où l'on vient, où l'on va.
@@ -59,8 +59,12 @@ if (OLD_SECRET === SECRET && FROM_SALT === TO_SALT) {
   process.exit(1);
 }
 
-const fromKey = scryptSync(OLD_SECRET, FROM_SALT, 32);
-const toKey = scryptSync(SECRET, TO_SALT, 32);
+const rekeyer = createRekeyer({
+  fromSecret: OLD_SECRET,
+  fromSalt: FROM_SALT,
+  toSecret: SECRET,
+  toSalt: TO_SALT,
+});
 
 /**
  * Colonnes chiffrées à reprendre.
@@ -99,36 +103,6 @@ function literal(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-/** Déchiffre avec l'ancien sel. Rend `null` si la valeur n'en vient pas. */
-function decryptFrom(payload: string): string | null {
-  try {
-    // Forme versionnée `v3:iv:tag:données` ou ancienne `iv:tag:données`.
-    // Les valeurs liées à un contexte (AAD) ne sont pas reprises : elles
-    // échouent ici et sont laissées telles quelles.
-    const split = payload.split(":");
-    const [iv, tag, data] = split.length === 4 && split[0] === "v3" ? split.slice(1) : split;
-    if (!iv || !tag || !data) return null;
-
-    const decipher = createDecipheriv("aes-256-gcm", fromKey, Buffer.from(iv, "base64url"));
-    decipher.setAuthTag(Buffer.from(tag, "base64url"));
-    return (
-      decipher.update(Buffer.from(data, "base64url")).toString("utf8") + decipher.final("utf8")
-    );
-  } catch {
-    // Déjà repris, ou jamais chiffré : on n'y touche pas.
-    return null;
-  }
-}
-
-/** Rechiffre avec la nouvelle clé, dans le format courant `v3:iv:tag:données`. */
-function encryptTo(plaintext: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", toKey, iv);
-  const data = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const parts = [iv, cipher.getAuthTag(), data].map((part) => part.toString("base64url"));
-  return `v3:${parts.join(":")}`;
-}
-
 const db = createClient();
 let reprises = 0;
 let ignorées = 0;
@@ -162,15 +136,15 @@ await db.transaction(async (tx) => {
 
     for (const row of rows) {
       const raw = typeof row.v === "string" ? row.v : null;
-      if (raw?.split(":").length !== 3) continue;
+      // Les deux formes, `v3:` comprise : voir `ciphertextParts`.
+      if (raw === null || ciphertextParts(raw) === null) continue;
 
-      const clear = decryptFrom(raw);
-      if (clear === null) {
+      const next = rekeyer.rekey(raw);
+      if (next === null) {
         ignorées += 1;
         continue;
       }
 
-      const next = encryptTo(clear);
       await tx.execute(
         sql.raw(
           `update "${target.table}"` +

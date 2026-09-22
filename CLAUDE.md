@@ -51,13 +51,7 @@ Fait, avec tests de non-régression :
 - **OpenAPI + SDK** : catalogue unique `packages/contracts/src/api-catalogue.ts`, SDK écrit à la main dans `packages/sdk`.
 - **Egg Minecraft Java unifié** : `infra/eggs/minecraft-java/`.
 - **Machine injoignable** : `nodes.unreachableSince` (seul écrivain : `node-health-watcher.service.ts`) → `nodeOutageBlock()` (`packages/contracts/src/server.ts`) → blocage complet de l'interface serveur.
-
-**Reste à faire — `docs/`**, dernier chantier V1 : ADR, runbooks, guide du contributeur.
-Seul `docs/reprise-pterodactyl.md` existe.
-
-ADR à rédiger (décisions déjà tranchées, raisons dans le code et PLAN) :
-Wings conservé tel quel · Argon2id plutôt que bcrypt · catalogue d'API comme source unique de la spécification · SDK écrit plutôt que généré · machine muette comme état de premier rang · dépôt sur ext4 plutôt que `drvfs`.
-
-Matière des runbooks : rotation du jeton de node (`POST /admin/nodes/:id/token/rotate`, refusée si le daemon ne répond pas ; banc `infra/local/verifier-rotation.sh`), perte ou changement de sel d'`APP_SECRET_KEY` (`packages/auth/src/secrets.ts`, `apps/api/scripts/rekey-secrets.mts`), `infra/local/README.md`, `infra/prod/README.md`.
+- **Rechiffrement des secrets** : `rekey-secrets.mts` reprend le format `v3:` (il le sautait, une rotation de la clé maître perdait tout) ; cœur testé dans `apps/api/src/common/rekey.ts`.
+- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`).
 
 À vérifier avec Matheo : `infra/prod/README.md` décrit encore une « bêta publique », probablement périmée.
