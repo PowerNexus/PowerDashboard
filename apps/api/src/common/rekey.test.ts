@@ -46,6 +46,21 @@ describe("rechiffrement des secrets", () => {
     expect(rotation.rekey(dejaReprise)).toBeNull();
   });
 
+  /*
+   * Non-régression : sans longueur de tag imposée, GCM acceptait un tag
+   * tronqué. Un chiffré forgé en base avec un tag de quatre octets — trente-
+   * deux bits, à la portée d'une recherche exhaustive — ressortait rechiffré
+   * avec un tag complet, et devenait indiscernable d'un vrai secret.
+   */
+  it("refuse une valeur dont le tag a été tronqué", () => {
+    const [prefixe, iv, tag, donnees] = encryptSecret("jeton-du-node", ANCIENNE).split(":");
+    const court = Buffer.from(tag as string, "base64url")
+      .subarray(0, 4)
+      .toString("base64url");
+
+    expect(rotation.rekey([prefixe, iv, court, donnees].join(":"))).toBeNull();
+  });
+
   it("reprend un changement de sel à clé maître constante", () => {
     const changementDeSel = createRekeyer({
       fromSecret: NOUVELLE.APP_SECRET_KEY,

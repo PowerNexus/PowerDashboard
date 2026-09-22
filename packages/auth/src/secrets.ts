@@ -147,7 +147,11 @@ export function decryptSecret(payload: string, env?: NodeJS.ProcessEnv, context?
   }
   const [rawIv, rawTag, rawData] = parts as [string, string, string];
 
-  const decipher = createDecipheriv(ALGORITHM, derivedKey(env), Buffer.from(rawIv, "base64url"));
+  // La longueur du tag est aussi imposée au déchiffreur, en plus du contrôle
+  // ci-dessous : c'est lui qui a le dernier mot sur ce que GCM accepte.
+  const decipher = createDecipheriv(ALGORITHM, derivedKey(env), Buffer.from(rawIv, "base64url"), {
+    authTagLength: TAG_BYTES,
+  });
   if (versioned && context !== undefined) decipher.setAAD(Buffer.from(context, "utf8"));
   const tag = Buffer.from(rawTag, "base64url");
   if (tag.length !== TAG_BYTES) {

@@ -14,6 +14,9 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
  * ici ; le test vérifie qu'il reste celui que `decryptSecret` sait lire.
  */
 
+/** Longueur du tag GCM produit par `encryptSecret`, seule acceptée à la relecture. */
+const TAG_BYTES = 16;
+
 export interface RekeyOptions {
   /** Clé maître d'où l'on vient. Égale à `toSecret` pour un simple changement de sel. */
   fromSecret: string;
@@ -55,7 +58,12 @@ export function createRekeyer(options: RekeyOptions): Rekeyer {
     if (!parts) return null;
     const [iv, tag, data] = parts;
     try {
-      const decipher = createDecipheriv("aes-256-gcm", fromKey, Buffer.from(iv, "base64url"));
+      // Longueur du tag imposée : sans elle, GCM accepte un tag tronqué, et
+      // un chiffré forgé avec un tag de quatre octets ressortirait d'ici
+      // rechiffré avec un tag complet, c'est-à-dire blanchi.
+      const decipher = createDecipheriv("aes-256-gcm", fromKey, Buffer.from(iv, "base64url"), {
+        authTagLength: TAG_BYTES,
+      });
       decipher.setAuthTag(Buffer.from(tag, "base64url"));
       return (
         decipher.update(Buffer.from(data, "base64url")).toString("utf8") + decipher.final("utf8")
