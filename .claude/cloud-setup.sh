@@ -35,11 +35,18 @@ if command -v psql >/dev/null 2>&1; then
     || $SUDO -u postgres psql -c "create database gamedashboard owner gamedashboard" || true
 fi
 
-# --- cloudflared, pour exposer un port de la session sur une adresse publique -
-# Tunnel éphémère sans compte : `cloudflared tunnel --url http://localhost:3000`
-# affiche une adresse https://<aléatoire>.trycloudflare.com. Dernière version
-# stable, paquet officiel publié sur GitHub. Facultatif : un échec (réseau
-# filtré, architecture inconnue) n'empêche pas la session de démarrer.
+# --- cloudflared ---------------------------------------------------------------
+# Installé pour disposer de l'outil, mais un tunnel ne s'établit PAS depuis une
+# session distante : le conteneur ne laisse sortir que les ports TCP 80 et 443,
+# quel que soit le niveau d'accès réseau de l'environnement, alors que
+# cloudflared joint le bord de Cloudflare uniquement sur le port 7844 (QUIC en
+# UDP comme HTTP/2 en TCP). `cloudflared tunnel --url …` affiche bien une
+# adresse trycloudflare.com, puis échoue en boucle (« Allow outbound TCP on
+# port 7844 ») : l'adresse ne mène nulle part. Pour un accès distant, lancer le
+# tunnel depuis une machine dont le port 7844 sort, pas d'ici.
+# Dernière version stable, paquet officiel publié sur GitHub. Facultatif : un
+# échec (réseau filtré, architecture inconnue) n'empêche pas la session de
+# démarrer.
 if ! command -v cloudflared >/dev/null 2>&1; then
   arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
   deb=$(mktemp --suffix=.deb)
