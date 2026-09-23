@@ -114,6 +114,13 @@ export class BackupsService {
       );
     }
 
+    /*
+     * Toujours l'adaptateur local, **même quand un compartiment S3 est réglé** :
+     * `createBackup` part sans adaptateur, donc avec `wings`, et la
+     * restauration ne sait pas encore remettre une archive distante. Défaut
+     * connu (PLAN §12.4, décision 3) : l'écran des paramètres promet le
+     * contraire.
+     */
     const [row] = await this.db
       .insert(backups)
       .values({ serverId, name: name.trim(), ignoredFiles: ignore, disk: "local" })

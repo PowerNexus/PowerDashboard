@@ -173,7 +173,7 @@ Les captures montrent deux déclinaisons d'une même identité : une **version c
    └───────────────────┘      └──────────────────────┘
 
    Intégrations externes : Modrinth/CurseForge (marketplace), Discord (notifs),
-   SMTP, Cloudflare API, Google OAuth (connexion), système de facturation tiers
+   SMTP, Cloudflare API, fournisseur OIDC (annuaire de l'équipe), système de facturation tiers
    via l'API application (hors périmètre).
 ```
 
@@ -261,7 +261,7 @@ S'y ajoute un argument de valeur : personne ne choisit un hébergeur pour son su
 - Le panel doit servir les endpoints que Wings appelle (`/api/remote/servers/:uuid`, `/api/remote/servers/:uuid/install`, authentification SFTP, sauvegardes). Notre modèle de données doit s'y projeter sans le déformer, voir §7.5.
 - Wings authentifie le panel par un **jeton statique**, pas par mTLS. Le modèle de confiance réel est décrit en §5.5.
 - L'authentification SFTP est déléguée au panel : un défaut de *notre* authentification devient un accès aux fichiers. Notre code d'auth est donc du code critique au même titre que le daemon.
-- Toute dérive du contrat par confort casse à la prochaine version de Wings. Une version de Wings est épinglée et testée avant déploiement.
+- Toute dérive du contrat par confort casse à la prochaine version de Wings. Une version de Wings doit être épinglée et testée avant déploiement : `installer-wings.sh` ne le fait pas encore (§12.4, décision 6).
 
 **Risque assumé** : cela crée une dépendance à la maintenance de Wings en amont, dont le rythme s'est ralenti. Si le projet devenait non maintenu, le repli serait de reprendre le fork communautaire actif plutôt que de réécrire — à réévaluer chaque année.
 
@@ -274,6 +274,8 @@ S'y ajoute un argument de valeur : personne ne choisit un hébergeur pour son su
 - **Sentry** (front + API), **Grafana/Prometheus/Loki**.
 - **Biome** (lint + format), **Vitest**, **Playwright**, **k6** (charge).
 
+> **Livré en V1** : une seule machine, l'API et l'interface sous systemd derrière nginx, PostgreSQL sur la même machine (`infra/prod`). Compose HA, Traefik et le chart Helm décrivent la cible, pas l'existant (§12.4, décision 2).
+
 ---
 
 ## 5. Sécurité
@@ -285,8 +287,8 @@ S'y ajoute un argument de valeur : personne ne choisit un hébergeur pour son su
 | Mots de passe | Argon2id, politique 12+ caractères, vérification HaveIBeenPwned (k-anonymity). |
 | 2FA | TOTP + **passkeys WebAuthn** (Face ID, YubiKey). Obligatoire pour admins et revendeurs. Codes de secours. |
 | Sessions | Cookies `HttpOnly; Secure; SameSite=Lax`, session opaque en Redis (révocable), rotation à chaque élévation de privilège. |
-| Connexion Google | OAuth 2.0 / OIDC (bouton « Se connecter avec Google » de la capture), liaison à un compte existant par e-mail vérifié. Autres providers (Discord) ajoutables via la même abstraction. |
-| **SSO depuis le site client GameDashboard** | Le panel est **fournisseur d'identité** pour `gamedashboard.fr` : flux OAuth 2.0 Authorization Code avec PKCE (S256), endpoints `/v1/oauth/authorize`, `/token`, `/userinfo`, `/revoke`. Jeton d'accès 15 min, jeton de rafraîchissement rotatif. `redirect_uri` en correspondance exacte, `state` obligatoire et vérifié, `code_verifier` jamais exposé au navigateur. À la première connexion le compte est créé et lié à l'identifiant du site ; un e-mail déjà vérifié rapproche les comptes au lieu d'en créer un second. Les portées accordées sont révocables depuis `/account/security`. Documenté dans l'interface sur la page `/api`. |
+| Annuaire externe (OIDC) | Un fournisseur OIDC configurable (Authentik, Keycloak, Azure, Google…), pensé pour l'équipe et les sous-utilisateurs (Administration › Paramètres › Annuaire externe). Actif, il devient le **seul** chemin : l'API refuse alors la connexion par mot de passe. Code avec PKCE, `state` vérifié par la couche web. À la première connexion, rapprochement avec un compte existant **seulement** si le fournisseur déclare l'adresse vérifiée ; sinon, création (`sso.service.ts`). Les boutons de marque (« Se connecter avec Google », Discord) ne sont pas livrés : §12.4, décision 4. |
+| **Entrée depuis le site client** | Le client n'a pas de mot de passe sur le panel : son compte vit chez le système de facturation, qui le crée à la commande (`POST /application/users`). Derrière son bouton « Gérer mon serveur », le plugin demande `POST /application/users/sso-link` (clé applicative, portée `users.sso`) et redirige vers le lien rendu : **deux minutes, un seul usage**, seulement pour un compte existant, jamais pour un compte du personnel. Le panel n'est **pas** un serveur OAuth (ni `/authorize`, ni écran de consentement) : le facturier détient déjà des clés qui créent et suppriment des serveurs, et lui demander en plus le consentement du client serait une cérémonie sans contenu (`billing-sso.service.ts`). |
 | Captcha | Cloudflare Turnstile sur connexion, inscription et réinitialisation (comme sur la capture). |
 | Clés API | Préfixées (`gd_live_…`), hashées (SHA-256) en base, scopes, IP allowlist, expiration, dernière utilisation. |
 | Tokens WebSocket | JWT 5 min, scope + serveur, signé EdDSA, jamais réutilisable. |
@@ -412,7 +414,7 @@ Notation : `table (colonnes clés)`. Toutes les tables ont `id uuid`, `created_a
 Conséquences concrètes :
 - Le frontend et l'API partagent la même origine : l'interface s'authentifie par son cookie de session, aucun jeton ne transite par le JavaScript et il n'y a pas de préflight CORS sur les appels du panel.
 - Puisqu'un cookie suffit alors à authentifier, **le jeton anti-CSRF devient obligatoire** sur toute requête mutante (double-submit + vérification de `Origin`).
-- CORS n'est ouvert qu'aux origines déclarées par une application OAuth, pour les clients externes qui s'authentifient par clé.
+- CORS n'est ouvert qu'à l'origine du panel (`PANEL_ORIGIN`). Les systèmes tiers appellent l'API applicative de serveur à serveur, avec une clé : ils n'en ont pas besoin.
 
 **Routage Traefik.** Le préfixe `/api/` va au service API ; le chemin exact `/api` reste servi par Next et rend la page de documentation. Deux règles, la plus spécifique l'emportant :
 
@@ -436,7 +438,7 @@ PathPrefix(`/ws`)     → realtime (gateway websocket)
 Auth
   POST   /auth/login                      POST /auth/logout
   POST   /auth/2fa/totp/verify            POST /auth/passkey/options|verify
-  GET    /auth/oauth/google/start         GET  /auth/oauth/google/callback
+  GET    /auth/sso                        POST /auth/sso/start|callback    (annuaire OIDC)
   POST   /auth/register                   POST /auth/password/forgot|reset
 
 Compte
@@ -473,6 +475,7 @@ Marketplace
 Application (clé application, pour l'admin et les systèmes externes)
   GET/POST/PATCH/DELETE /application/servers   POST /application/servers/:id/suspend|unsuspend|reinstall
   GET/POST/PATCH/DELETE /application/users     GET/POST /application/nodes|allocations|eggs
+  POST   /application/users/sso-link   (entrée du client : lien à usage unique, §5.1)
 ```
 
 ### 7.3 Temps réel (Socket.IO)
@@ -812,14 +815,16 @@ GameDashboard/
 - **Runbooks** dans `docs/runbooks/` : node down, migration de serveur, restauration DB, rotation des secrets, incident sécurité.
 - **Documentation** : ADR pour chaque décision structurante (`docs/adr/0001-nestjs-vs-go-core.md`, …), doc API Scalar, guide contributeur.
 
-### 12.4 Décisions ouvertes (à trancher avant la phase 1)
+### 12.4 Décisions structurantes
 
-1. **Core en NestJS vs Go** : NestJS retenu pour la vitesse de dev et le partage de types avec le front. Plus de daemon à écrire, donc plus de Go dans le projet. À confirmer.
-2. **Kubernetes ou Compose HA pour le panel** : Compose HA (2 hôtes + Traefik) suffit au départ. Helm chart livré quand même pour l'avenir.
-3. **Stockage backups** : MinIO auto-hébergé vs S3 externe (Scaleway/OVH). Coût vs simplicité.
-4. **Providers OAuth** : Google seul en v1 (comme la capture) ou Google + Discord dès le départ ?
+Posées avant la phase 1, relues à la fin de la V1 (septembre 2026) contre le code, qui fait foi. Quatre sont tranchées dans les faits, dont une (la 3) cache un défaut à corriger avant l'étiquette `v1.0.0` ; deux (la 4 et la 6) attendent une décision.
+
+1. **Core en NestJS ou en Go.** **Tranché : NestJS.** L'API est en NestJS (`apps/api`) et partage ses types avec l'interface par `packages/contracts`. Aucun Go dans le dépôt : Wings est conservé tel quel ([ADR 0001](./docs/adr/0001-wings-conserve.md)).
+2. **Hébergement du panel.** **Tranché pour la V1 : une seule machine.** L'API et l'interface tournent sous systemd derrière nginx, avec PostgreSQL sur la même machine (`infra/prod`, [installation](./docs/installation.md)). Ni Compose HA, ni Traefik, ni chart Helm ne sont livrés ; §4.4 les garde comme cible. La question se rouvrira quand une machine ne suffira plus.
+3. **Stockage des sauvegardes.** **Tranché côté code : tout compartiment compatible S3** (Amazon, Scaleway, OVH, MinIO), point d'accès et adressage par chemin réglables dans Administration › Paramètres › Stockage des sauvegardes. MinIO ou S3 externe devient un choix d'exploitation, plus une question de code. **Mais le branchement est incomplet, et c'est un défaut de la V1** : le panel demande toujours l'adaptateur local à Wings (`BackupsService.create`), et ne sait pas restaurer une archive distante (Wings attend alors une `download_url`). Régler un compartiment ne déplace donc aucune sauvegarde hors du node, alors que l'écran des paramètres le promet. À corriger avant l'étiquette `v1.0.0`.
+4. **Fournisseurs de connexion.** **Tranché autrement que posé.** Les clients entrent par le lien du système de facturation (§5.1). L'équipe peut passer par un annuaire OIDC configurable (Google compris), qui devient alors le seul chemin, pour tous. Les boutons de marque ne sont pas livrés : les valeurs `google` et `discord` de `oauth_provider` leur restent réservées. **À trancher** : §10.1 range « Google OAuth » dans la V1. Soit un bouton « Se connecter avec Google » facultatif, à côté du mot de passe, avant `v1.0.0` ; soit son report en v1.5, puisque les clients n'ont pas de mot de passe ici.
 5. ~~**Sondes de jeu** : dans Forge ou dans le worker ?~~ **Tranché** : dans le worker. Wings ne les expose pas et n'est pas modifié (§8.2).
-6. **Version de Wings supportée** : suivre l'amont au plus près, ou n'épingler qu'après validation en préproduction ? Validation préalable recommandée, le daemon n'étant pas sous notre contrôle.
+6. **Version de Wings.** **À trancher.** §4.3, §12.3 et l'ADR 0001 veulent une version épinglée, validée par les bancs avant tout déploiement. Dans les faits, trois sources divergent : le compose de dev épingle `v1.11.13`, les bancs de Codiax compilent un clone local, et `installer-wings.sh` installe la dernière version publiée — une production peut donc tourner sur un Wings qu'aucun banc n'a vu. Recommandation : épingler dans `installer-wings.sh` la version que les bancs ont validée (surchargeable par une variable), aligner le compose de dev sur elle, et ne la monter qu'après un passage des bancs.
 
 ---
 
