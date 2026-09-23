@@ -173,6 +173,20 @@ export class PlatformSettingsService {
   }
 
   /**
+   * Client OAuth du bouton « Se connecter avec Google », secret compris.
+   *
+   * Même règle que `ssoConfiguration` : lu côté serveur seulement, et `null`
+   * dès qu'il manque quelque chose — un bouton qui mènerait à une page
+   * d'erreur de Google ne doit pas s'afficher.
+   */
+  async googleConfiguration(): Promise<{ clientId: string; clientSecret: string } | null> {
+    if (!(await this.boolean("google.enabled"))) return null;
+    const clientId = await this.text("google.clientId");
+    const clientSecret = await this.secret("google.clientSecret");
+    return clientId && clientSecret ? { clientId, clientSecret } : null;
+  }
+
+  /**
    * Configuration SMTP, mot de passe compris.
    *
    * Comme pour l'authentification unique : c'est une lecture qui **déchiffre**,

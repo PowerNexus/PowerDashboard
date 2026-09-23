@@ -81,6 +81,16 @@
   --gd-console-bg: #0b0d13;
   --gd-console-fg: #d1d5db;
 
+  /*
+   * Logo Google, sur le bouton « Se connecter avec Google » (PLAN §12.4,
+   * décision 4). Les couleurs de la marque, imposées par Google : elles ne
+   * suivent pas le thème.
+   */
+  --gd-google-blue: #4285f4;
+  --gd-google-green: #34a853;
+  --gd-google-yellow: #fbbc05;
+  --gd-google-red: #ea4335;
+
   /* Forme */
   --gd-radius: 12px;
   --gd-radius-sm: 8px;

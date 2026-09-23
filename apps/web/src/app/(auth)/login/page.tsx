@@ -3,16 +3,17 @@ import { LogIn } from "lucide-react";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import { LoginForm } from "@/components/login-form";
 import { pageTitle } from "@/lib/page-title";
 import { getBranding } from "@/server/api/branding";
 import { fetchPublicAuthConfig } from "@/server/api/register";
-import { fetchSsoStatus, SSO_CHALLENGE_COOKIE } from "@/server/api/sso";
+import { fetchGoogleEnabled, fetchSsoStatus, SSO_CHALLENGE_COOKIE } from "@/server/api/sso";
 
 export const generateMetadata = pageTitle("login", "title");
 
 /** Raisons d'échec renvoyées par les routes de cérémonie, dans l'URL. */
-const SSO_FAILURES = new Set(["failed", "denied", "expired", "state", "refused"]);
+const SSO_FAILURES = new Set(["failed", "denied", "expired", "state", "refused", "noAccount"]);
 
 export default async function LoginPage({
   searchParams,
@@ -21,10 +22,11 @@ export default async function LoginPage({
 }) {
   const t = await getTranslations("login");
   const parameters = await searchParams;
-  const [sso, auth, branding] = await Promise.all([
+  const [sso, auth, branding, google] = await Promise.all([
     fetchSsoStatus(),
     fetchPublicAuthConfig(),
     getBranding(),
+    fetchGoogleEnabled(),
   ]);
   const registrationOpen = auth.open;
 
@@ -156,6 +158,14 @@ export default async function LoginPage({
             resumed={resumed}
             captchaSiteKey={auth.captchaSiteKey}
             passwordResetByEmail={auth.passwordResetByEmail}
+            alternative={
+              google ? (
+                <GoogleSignIn
+                  label={t("ssoSignIn", { provider: "Google" })}
+                  separator={t("orWithEmail")}
+                />
+              ) : null
+            }
           />
         )}
       </AuthCard>

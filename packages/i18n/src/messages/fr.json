@@ -1086,7 +1086,8 @@
       "denied": "Le fournisseur a refusé la connexion, ou vous l'avez annulée.",
       "expired": "La demande a expiré. Recommencez.",
       "state": "La réponse du fournisseur ne correspond pas à la demande envoyée. Recommencez depuis cette page.",
-      "refused": "Le fournisseur a répondu, mais le compte n'a pas pu être ouvert."
+      "refused": "Le fournisseur a répondu, mais le compte n'a pas pu être ouvert.",
+      "noAccount": "Aucun compte de ce panel n'utilise l'adresse de ce compte Google, et les inscriptions sont fermées. Connectez-vous avec votre e-mail et votre mot de passe."
     }
   },
   "marketplace": {
@@ -1498,6 +1499,7 @@
     "method_password": "par mot de passe",
     "method_passkey": "par clé d'accès",
     "method_sso": "par compte GameDashboard",
+    "method_google": "par compte Google",
     "method_apiKey": "par clé d'API",
     "columnOpened": "Ouverte",
     "neverSeen": "Jamais",

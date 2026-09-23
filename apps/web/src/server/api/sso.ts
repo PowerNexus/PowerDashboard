@@ -5,13 +5,25 @@ const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN ?? "http://localhost:3000";
 
 /**
+ * Les deux cérémonies OAuth de la page de connexion.
+ *
+ * `sso` : l'annuaire de l'équipe, configurable, seul chemin une fois rendu
+ * obligatoire. `google` : le bouton « Se connecter avec Google », une porte de
+ * plus à côté du mot de passe (PLAN §12.4, décision 4). Même aller-retour,
+ * mêmes protections ; chacune a ses routes — `/auth/<cérémonie>/…`, côté
+ * interface comme côté API — et son cookie, pour qu'une cérémonie ouverte
+ * chez l'un ne se termine jamais chez l'autre.
+ */
+export type Ceremony = "sso" | "google";
+
+/**
  * Cookie qui porte l'état et le vérificateur PKCE pendant l'aller-retour.
  *
- * Chemin restreint à `/auth/sso` : il n'a aucune raison d'accompagner les
- * requêtes du reste du panel, et un secret qui voyage moins fuite moins.
+ * Chemin restreint à `/auth/<cérémonie>` : il n'a aucune raison d'accompagner
+ * les requêtes du reste du panel, et un secret qui voyage moins fuite moins.
  */
-export const SSO_STATE_COOKIE = "gd_sso";
-/** Défi de second facteur laissé par le retour SSO, lu par la page de connexion. */
+export const CEREMONY_COOKIE: Record<Ceremony, string> = { sso: "gd_sso", google: "gd_google" };
+/** Défi de second facteur laissé par le retour d'une cérémonie, lu par la page de connexion. */
 export const SSO_CHALLENGE_COOKIE = "gd_sso_challenge";
 
 export interface SsoPending {
@@ -24,6 +36,10 @@ export interface SsoStatus {
   label: string | null;
 }
 
+export function ceremonyPath(ceremony: Ceremony): string {
+  return `/auth/${ceremony}`;
+}
+
 /**
  * Adresse de retour, dérivée de l'origine du panel.
  *
@@ -33,8 +49,8 @@ export interface SsoStatus {
  * refusent l'échange à la moindre différence — un port, une barre oblique
  * finale suffisent.
  */
-export function ssoRedirectUri(): string {
-  return new URL("/auth/sso/callback", PANEL_ORIGIN).toString();
+export function ceremonyRedirectUri(ceremony: Ceremony): string {
+  return new URL(`${ceremonyPath(ceremony)}/callback`, PANEL_ORIGIN).toString();
 }
 
 /** État de l'authentification unique, pour la page de connexion. */
@@ -52,15 +68,32 @@ export async function fetchSsoStatus(): Promise<SsoStatus> {
   }
 }
 
-export async function startSso(): Promise<{
+/**
+ * Le bouton Google est-il proposé ?
+ *
+ * Faux quand l'API ne répond pas : un bouton qui mènerait à une erreur ne
+ * vaut pas mieux que pas de bouton, et le mot de passe reste là.
+ */
+export async function fetchGoogleEnabled(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_URL}/api/v1/auth/google`, { cache: "no-store" });
+    if (!response.ok) return false;
+    const { data } = (await response.json()) as { data: { enabled: boolean } };
+    return data.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function startCeremony(ceremony: Ceremony): Promise<{
   url: string | null;
   pending: SsoPending | null;
   error: string | null;
 }> {
-  const response = await fetch(`${API_URL}/api/v1/auth/sso/start`, {
+  const response = await fetch(`${API_URL}/api/v1/auth/${ceremony}/start`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ redirectUri: ssoRedirectUri() }),
+    body: JSON.stringify({ redirectUri: ceremonyRedirectUri(ceremony) }),
     cache: "no-store",
   }).catch(() => null);
 
@@ -84,13 +117,17 @@ export async function startSso(): Promise<{
  * Rend la réponse brute : l'appelant doit en recopier le cookie de session, et
  * distinguer une connexion aboutie d'une demande de second facteur.
  */
-export async function completeSso(code: string, codeVerifier: string): Promise<Response> {
-  return fetch(`${API_URL}/api/v1/auth/sso/callback`, {
+export async function completeCeremony(
+  ceremony: Ceremony,
+  code: string,
+  codeVerifier: string,
+): Promise<Response> {
+  return fetch(`${API_URL}/api/v1/auth/${ceremony}/callback`, {
     method: "POST",
     // Cette cérémonie ouvre une session : l'appareil qui apparaîtra dans la
     // liste doit être celui du visiteur, pas le serveur de rendu.
     headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
-    body: JSON.stringify({ code, codeVerifier, redirectUri: ssoRedirectUri() }),
+    body: JSON.stringify({ code, codeVerifier, redirectUri: ceremonyRedirectUri(ceremony) }),
     cache: "no-store",
   });
 }

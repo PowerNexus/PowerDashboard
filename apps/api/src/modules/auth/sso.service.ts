@@ -10,19 +10,38 @@ import { PlatformSettingsService, type SsoConfiguration } from "../admin/platfor
  * Authentification unique : le panel comme client OAuth 2.0.
  *
  * Le fournisseur est la source de vérité. Le panel n'invente aucune identité,
- * il reconnaît celles qu'on lui présente — et, une fois le réglage activé, il
- * n'en reconnaît plus d'autres.
+ * il reconnaît celles qu'on lui présente — et, une fois l'annuaire rendu
+ * obligatoire, il n'en reconnaît plus d'autres. Le bouton Google passe par la
+ * même cérémonie et le même rapprochement : seules les adresses changent.
  */
 
 /**
  * Le fournisseur, tel que la liaison le nomme.
  *
- * « oidc » et non « google » : le panel expose **un** fournisseur configurable,
- * quel qu'il soit — Authentik, Keycloak, Azure, ou Google justement. Les
- * valeurs dédiées de l'énumération sont réservées aux boutons de marque prévus
- * au plan, qui auront leur propre cérémonie.
+ * `oidc` : l'annuaire configurable — Authentik, Keycloak, Azure… —, qui
+ * devient le seul chemin une fois activé. `google` : le bouton de marque, une
+ * porte de plus à côté du mot de passe (PLAN §12.4, décision 4). Deux
+ * liaisons distinctes : un même compte peut porter les deux.
  */
-const PROVIDER = "oidc" as const;
+export type SsoProvider = "oidc" | "google";
+
+/**
+ * Adresses de Google, celles de son document de découverte
+ * (`accounts.google.com/.well-known/openid-configuration`). Fixes : les rendre
+ * réglables n'offrirait qu'une occasion de se tromper.
+ */
+const GOOGLE = {
+  authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+  tokenUrl: "https://oauth2.googleapis.com/token",
+  userinfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
+  scopes: "openid email profile",
+} as const;
+
+/** Ce qu'une cérémonie doit savoir de son fournisseur. */
+type Ceremony = Omit<SsoConfiguration, "label"> & {
+  /** Paramètres d'autorisation propres au fournisseur. */
+  extra?: Record<string, string>;
+};
 
 /** Départ d'une cérémonie : ce que le navigateur doit emporter. */
 export interface SsoStart {
@@ -46,6 +65,19 @@ export class SsoExchangeError extends Error {
   }
 }
 
+/**
+ * Aucun compte ne correspond, et la cérémonie n'a pas le droit d'en créer.
+ *
+ * Le cas du bouton Google quand les inscriptions sont fermées : Google atteste
+ * une identité, il n'ouvre pas le panel à qui n'y a pas de compte.
+ */
+export class SsoNoAccountError extends Error {
+  constructor() {
+    super("Aucun compte de ce panel n'utilise cette adresse, et les inscriptions sont fermées.");
+    this.name = "SsoNoAccountError";
+  }
+}
+
 @Injectable()
 export class SsoService {
   private readonly logger = new Logger(SsoService.name);
@@ -61,6 +93,34 @@ export class SsoService {
   }
 
   /**
+   * Le bouton Google est-il proposé ?
+   *
+   * Jamais quand l'annuaire est obligatoire : il est alors le seul chemin,
+   * pour tout le monde, et une seconde porte le contournerait.
+   */
+  async googleAvailable(): Promise<boolean> {
+    return (await this.ceremony("google")) !== null;
+  }
+
+  private async ceremony(provider: SsoProvider): Promise<Ceremony | null> {
+    const annuaire = await this.configuration();
+    if (provider === "oidc") return annuaire;
+    if (annuaire) return null;
+
+    const google = await this.settings.googleConfiguration();
+    if (!google) return null;
+    return {
+      ...GOOGLE,
+      clientId: google.clientId,
+      clientSecret: google.clientSecret,
+      // Le choix du compte à chaque fois : sur un poste partagé, ou pour qui a
+      // plusieurs comptes Google, entrer d'office avec celui du navigateur
+      // ouvrirait le mauvais compte du panel.
+      extra: { prompt: "select_account" },
+    };
+  }
+
+  /**
    * Construit l'URL d'autorisation.
    *
    * PKCE est employé **même avec un secret client**, et ce n'est pas
@@ -68,8 +128,8 @@ export class SsoService {
    * d'autorisation lui-même, qui transite par le navigateur et peut fuiter par
    * l'historique, un journal de proxy ou un en-tête `Referer`.
    */
-  async start(redirectUri: string): Promise<SsoStart> {
-    const config = await this.configuration();
+  async start(redirectUri: string, provider: SsoProvider = "oidc"): Promise<SsoStart> {
+    const config = await this.ceremony(provider);
     if (!config) throw new SsoDisabledError();
 
     const state = randomBytes(32).toString("base64url");
@@ -79,8 +139,10 @@ export class SsoService {
     const url = new URL(config.authorizeUrl);
     // Les paramètres existants de l'URL configurée sont conservés : certains
     // fournisseurs en imposent (`tenant`, `audience`), et les écraser ferait
-    // échouer la cérémonie sans rien indiquer.
+    // échouer la cérémonie sans rien indiquer. Ceux du fournisseur passent
+    // avant les nôtres, qui ont donc le dernier mot.
     for (const [key, value] of Object.entries({
+      ...config.extra,
       response_type: "code",
       client_id: config.clientId,
       redirect_uri: redirectUri,
@@ -108,8 +170,9 @@ export class SsoService {
     code: string,
     codeVerifier: string,
     redirectUri: string,
+    provider: SsoProvider = "oidc",
   ): Promise<SsoProfile> {
-    const config = await this.configuration();
+    const config = await this.ceremony(provider);
     if (!config) throw new SsoDisabledError();
 
     const token = await this.exchange(config, code, codeVerifier, redirectUri);
@@ -117,7 +180,7 @@ export class SsoService {
   }
 
   private async exchange(
-    config: SsoConfiguration,
+    config: Ceremony,
     code: string,
     codeVerifier: string,
     redirectUri: string,
@@ -159,7 +222,7 @@ export class SsoService {
     return payload.access_token;
   }
 
-  private async fetchProfile(config: SsoConfiguration, accessToken: string): Promise<SsoProfile> {
+  private async fetchProfile(config: Ceremony, accessToken: string): Promise<SsoProfile> {
     let response: Response;
     try {
       response = await fetch(config.userinfoUrl, {
@@ -182,20 +245,26 @@ export class SsoService {
    *    ambiguïté ;
    * 2. une adresse **vérifiée par le fournisseur** correspond à un compte
    *    existant : les deux sont rapprochés plutôt que d'en créer un second ;
-   * 3. sinon, un compte est créé.
+   * 3. sinon, un compte est créé — si la cérémonie en a le droit
+   *    (`mayCreate`) : le bouton Google ne l'a que si les inscriptions sont
+   *    ouvertes.
    *
    * Le rapprochement du cas 2 n'a lieu **que** si le fournisseur affirme avoir
    * vérifié l'adresse. Sans ce contrôle, quiconque déclare chez un fournisseur
    * laxiste l'adresse de quelqu'un d'autre hériterait de son compte panel, de
    * ses serveurs et de ses sauvegardes.
    */
-  async resolveUser(profile: SsoProfile): Promise<{ id: string; created: boolean }> {
+  async resolveUser(
+    profile: SsoProfile,
+    options: { provider?: SsoProvider; mayCreate?: boolean } = {},
+  ): Promise<{ id: string; created: boolean }> {
+    const provider = options.provider ?? "oidc";
     const [byExternal] = await this.db
       .select({ id: userOauthAccounts.userId })
       .from(userOauthAccounts)
       .where(
         and(
-          eq(userOauthAccounts.provider, PROVIDER),
+          eq(userOauthAccounts.provider, provider),
           eq(userOauthAccounts.providerUserId, profile.subject),
         ),
       )
@@ -221,7 +290,7 @@ export class SsoService {
           .select({ providerUserId: userOauthAccounts.providerUserId })
           .from(userOauthAccounts)
           .where(
-            and(eq(userOauthAccounts.userId, byEmail.id), eq(userOauthAccounts.provider, PROVIDER)),
+            and(eq(userOauthAccounts.userId, byEmail.id), eq(userOauthAccounts.provider, provider)),
           )
           .limit(1);
 
@@ -229,7 +298,7 @@ export class SsoService {
           throw new SsoExchangeError("ce compte est déjà lié à une autre identité");
         }
 
-        await this.link(byEmail.id, profile);
+        await this.link(byEmail.id, profile, provider);
         await this.refresh(byEmail.id, profile);
         return { id: byEmail.id, created: false };
       }
@@ -258,6 +327,8 @@ export class SsoService {
       );
     }
 
+    if (options.mayCreate === false) throw new SsoNoAccountError();
+
     const now = new Date().toISOString();
     const [created] = await this.db
       .insert(users)
@@ -279,7 +350,7 @@ export class SsoService {
       .returning({ id: users.id });
 
     if (!created) throw new SsoExchangeError("le compte n'a pas pu être créé");
-    await this.link(created.id, profile);
+    await this.link(created.id, profile, provider);
     return { id: created.id, created: true };
   }
 
@@ -294,13 +365,13 @@ export class SsoService {
    *
    * Idempotent : rejouer une connexion ne doit pas échouer sur l'index unique.
    */
-  private async link(userId: string, profile: SsoProfile): Promise<void> {
+  private async link(userId: string, profile: SsoProfile, provider: SsoProvider): Promise<void> {
     const now = new Date().toISOString();
     await this.db
       .insert(userOauthAccounts)
       .values({
         userId,
-        provider: PROVIDER,
+        provider,
         providerUserId: profile.subject,
         email: profile.email ?? "",
         linkedAt: now,
