@@ -282,7 +282,7 @@ describe("actions GitHub des workflows", () => {
         .map(([etape]) => etape)
         .filter((etape) => etape.includes("actions/upload-artifact@")),
     );
-    expect(envois.length).toBe(2);
+    expect(envois.length).toBe(3);
     for (const etape of envois) {
       expect(etape).toContain("continue-on-error: true");
     }
@@ -318,6 +318,56 @@ describe("actions GitHub des workflows", () => {
     expect(versions.length).toBeGreaterThan(0);
     for (const [, majeure, mineure] of versions) {
       expect(Number(majeure) > 0 || Number(mineure) >= 35).toBe(true);
+    }
+  });
+});
+
+/**
+ * Le scan ZAP (PLAN §5.4) : présent, reproductible, et honnête sur ce qu'il
+ * laisse passer.
+ */
+describe("scan ZAP de la CI", () => {
+  const ci = readFileSync(join(RACINE, ".github", "workflows", "ci.yml"), "utf8");
+  const script = readFileSync(join(RACINE, "infra", "ci", "zap-baseline.sh"), "utf8");
+  const regles = readFileSync(join(RACINE, "infra", "ci", "zap-regles.tsv"), "utf8")
+    .split("\n")
+    .filter((ligne) => ligne.trim() !== "" && !ligne.startsWith("#"));
+
+  it("tourne après les parcours, sur l'application compilée", () => {
+    const parcours = ci.indexOf("name: Parcours et accessibilité");
+    const scan = ci.indexOf("name: Scan ZAP");
+    expect(parcours).toBeGreaterThan(0);
+    expect(scan).toBeGreaterThan(parcours);
+    expect(ci.slice(scan, ci.indexOf("\n\n", scan))).toContain(
+      "run: bash infra/ci/zap-baseline.sh",
+    );
+  });
+
+  it("épingle l'image de ZAP par empreinte", () => {
+    expect(script).toMatch(
+      /^IMAGE=ghcr\.io\/zaproxy\/zaproxy@sha256:[0-9a-f]{64} # \d+\.\d+\.\d+$/m,
+    );
+  });
+
+  it("ne fait jamais taire un avertissement sans le dire", () => {
+    // Sans -I, un avertissement rend un code non nul : c'est ce qui fait
+    // échouer le job sur une alerte nouvelle.
+    expect(script).toMatch(/zap-baseline\.py -t "\$CIBLE" -c regles\.tsv/);
+    expect(script).not.toMatch(/zap-baseline\.py[^\n]* -I\b/);
+  });
+
+  it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
+    expect(script).toContain("TRAVAIL=$(mktemp -d)");
+    expect(script).toContain('-v "$TRAVAIL:/zap/wrk:rw"');
+  });
+
+  it("justifie chaque exception", () => {
+    expect(regles.length).toBeGreaterThan(0);
+    for (const ligne of regles) {
+      const [id, niveau, raison] = ligne.split("\t");
+      expect(id).toMatch(/^\d+$/);
+      expect(["IGNORE", "INFO", "WARN", "FAIL"]).toContain(niveau);
+      expect((raison ?? "").length).toBeGreaterThan(40);
     }
   });
 });

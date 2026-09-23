@@ -55,6 +55,7 @@ Fait, avec tests de non-régression :
 - **Planificateur** parallélisé avec garde `enVol` (`apps/api/src/modules/scheduler/schedule-runner.service.ts`).
 - **Balayages de fond** centralisés dans `battre()` (`apps/api/src/common/background-tick.ts`) : un rejet non rattrapé tuait le processus sous Node 24.
 - **Changement d'egg** transactionnel, synchronisé avant réinstallation.
+- **Scan ZAP en CI** (PLAN §5.4) : `infra/ci/zap-baseline.sh` dans le job e2e, passif, image épinglée ; toute alerte hors de `infra/ci/zap-regles.tsv` (exceptions justifiées) fait échouer le job. Dette relevée : `script-src 'unsafe-inline'` (pas de nonce, `next.config.ts`).
 - **Mots de passe** : bcrypt reconnu et réécrit en Argon2id à la première connexion (`packages/auth/src/password.ts`).
 - **Reprise Pterodactyl** : `apps/api/scripts/import-pterodactyl.mts`, voir `docs/reprise-pterodactyl.md`.
 - **OpenAPI + SDK** : catalogue unique `packages/contracts/src/api-catalogue.ts`, SDK écrit à la main dans `packages/sdk`.

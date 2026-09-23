@@ -161,7 +161,13 @@ le rendu.
 `.github/workflows/ci.yml` bloque sur : lint, types, tests, build, build de
 Storybook, **un schéma sans migration**, **un catalogue d'API sans
 `openapi.json` régénéré**, `pnpm audit` dès le niveau *low*, Trivy (dépendances,
-secrets, configuration) et Semgrep. `pnpm outdated -r` informe sans bloquer.
+secrets, configuration), Semgrep et le **scan ZAP** de l'application compilée.
+`pnpm outdated -r` informe sans bloquer.
+
+Une alerte ZAP nouvelle se corrige, ou s'accepte dans
+`infra/ci/zap-regles.tsv` avec sa raison. Le scan se rejoue en local après
+`pnpm build`, avec Docker et une base migrée :
+`DATABASE_URL=… APP_SECRET_KEY=… bash infra/ci/zap-baseline.sh`.
 
 ## Git
 

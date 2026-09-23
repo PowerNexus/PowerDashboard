@@ -1,0 +1,13 @@
+# Règles du scan ZAP « baseline » (infra/ci/zap-baseline.sh).
+#
+# Une règle absente de ce fichier vaut WARN, et tout WARN fait échouer le job :
+# une alerte nouvelle se lit, puis se corrige ou s'accepte ici. Chaque
+# exception porte sa raison ; une exception sans raison ne se relit pas.
+#
+# Format ZAP : identifiant, tabulation, IGNORE|WARN|FAIL, tabulation, commentaire.
+10044	IGNORE	(Grosse redirection) Le corps de la redirection / → /login est le catalogue de traductions embarqué dans chaque page : du texte public, aucune donnée de compte.
+10055	IGNORE	(CSP) Sources larges voulues : connect-src https: wss: pour la console et les envois qui parlent directement aux nodes Wings, img-src https: pour les logos des revendeurs ; style-src 'unsafe-inline' pour les styles en ligne de React. script-src 'unsafe-inline' est une dette connue (CSP à nonce, PLAN §5.4, voir next.config.ts) : à corriger à part, pas à masquer ici.
+10202	IGNORE	(Jeton anti-CSRF) Les formulaires passent par des Server Actions de Next, qui refusent toute requête dont l'origine n'est pas l'hôte ; l'API vérifie Origin et un jeton en double soumission (PLAN §5.4).
+10031	INFO	(Attribut HTML contrôlable) Les champs $ACTION_* renvoyés par /login sont les identifiants des Server Actions de Next ; React échappe tout attribut qu'il écrit. Signalé à faible confiance par ZAP, gardé au rapport.
+10109	INFO	(Application web moderne) Constat, pas une faiblesse : ZAP note que les pages sont rendues par des scripts.
+10111	INFO	(Requête d'authentification repérée) Constat, pas une faiblesse : ZAP a trouvé le formulaire de connexion.
