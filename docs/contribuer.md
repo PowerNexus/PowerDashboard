@@ -135,6 +135,8 @@ livraison suivante.
 pnpm lint        # Biome
 pnpm typecheck
 pnpm test        # Vitest
+pnpm db:check    # schéma et migrations en phase
+pnpm openapi     # puis git diff openapi.json : doit rester vide
 ```
 
 Pas besoin de tout recompiler après chaque retouche : la suite complète se
@@ -142,7 +144,9 @@ justifie après un changement structurel, et avant de pousser.
 
 - **Unitaires** : `*.test.ts` à côté du code.
 - **Intégration** : `*.integration.test.ts`, sur une base jetable
-  (`apps/api/src/test/throwaway-database.ts`), sautés sans `DATABASE_URL`.
+  (`apps/api/src/test/throwaway-database.ts`). `DATABASE_URL=… pnpm test` les
+  exécute (turbo transmet la variable) ; sans elle, ils se sautent et le
+  disent.
 - **Contrat Wings** : les bancs `infra/local/verifier-*.sh`, contre un Wings
   réel ([`infra/local/README.md`](../infra/local/README.md)). Ils ne tournent
   que sur Codiax, pas en CI ni en session distante. À lancer après toute

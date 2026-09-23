@@ -53,6 +53,11 @@ Fait, avec tests de non-régression :
 - **Egg Minecraft Java unifié** : `infra/eggs/minecraft-java/`.
 - **Machine injoignable** : `nodes.unreachableSince` (seul écrivain : `node-health-watcher.service.ts`) → `nodeOutageBlock()` (`packages/contracts/src/server.ts`) → blocage complet de l'interface serveur.
 - **Rechiffrement des secrets** : `rekey-secrets.mts` reprend le format `v3:` (il le sautait, une rotation de la clé maître perdait tout) ; cœur testé dans `apps/api/src/common/rekey.ts`.
-- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`).
+- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node, machine injoignable et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`). README à jour.
+- **Schéma et migrations en phase** : instantané `0038`, migration `0038_constraint_names`, `pnpm db:check` (drizzle-kit sort en succès même quand il s'arrête sur une question).
+- **Certificats des revendeurs** : un certificat expiré n'est plus « actif » (`certificateStanding`).
+- **Traduction complète** : page d'erreur et page introuvable ; routes citées dans les textes vérifiées contre l'API.
+
+**La V1 est terminée.** GitHub Actions est suspendu (facture impayée) : les vérifications se font en local — `pnpm lint && pnpm typecheck && DATABASE_URL=… pnpm test && pnpm db:check && pnpm build`, puis `pnpm e2e`.
 
 - **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).
