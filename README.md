@@ -22,7 +22,20 @@ infra/eggs          Eggs maison (Minecraft Java unifié)
 docs/               ADR, runbooks, guide du contributeur, reprise Pterodactyl
 ```
 
-## Démarrer
+## Installer sur un serveur
+
+**Première installation ?** Suivez [docs/installation.md](./docs/installation.md) :
+un guide pas à pas, du serveur vide au premier serveur de jeu, pensé pour qui
+découvre le projet. Deux scripts font le travail :
+
+```bash
+sudo bash infra/prod/installer.sh         # le panel : questions, paquets, certificat, premier administrateur
+sudo bash infra/prod/installer-wings.sh   # une machine de jeu : Docker, Wings, certificat
+```
+
+Relancé, `installer.sh` met le panel à jour.
+
+## Démarrer (développement)
 
 ```bash
 pnpm install

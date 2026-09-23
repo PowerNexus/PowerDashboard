@@ -7,9 +7,15 @@ installation en service aujourd'hui est la production locale
 dossier en est la version pour une vraie machine, et ce qui la distingue du
 local y est écrit.
 
-`panel.example.fr` est un nom d'exemple. Avant le premier passage, le
-remplacer dans `deploy.sh` (`DOMAIN`) et dans `panel.conf` (`server_name`,
-journaux, chemin du certificat).
+**Première installation** : `sudo bash infra/prod/installer.sh`, qui installe
+les paquets, obtient le certificat, appelle `deploy.sh` et crée le premier
+administrateur. Le pas à pas est dans [docs/installation.md](../../docs/installation.md) ;
+`installer-wings.sh` prépare de même une machine de jeu.
+
+`panel.example.fr` est un nom d'exemple, que `deploy.sh` remplace dans
+`panel.conf` au moment de l'installer. Le domaine réel se donne une fois par
+`GD_DOMAIN=panel.mondomaine.fr` ; les passages suivants le relisent dans
+`PANEL_ORIGIN` de `api.env`.
 
 | | |
 |---|---|
@@ -20,6 +26,14 @@ journaux, chemin du certificat).
 | Base | rôle et base `gamedashboard` sur le PostgreSQL de la machine |
 | Certificat | émis et renouvelé par certbot, hors de ce dépôt |
 | Certificats des revendeurs | `certificates.sh`, sous `gamedashboard-certificates.timer` |
+| TLS nginx | `tls-intermediate.conf`, posé dans `/etc/nginx/snippets/tls/` s'il manque |
+
+**Machine neuve.** Le vhost a d'abord été écrit sur une machine partagée qui
+lui fournissait, sans que ce soit écrit, un `map` (`$req_connection`) et le
+fichier de réglages TLS. Il apporte désormais les deux lui-même (`$gd_connection`,
+`tls-intermediate.conf`), et `deploy.sh` réécrit `http2 on;` en
+`listen 443 ssl http2;` pour un nginx antérieur à 1.25.1 (Debian 12,
+Ubuntu 22.04 et 24.04). `apps/api/src/common/infra-prod.test.ts` y veille.
 
 ## Livrer une nouvelle version
 

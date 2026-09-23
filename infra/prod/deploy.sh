@@ -2,8 +2,14 @@
 #
 # Déploiement du panel sur un serveur Linux (systemd, nginx, PostgreSQL).
 #
-# `panel.example.fr` est un nom d'exemple : le remplacer ici (DOMAIN) et dans
-# panel.conf (server_name, journaux, certificat) avant le premier passage.
+# Le domaine se donne par `GD_DOMAIN=panel.mondomaine.fr`. Aux passages
+# suivants, il est relu dans `PANEL_ORIGIN` du fichier api.env déjà écrit :
+# une livraison n'a pas à le redemander. panel.conf est installé avec ce
+# domaine à la place de `panel.example.fr`.
+#
+# Pour une première installation, `installer.sh` fait tout le chemin — paquets,
+# certificat, premier administrateur — et appelle ce script. Voir
+# docs/installation.md.
 #
 # Ce script s'exécute **sur le serveur**, en root. Il est idempotent : on peut
 # le relancer à chaque livraison. Il ne crée un secret que s'il n'existe pas
@@ -22,9 +28,21 @@ SRC=${1:-$APP}
 
 WEB_PORT=3210
 API_PORT=3211
-DOMAIN=panel.example.fr
+EXEMPLE=panel.example.fr
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
+
+# Le domaine : donné explicitement, sinon celui de l'installation existante.
+# L'ancienne constante à éditer dans ce fichier était perdue au premier
+# `rsync`, qui ramenait la version du dépôt.
+DOMAIN=${GD_DOMAIN:-}
+if [ -z "$DOMAIN" ] && [ -f "$ENVDIR/api.env" ]; then
+  DOMAIN=$(sed -n 's#^PANEL_ORIGIN=https://##p' "$ENVDIR/api.env" | head -n 1)
+fi
+if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "$EXEMPLE" ]; then
+  echo "Domaine inconnu. Relancer avec : GD_DOMAIN=panel.mondomaine.fr bash $0" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 say "Utilisateur et arborescence"
@@ -156,9 +174,30 @@ systemctl restart gamedashboard-web.service
 # ---------------------------------------------------------------------------
 say "nginx"
 # ---------------------------------------------------------------------------
+# Réglages TLS inclus par le vhost. Posés seulement s'ils manquent : sur une
+# machine partagée, d'autres vhosts incluent peut-être déjà ce fichier.
+if [ ! -f /etc/nginx/snippets/tls/tls-intermediate.conf ]; then
+  install -d -m 755 /etc/nginx/snippets/tls
+  install -m 644 "$APP/infra/prod/tls-intermediate.conf" /etc/nginx/snippets/tls/
+fi
+
 # Le fichier du dépôt s'appelle panel.conf ; il est installé sous le nom du
-# domaine. Le chercher sous ce nom dans le dépôt faisait échouer l'étape.
-install -m 644 "$APP/infra/prod/panel.conf" "/etc/nginx/sites-available/$DOMAIN.conf"
+# domaine. Le chercher sous ce nom dans le dépôt faisait échouer l'étape. Le
+# nom d'exemple y est remplacé par le domaine réel, partout où il figure :
+# server_name, journaux, chemin du certificat.
+#
+# `http2 on;` n'existe que depuis nginx 1.25.1. Debian 12 et Ubuntu 24.04
+# livrent une version antérieure, qui refuse la directive : on y revient
+# alors à l'ancienne écriture, `listen 443 ssl http2;`, que ces versions
+# comprennent et que les suivantes acceptent encore.
+VHOST=$(sed "s/$(printf '%s' "$EXEMPLE" | sed 's/\./\\./g')/$DOMAIN/g" "$APP/infra/prod/panel.conf")
+NGINX_VERSION=$(nginx -v 2>&1 | sed -n 's#.*nginx/\([0-9.]*\).*#\1#p')
+if [ "$(printf '%s\n' 1.25.1 "$NGINX_VERSION" | sort -V | head -n 1)" != 1.25.1 ]; then
+  VHOST=$(printf '%s\n' "$VHOST" | sed -e '/^[[:space:]]*http2 on;/d' \
+    -e 's/^\([[:space:]]*listen .*443 ssl\);/\1 http2;/')
+fi
+printf '%s\n' "$VHOST" > "/etc/nginx/sites-available/$DOMAIN.conf"
+chmod 644 "/etc/nginx/sites-available/$DOMAIN.conf"
 ln -sfn "/etc/nginx/sites-available/$DOMAIN.conf" "/etc/nginx/sites-enabled/$DOMAIN.conf"
 # `nginx -t` avant tout rechargement : si la machine sert d'autres sites, une
 # configuration fautive les emporterait tous.

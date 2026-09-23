@@ -61,3 +61,4 @@ Fait, avec tests de non-régression :
 **La V1 est terminée.** GitHub Actions est suspendu (facture impayée) : les vérifications se font en local — `pnpm lint && pnpm typecheck && DATABASE_URL=… pnpm test && pnpm db:check && pnpm build`, puis `pnpm e2e`.
 
 - **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).
+- **Installation guidée** : `infra/prod/installer.sh` (panel) et `installer-wings.sh` (machine de jeu), guide pas à pas `docs/installation.md`. Le vhost démarre sur une machine neuve (map `$gd_connection`, `tls-intermediate.conf` livré, `http2` adapté à nginx < 1.25.1) — `infra-prod.test.ts`.
