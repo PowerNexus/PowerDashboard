@@ -47,6 +47,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
     group: "Serveurs",
   },
   {
+    method: "GET",
+    path: "/servers/{server}/metrics?range={plage}",
+    summary:
+      "Historique agrégé CPU, mémoire, disque, réseau et joueurs sur 1h, 24h, 7d ou 30d. Un pas sans mesure vaut null, jamais zéro.",
+    scope: "console.read",
+    group: "Serveurs",
+  },
+  {
     method: "POST",
     path: "/servers/{server}/power",
     summary: "Envoyer un signal start, stop, restart ou kill.",

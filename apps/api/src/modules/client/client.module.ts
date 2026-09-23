@@ -29,6 +29,8 @@ import { SchedulesService } from "./schedules.service";
 import { ServerAccessService } from "./server-access.service";
 import { ServerFeaturesController } from "./server-features.controller";
 import { ServerInvitesService } from "./server-invites.service";
+import { ServerMetricsController } from "./server-metrics.controller";
+import { ServerMetricsService } from "./server-metrics.service";
 import { ServerProvisioningService } from "./server-provisioning.service";
 import { ServerResizeService } from "./server-resize.service";
 import { ServerRuntimeController } from "./server-runtime.controller";
@@ -57,6 +59,8 @@ import { SubusersService } from "./subusers.service";
     ClientController,
     ServerRuntimeController,
     ServerFeaturesController,
+    // L'historique des mesures : relu en base, jamais demandé au daemon.
+    ServerMetricsController,
     AccountController,
     NotificationsController,
     // Le bout du lien d'invitation. Sans garde de serveur, puisqu'à cet instant
@@ -69,6 +73,7 @@ import { SubusersService } from "./subusers.service";
     HostbillService,
     ClientNodesService,
     ServerAccessService,
+    ServerMetricsService,
     // L'assemblage des envois reprenables. Il vit côté panel parce que Wings,
     // non modifié, ne sait pas compléter un fichier déjà commencé.
     FileUploadService,

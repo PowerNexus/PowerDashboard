@@ -308,6 +308,20 @@ export async function apiSendFor<T>(
   return (await response.json()) as T;
 }
 
+/**
+ * Une lecture **d'appoint**, dont le refus reste local.
+ *
+ * `apiFetch` renvoie vers la connexion sur un 403 : juste pour une page
+ * entière, faux pour un bloc à l'intérieur d'une page. Un sous-utilisateur sans
+ * `console.read` qui ouvre la console serait déconnecté de fait par le seul
+ * graphe d'historique, alors qu'il lui suffit de ne pas le voir. Ici, le refus
+ * remonte en `ApiError` avec le message de l'API, et l'écran en décide.
+ */
+export async function apiReadFor<T>(path: string): Promise<T> {
+  const response = await apiCall(path, undefined, "GET");
+  return (await response.json()) as T;
+}
+
 async function apiCall(path: string, body: unknown, method: string): Promise<Response> {
   const store = await cookies();
   const session = store.get(SESSION_COOKIE)?.value;
