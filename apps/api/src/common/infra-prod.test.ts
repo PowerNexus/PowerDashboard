@@ -362,7 +362,7 @@ describe("scan ZAP de la CI", () => {
   it("ne confond pas un Docker absent avec une alerte", () => {
     const controle = script.indexOf("docker info >/dev/null 2>&1 ||");
     expect(controle).toBeGreaterThan(0);
-    expect(controle).toBeLessThan(script.indexOf("docker run"));
+    expect(controle).toBeLessThan(script.indexOf("docker run --rm"));
     expect(script.slice(controle, script.indexOf("\n", controle))).toContain("exit 3");
   });
 
