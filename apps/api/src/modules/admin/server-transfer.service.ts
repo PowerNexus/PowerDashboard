@@ -8,7 +8,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { NotificationsService } from "../notifications/notifications.service";
 import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
@@ -45,6 +45,11 @@ import { WingsTokenService } from "../wings/wings-token.service";
  * personne puisse le débloquer autrement qu'en base.
  */
 export const TRANSFER_STALE_MS = 2 * 60 * 60 * 1000;
+
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/** Motif conservé pour un transfert clos faute de nouvelles. */
+export const STALE_REASON = "Aucun compte rendu des daemons en deux heures : transfert abandonné.";
 
 export interface TransferView {
   id: string;
@@ -223,7 +228,18 @@ export class ServerTransferService {
       return;
     }
 
-    await this.db.transaction(async (tx) => {
+    const switched = await this.db.transaction(async (tx) => {
+      /*
+       * La ligne du transfert est verrouillée, et relue « en cours ».
+       *
+       * Le balayage des transferts perdus peut clore celui-ci à l'instant où
+       * l'accusé de réception arrive. Sans verrou, les deux passeraient : la
+       * bascule rattacherait le serveur au port d'arrivée, puis le retour en
+       * arrière rendrait ce même port — un serveur sans adresse. Le premier
+       * arrivé gagne, le second ne trouve plus rien à faire.
+       */
+      if (!(await lockRunning(tx, transfer.id))) return false;
+
       const [arrival] = await tx
         .select({ id: allocations.id })
         .from(allocations)
@@ -259,7 +275,14 @@ export class ServerTransferService {
         .update(serverTransfers)
         .set({ state: "completed", updatedAt: new Date().toISOString() })
         .where(eq(serverTransfers.id, transfer.id));
+
+      return true;
     });
+
+    if (!switched) {
+      this.logger.warn(`Transfert confirmé pour ${serverId}, mais il venait d'être clos.`);
+      return;
+    }
 
     /*
      * La copie de départ est retirée, et **après** la bascule.
@@ -332,7 +355,7 @@ export class ServerTransferService {
       return;
     }
 
-    await this.rollback(transfer.id, serverId, reason);
+    if (!(await this.rollback(transfer.id, serverId, reason))) return;
 
     await this.notifications.notifyServerOwner(serverId, {
       type: "server.transfer_failed",
@@ -355,22 +378,18 @@ export class ServerTransferService {
    * Appelé aussi bien quand le daemon refuse l'ordre que lorsqu'il rapporte un
    * échec : dans les deux cas, ce qu'il faut défaire est exactement le même.
    */
-  private async rollback(transferId: string, serverId: string, reason: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const [transfer] = await tx
-        .select({ toNodeId: serverTransfers.toNodeId })
-        .from(serverTransfers)
-        .where(eq(serverTransfers.id, transferId))
-        .limit(1);
+  private async rollback(transferId: string, serverId: string, reason: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      // Même verrou que la bascule : un transfert déjà conclu dans un sens ne
+      // se conclut pas dans l'autre. Rendre le port d'un serveur qui vient
+      // d'arriver lui retirerait sa seule adresse.
+      const transfer = await lockRunning(tx, transferId);
+      if (!transfer) return false;
 
-      if (transfer) {
-        await tx
-          .update(allocations)
-          .set({ serverId: null, updatedAt: new Date().toISOString() })
-          .where(
-            and(eq(allocations.serverId, serverId), eq(allocations.nodeId, transfer.toNodeId)),
-          );
-      }
+      await tx
+        .update(allocations)
+        .set({ serverId: null, updatedAt: new Date().toISOString() })
+        .where(and(eq(allocations.serverId, serverId), eq(allocations.nodeId, transfer.toNodeId)));
 
       await tx
         .update(serverTransfers)
@@ -392,7 +411,42 @@ export class ServerTransferService {
         .update(servers)
         .set({ state: null, updatedAt: new Date().toISOString() })
         .where(and(eq(servers.id, serverId), eq(servers.state, "transferring")));
+
+      return true;
     });
+  }
+
+  /**
+   * Clôt les transferts dont aucun daemon n'a rapporté l'issue.
+   *
+   * **Ce qui manquait.** Un daemon mort en pleine copie, un compte rendu
+   * perdu : rien ne concluait le transfert. `TRANSFER_STALE_MS` retirait au
+   * node d'arrivée le droit de lire la configuration, mais le serveur restait
+   * en « transfert » pour toujours — toute action refusée, au client comme à
+   * l'administration, et la seule sortie était une requête écrite à la main
+   * en base.
+   *
+   * Passé le délai, le transfert est traité comme un échec rapporté : même
+   * retour en arrière, même notification, même webhook. C'est sans risque pour
+   * les fichiers — la base n'a jamais cessé de désigner le node de départ, qui
+   * garde sa copie jusqu'à la bascule. Et c'est cohérent avec le délai : une
+   * réussite annoncée plus tard serait de toute façon refusée
+   * (`isTransferTarget`).
+   *
+   * Rend le nombre de transferts clos.
+   */
+  async expireStale(now: Date = new Date()): Promise<number> {
+    const threshold = new Date(now.getTime() - TRANSFER_STALE_MS).toISOString();
+    const stale = await this.db
+      .select({ serverId: serverTransfers.serverId })
+      .from(serverTransfers)
+      .where(and(eq(serverTransfers.state, "running"), lt(serverTransfers.createdAt, threshold)));
+
+    for (const { serverId } of stale) {
+      this.logger.warn(`Transfert de ${serverId} sans compte rendu depuis deux heures : clos.`);
+      await this.fail(serverId, STALE_REASON);
+    }
+    return stale.length;
   }
 
   /**
@@ -451,6 +505,25 @@ export class ServerTransferService {
 
     return row !== undefined;
   }
+}
+
+/**
+ * Verrouille la ligne d'un transfert **encore en cours**, et la rend.
+ *
+ * `null` si le transfert n'est plus en cours : quelqu'un d'autre l'a conclu
+ * entre la lecture et la transaction.
+ */
+async function lockRunning(
+  tx: Transaction,
+  transferId: string,
+): Promise<{ toNodeId: string } | null> {
+  const [row] = await tx
+    .select({ toNodeId: serverTransfers.toNodeId })
+    .from(serverTransfers)
+    .where(and(eq(serverTransfers.id, transferId), eq(serverTransfers.state, "running")))
+    .limit(1)
+    .for("update");
+  return row ?? null;
 }
 
 function describe(error: unknown): string {
