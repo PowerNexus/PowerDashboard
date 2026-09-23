@@ -7,6 +7,7 @@ export * from "./application-api";
 export * from "./branding";
 export * from "./client-webhooks";
 export * from "./cron";
+export * from "./egg-editor";
 export * from "./egg-rules";
 export * from "./engine";
 export * from "./hostbill";

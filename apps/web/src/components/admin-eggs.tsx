@@ -3,6 +3,7 @@
 import {
   AlertBanner,
   Badge,
+  Button,
   type ColumnDef,
   DataTable,
   EmptyState,
@@ -13,12 +14,14 @@ import {
   SelectMenu,
   Switch,
 } from "@gamedashboard/ui";
-import { Egg, Search } from "lucide-react";
+import { Egg, Pencil, Search } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState, useTransition } from "react";
 import type { AdminEgg, EggCatalogueEntry, EggCatalogueSource } from "@/server/api/admin";
 import { setEggEnabled } from "@/server/api/admin-actions";
+import { AdminEggExportButton } from "./admin-egg-export-button";
 import { AdminEggImport } from "./admin-egg-import";
 
 export function AdminEggs({
@@ -129,6 +132,22 @@ export function AdminEggs({
             aria-label={t("enableLabel", { name: row.original.name })}
             onCheckedChange={(next) => run(() => setEggEnabled(row.original.id, next))}
           />
+        ),
+      },
+      {
+        id: "actions",
+        header: t("columnActions"),
+        cell: ({ row }) => (
+          // Des actions nommées plutôt que des icônes seules : « Modifier » et
+          // « Exporter » se lisent sans survoler quoi que ce soit.
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button asChild size="sm" variant="secondary">
+              <Link href={`/admin/eggs/${row.original.id}`}>
+                <Pencil /> {t("edit")}
+              </Link>
+            </Button>
+            <AdminEggExportButton eggId={row.original.id} size="sm" variant="ghost" />
+          </div>
         ),
       },
     ],

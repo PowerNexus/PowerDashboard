@@ -249,6 +249,7 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Propriétaire d'un serveur changé",
   },
   "admin.smtp_tested": { category: "settings", label: "Envoi de courrier éprouvé" },
+  "admin.egg_updated": { category: "settings", label: "Egg modifié" },
   "node.configuration_read": { category: "settings", label: "Configuration de node consultée" },
   "application.domain_certificate_reported": {
     category: "network",

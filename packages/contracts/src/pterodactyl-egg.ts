@@ -202,3 +202,104 @@ function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
 }
+
+/**
+ * Export d'un egg au format PTDL_v2, tel que Pterodactyl le produit.
+ *
+ * Le fichier doit pouvoir **revenir** : réimporté ici, il redonne le même egg
+ * (`parsePterodactylEgg(exportPterodactylEgg(egg))` égale `egg`) ; importé
+ * dans un Pterodactyl, il y est lu comme l'un des siens. Les deux lecteurs
+ * n'attendent pas tout à fait la même chose, et c'est Pterodactyl qui dicte
+ * la forme :
+ *
+ * - les blocs `config.*` sont des **chaînes JSON**, pas des objets. Le lecteur
+ *   d'ici accepte les deux, celui de Pterodactyl n'accepte que la chaîne ;
+ * - `field_type` est posé sur chaque variable : PTDL_v2 l'a introduit, et un
+ *   Pterodactyl récent l'attend.
+ */
+export interface PterodactylEggExport {
+  _comment: string;
+  meta: { version: "PTDL_v2"; update_url: null };
+  exported_at: string;
+  name: string;
+  author: string;
+  description: string | null;
+  features: string[];
+  docker_images: Record<string, string>;
+  file_denylist: string[];
+  startup: string;
+  config: { files: string; startup: string; logs: string; stop: string | null };
+  scripts: { installation: { script: string; container: string; entrypoint: string } };
+  variables: {
+    name: string;
+    description: string;
+    env_variable: string;
+    default_value: string;
+    user_viewable: boolean;
+    user_editable: boolean;
+    rules: string;
+    field_type: "text";
+  }[];
+}
+
+/**
+ * `exportedAt` est un paramètre plutôt qu'une lecture de l'horloge : c'est la
+ * seule valeur qui change d'un export à l'autre, et un test qui compare deux
+ * exports ne doit pas dépendre de la seconde où il tourne.
+ */
+export function exportPterodactylEgg(
+  egg: ParsedEgg,
+  exportedAt: Date = new Date(),
+): PterodactylEggExport {
+  return {
+    _comment: "Export GameDashboard au format Pterodactyl PTDL_v2.",
+    meta: { version: "PTDL_v2", update_url: null },
+    // Pterodactyl écrit l'instant avec son décalage (`+00:00`), pas le `Z`
+    // d'ISO : on s'y conforme, certains outils tiers comparent la chaîne.
+    exported_at: exportedAt.toISOString().replace(/\.\d{3}Z$/, "+00:00"),
+    name: egg.name,
+    // Chaîne vide et non `null` : Pterodactyl exige le champ, et notre lecteur
+    // ramène la chaîne vide à `null` — l'aller-retour reste exact.
+    author: egg.author ?? "",
+    description: egg.description,
+    features: [...egg.features],
+    docker_images: { ...egg.dockerImages },
+    file_denylist: [...egg.fileDenylist],
+    startup: egg.startup,
+    config: {
+      files: configBlock(egg.configFiles),
+      startup: configBlock(egg.configStartup),
+      logs: configBlock(egg.configLogs),
+      stop: egg.configStop,
+    },
+    scripts: {
+      installation: {
+        script: egg.installScript,
+        container: egg.installContainer,
+        entrypoint: egg.installEntrypoint,
+      },
+    },
+    variables: egg.variables.map((variable) => ({
+      name: variable.name,
+      // Même raison que pour l'auteur : chaîne vide exportée, `null` relu.
+      description: variable.description ?? "",
+      env_variable: variable.envVariable,
+      default_value: variable.defaultValue,
+      user_viewable: variable.userViewable,
+      user_editable: variable.userEditable,
+      rules: variable.rules,
+      field_type: "text",
+    })),
+  };
+}
+
+/**
+ * Un bloc de configuration, sérialisé comme Pterodactyl l'attend.
+ *
+ * Indenté sur quatre espaces, comme ses propres exports : un bloc de trois
+ * kilo-octets sur une seule ligne ne se relit pas. `null` devient `{}` — le
+ * lecteur ferait de même, et Pterodactyl refuse une chaîne vide.
+ */
+function configBlock(value: unknown): string {
+  return JSON.stringify(value ?? {}, null, 4);
+}

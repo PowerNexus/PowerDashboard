@@ -146,3 +146,89 @@ function compile(argument: string): RegExp | null {
     return null;
   }
 }
+
+/* --- Écriture des règles ---------------------------------------------------- */
+
+/**
+ * Règles qu'on accepte d'**écrire** depuis l'éditeur d'egg.
+ *
+ * Exactement celles que `check()` applique, plus les quatre qu'il sait sans
+ * effet (`required`, `nullable`, `string`, `sometimes`). La lecture reste
+ * tolérante — une règle inconnue d'un egg importé est ignorée —, mais
+ * l'écriture ne l'est pas : un administrateur qui tape `requird` ou `digits:5`
+ * croirait protéger la variable, alors que le panel laisserait tout passer.
+ * Mieux vaut le lui dire au moment où il la tape.
+ */
+export const WRITABLE_EGG_RULES = [
+  "required",
+  "nullable",
+  "string",
+  "sometimes",
+  "numeric",
+  "integer",
+  "boolean",
+  "alpha_dash",
+  "alpha_num",
+  "in",
+  "max",
+  "min",
+  "between",
+  "regex",
+  "url",
+  "ip",
+  "ipv4",
+] as const;
+
+/** Ce qu'on reproche à une chaîne de règles, sous une forme traduisible. */
+export type RulesProblem =
+  | { code: "rulesEmpty" }
+  | { code: "ruleUnknown"; rule: string }
+  | { code: "ruleNeedsNumber"; rule: string }
+  | { code: "ruleNeedsTwoNumbers"; rule: string }
+  | { code: "ruleInEmpty" }
+  | { code: "ruleRegexInvalid" };
+
+/**
+ * Vérifie une chaîne de règles **avant** de l'enregistrer.
+ *
+ * Le découpage est celui de `validateVariableValue` — même fonction, pas une
+ * copie : une règle que l'éditeur accepte doit être lue de la même façon par
+ * ce qui l'appliquera ensuite aux serveurs. Rend le premier défaut, ou `null`.
+ */
+export function rulesProblem(rules: string): RulesProblem | null {
+  const list = splitRules(rules);
+  if (list.length === 0) return { code: "rulesEmpty" };
+
+  for (const rule of list) {
+    if (!(WRITABLE_EGG_RULES as readonly string[]).includes(rule.name)) {
+      return { code: "ruleUnknown", rule: rule.name || "|" };
+    }
+    if ((rule.name === "max" || rule.name === "min") && !isNumber(rule.argument)) {
+      return { code: "ruleNeedsNumber", rule: rule.name };
+    }
+    if (rule.name === "between") {
+      const bounds = rule.argument.split(",");
+      if (bounds.length !== 2 || !bounds.every((bound) => isNumber(bound))) {
+        return { code: "ruleNeedsTwoNumbers", rule: rule.name };
+      }
+    }
+    if (rule.name === "in" && rule.argument.split(",").every((value) => value.trim() === "")) {
+      return { code: "ruleInEmpty" };
+    }
+    // `compile` rend `null` sur une expression illisible, et `check` laisse
+    // alors tout passer : c'est exactement ce qu'il faut refuser à l'écriture.
+    if (rule.name === "regex" && compile(rule.argument) === null) {
+      return { code: "ruleRegexInvalid" };
+    }
+  }
+  return null;
+}
+
+/** La règle `required` figure-t-elle dans la chaîne ? */
+export function rulesRequireValue(rules: string): boolean {
+  return splitRules(rules).some((rule) => rule.name === "required");
+}
+
+function isNumber(value: string): boolean {
+  return value.trim() !== "" && Number.isFinite(Number(value.trim()));
+}
