@@ -36,6 +36,14 @@ import { PlatformSettingsService } from "./platform-settings.service";
 /** Délai d'attente pour joindre le daemon. Court : on est dans une requête admin. */
 const DAEMON_TIMEOUT_MS = 8_000;
 
+/**
+ * Délai de chacun des deux allers-retours d'un changement de liaison.
+ *
+ * Deux fois quatre secondes tiennent sous les dix secondes après lesquelles
+ * l'interface abandonne une action (voir `rebind`).
+ */
+const REBIND_STEP_MS = 4_000;
+
 export interface NodeConfigurationFile {
   yaml: string;
   tokenId: string;
@@ -177,19 +185,27 @@ export class NodeConfigurationService {
    * machine : une autre ne saurait pas y répondre), plus une bannière SSH au
    * nouveau port SFTP quand il change.
    *
-   * 1. Le daemon répond-il déjà à la nouvelle liaison ? (Wings redémarré après
-   *    une première demande, ou simple changement de nom DNS.) → enregistré.
-   * 2. Sinon, la nouvelle configuration lui est poussée **à l'ancienne
-   *    adresse**, là où il écoute encore. Échec → `refused`, rien n'est écrit,
-   *    et le fichier à déposer à la main est rendu.
-   * 3. Puis on revérifie. Réussite → enregistré. Échec → `restart_required` :
-   *    le fichier est écrit sur la machine, Wings attend son redémarrage.
+   * 1. La nouvelle configuration est poussée **à l'ancienne adresse**, là où
+   *    le daemon écoute encore.
+   * 2. Puis on vérifie à la nouvelle. Réussite → enregistré (`applied`) — que
+   *    la poussée ait abouti ou non : un daemon déjà redémarré sur la nouvelle
+   *    adresse ne répond plus à l'ancienne, et c'est justement le cas où l'on
+   *    revient valider. Échec après une poussée réussie → `restart_required`
+   *    : le fichier est écrit sur la machine, Wings attend son redémarrage.
+   *    Échec après une poussée ratée → `refused`, avec le fichier à déposer.
+   *
+   * **Deux allers-retours, pas trois, et courts.** L'interface abandonne une
+   * action au bout de dix secondes (`API_TIMEOUT_MS`) ; une vérification
+   * préalable, une poussée et une revérification de huit secondes chacune
+   * dépassaient ce délai sur une machine injoignable, et l'écran annonçait
+   * une panne de l'API au lieu du refus explicite. La vérification HTTP et la
+   * bannière SSH partent en parallèle pour la même raison.
    *
    * Entre le redémarrage de Wings et la nouvelle demande, le panel ne joint
    * plus le daemon — mais le daemon, lui, joint toujours le panel (jeton et
    * adresse du panel inchangés), et ses serveurs tournent. Redemander la même
-   * modification referme la fenêtre : l'étape 1 la constate et l'enregistre.
-   * Voir `docs/runbooks/modifier-liaison-node.md`.
+   * modification referme la fenêtre : la vérification la constate et
+   * l'enregistre. Voir `docs/runbooks/modifier-liaison-node.md`.
    */
   async rebind(nodeId: string, target: NodeBindingInput): Promise<RebindOutcome> {
     const node = await this.node(nodeId);
@@ -200,15 +216,14 @@ export class NodeConfigurationService {
     if (changed.length === 0) return { status: "unchanged", changed, failure: null, file: null };
 
     const token = decryptSecret(node.tokenEnc);
-    const proven = () => this.answersAt(target, token, changed.includes("daemonSftpPort"));
+    const configuration = await this.build({ ...node, ...target }, node.tokenId, token);
+    const pushed = await this.push(baseUrlOf(node), token, configuration, REBIND_STEP_MS);
 
-    if (await proven()) {
+    if (await this.answersAt(target, token, changed.includes("daemonSftpPort"))) {
       await this.saveBinding(node, target, changed);
       return { status: "applied", changed, failure: null, file: null };
     }
 
-    const configuration = await this.build({ ...node, ...target }, node.tokenId, token);
-    const pushed = await this.push(baseUrlOf(node), token, configuration);
     if (pushed !== null) {
       return {
         status: "refused",
@@ -217,12 +232,6 @@ export class NodeConfigurationService {
         file: await this.toFile(configuration),
       };
     }
-
-    if (await proven()) {
-      await this.saveBinding(node, target, changed);
-      return { status: "applied", changed, failure: null, file: null };
-    }
-
     return { status: "restart_required", changed, failure: RESTART_REQUIRED_MESSAGE, file: null };
   }
 
@@ -232,8 +241,11 @@ export class NodeConfigurationService {
     token: string,
     checkSftp: boolean,
   ): Promise<boolean> {
-    if (!(await this.reachable(baseUrlOf(target), token))) return false;
-    return checkSftp ? sshBannerAt(target.fqdn, target.daemonSftpPort) : true;
+    const [http, ssh] = await Promise.all([
+      this.reachable(baseUrlOf(target), token, REBIND_STEP_MS),
+      checkSftp ? sshBannerAt(target.fqdn, target.daemonSftpPort, REBIND_STEP_MS) : true,
+    ]);
+    return http && ssh;
   }
 
   private async saveBinding(
@@ -267,6 +279,7 @@ export class NodeConfigurationService {
     baseUrl: string,
     currentToken: string,
     configuration: WingsNodeConfiguration,
+    timeoutMs: number = DAEMON_TIMEOUT_MS,
   ): Promise<string | null> {
     try {
       const response = await fetch(`${baseUrl}/api/update`, {
@@ -277,7 +290,7 @@ export class NodeConfigurationService {
           Accept: "application/json",
         },
         body: JSON.stringify(configuration),
-        signal: AbortSignal.timeout(DAEMON_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (!response.ok) return `Le daemon a refusé la mise à jour (HTTP ${response.status}).`;
@@ -301,11 +314,15 @@ export class NodeConfigurationService {
   }
 
   /** Le daemon répond-il au jeton donné ? Seule preuve qu'il l'a bien adopté. */
-  private async reachable(baseUrl: string, token: string): Promise<boolean> {
+  private async reachable(
+    baseUrl: string,
+    token: string,
+    timeoutMs: number = DAEMON_TIMEOUT_MS,
+  ): Promise<boolean> {
     try {
       const response = await fetch(`${baseUrl}/api/system`, {
         headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-        signal: AbortSignal.timeout(DAEMON_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       return response.ok;
     } catch {

@@ -285,7 +285,6 @@ describe.skipIf(!HAS_DATABASE)("modification d'un node (intégration)", () => {
     it("n'enregistre pas un nouveau port tant que Wings n'a pas redémarré", async () => {
       const token = randomBytes(16).toString("hex");
       const wings = await fakeWings(token);
-      cleanups.push(wings.close);
       const nodeId = await nodeOn(wings, token);
       const next = await freePort();
 
@@ -304,6 +303,9 @@ describe.skipIf(!HAS_DATABASE)("modification d'un node (intégration)", () => {
 
       // « Redémarrage » : le daemon rouvre sur le nouveau port. La même demande
       // le constate, et l'enregistre.
+      // L'ancien daemon s'arrête avec le redémarrage : la poussée à l'ancienne
+      // adresse échoue, et c'est la vérification qui doit trancher.
+      await wings.close();
       const restarted = await fakeWings(token, { port: next });
       cleanups.push(restarted.close);
       const confirmed = await configuration.rebind(nodeId, {
@@ -356,7 +358,7 @@ describe.skipIf(!HAS_DATABASE)("modification d'un node (intégration)", () => {
 
     it("enregistre un changement de nom que le daemon honore déjà", async () => {
       // Le nouveau nom désigne la même machine : le daemon y répond avec son
-      // jeton, il n'y a rien à lui pousser.
+      // jeton dès la poussée faite, sans redémarrage.
       const token = randomBytes(16).toString("hex");
       const wings = await fakeWings(token);
       cleanups.push(wings.close);
@@ -369,7 +371,6 @@ describe.skipIf(!HAS_DATABASE)("modification d'un node (intégration)", () => {
         daemonSftpPort: 2022,
       });
       expect(outcome).toMatchObject({ status: "applied", changed: ["fqdn"] });
-      expect(wings.updates).toHaveLength(0);
       expect((await stored(nodeId))?.fqdn).toBe("localhost");
     });
 
@@ -446,6 +447,20 @@ describe.skipIf(!HAS_DATABASE)("modification d'un node (intégration)", () => {
         }),
       ).rejects.toThrow(/nom de domaine/);
       expect(wings.updates).toHaveLength(0);
+    });
+  });
+
+  it("rend capacité et allocation sans que l'une écrase l'autre", async () => {
+    const nodeId = await seedNode(db, { locationId });
+    await seedServer(db, { nodeId, ownerId: await seedUser(db) });
+
+    const detail = await infrastructure.nodeDetail(nodeId);
+    expect(detail).toMatchObject({
+      memoryMb: 65_536,
+      diskMb: 1_048_576,
+      memoryAllocatedMb: 2048,
+      diskAllocatedMb: 10_240,
+      servers: 1,
     });
   });
 

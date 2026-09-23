@@ -379,7 +379,15 @@ export class InfrastructureService {
       .limit(1);
     if (!row) throw new NotFoundException("Node introuvable.");
 
-    return { ...row, ...(await this.allocatedOn(this.db, nodeId)) };
+    // Renommés : `memoryMb` est la capacité de la machine, et l'allocation
+    // posée par-dessus sous le même nom l'effaçait.
+    const allocated = await this.allocatedOn(this.db, nodeId);
+    return {
+      ...row,
+      memoryAllocatedMb: allocated.memoryMb,
+      diskAllocatedMb: allocated.diskMb,
+      servers: allocated.servers,
+    };
   }
 
   /**

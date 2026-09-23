@@ -60,19 +60,32 @@ export function bindingChanges(
   return NODE_BINDING_FIELDS.filter((field) => current[field] !== next[field]);
 }
 
+/** Ce qui rend une liaison inacceptable, sous forme de code : l'écran traduit. */
+export type BindingProblemCode = "fqdn_needs_domain" | "ports_collide";
+
 /**
  * Un nom de domaine est exigé en HTTPS : une adresse IP ne porte pas de
  * certificat valide, et le daemon paraîtrait injoignable sans raison visible.
  * Même règle qu'à la création (`InfrastructureService.createNode`).
  */
-export function bindingProblem(binding: NodeBindingInput): string | null {
+export function bindingProblemCode(binding: NodeBindingInput): BindingProblemCode | null {
   if (binding.scheme === "https" && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(binding.fqdn)) {
-    return "Un nom de domaine est attendu en HTTPS : une adresse IP ne peut pas porter de certificat valide.";
+    return "fqdn_needs_domain";
   }
-  if (binding.daemonPort === binding.daemonSftpPort) {
-    return "Le port du daemon et le port SFTP doivent être différents : un seul programme peut écouter sur un port.";
-  }
+  if (binding.daemonPort === binding.daemonSftpPort) return "ports_collide";
   return null;
+}
+
+/** Le même refus, en phrase, pour l'API. */
+export function bindingProblem(binding: NodeBindingInput): string | null {
+  switch (bindingProblemCode(binding)) {
+    case "fqdn_needs_domain":
+      return "Un nom de domaine est attendu en HTTPS : une adresse IP ne peut pas porter de certificat valide.";
+    case "ports_collide":
+      return "Le port du daemon et le port SFTP doivent être différents : un seul programme peut écouter sur un port.";
+    default:
+      return null;
+  }
 }
 
 /**

@@ -75,7 +75,17 @@ export interface AdminServer {
 export interface AdminUser {
   id: string;
   name: string;
+  /** Les deux moitiés du nom, que la fiche de modification édite séparément. */
+  nameFirst: string;
+  nameLast: string;
   email: string;
+  /** `null` tant que l'adresse n'est pas confirmée ; une adresse changée y revient. */
+  emailVerifiedAt: string | null;
+  locale: string;
+  /** Compte suspendu depuis cet instant, ou `null` pour un compte actif. */
+  suspendedAt: string | null;
+  /** Motif interne, montré au support seulement. */
+  suspensionReason: string | null;
   role: "admin" | "support" | "reseller" | "user";
   is2faEnabled: boolean;
   /**

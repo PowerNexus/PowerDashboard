@@ -24,14 +24,20 @@ que le daemon a prouvé** : une réponse à `GET /api/system` authentifiée par 
 jeton du node *à la nouvelle adresse*, plus une bannière SSH au nouveau port
 SFTP quand il change.
 
-1. Le daemon répond-il déjà à la nouvelle adresse ? → enregistré (`applied`).
-2. Sinon, la nouvelle configuration lui est poussée **à l'ancienne adresse**.
-   Échec → `refused` : rien n'est écrit, le `config.yml` à déposer à la main
-   est rendu (il porte le jeton en clair ; sa sortie est consignée comme
-   `node.configuration_read`).
-3. Revérification. Réussite → `applied`. Échec → `restart_required` : le
-   fichier est écrit sur la machine, Wings attend son redémarrage. Rien n'est
-   changé dans le panel.
+1. La nouvelle configuration est **poussée** au daemon, à l'ancienne adresse
+   (`POST /api/update`, authentifié par le jeton du node).
+2. Le panel **vérifie** à la nouvelle adresse :
+   - le daemon y répond → enregistré (`applied`), que la poussée ait abouti
+     ou non (un daemon déjà redémarré n'écoute plus à l'ancienne adresse) ;
+   - il n'y répond pas, mais la poussée a abouti → `restart_required` : le
+     fichier est écrit sur la machine, Wings attend son redémarrage. Rien
+     n'est changé dans le panel ;
+   - il n'y répond pas et la poussée a échoué → `refused` : rien n'est écrit,
+     et le `config.yml` à déposer à la main est rendu (il porte le jeton en
+     clair ; sa sortie est consignée comme `node.configuration_read`).
+
+Deux allers-retours de quatre secondes au plus : l'interface abandonne une
+action au bout de dix.
 
 Chaque issue est tracée : `node.binding_changed`,
 `node.binding_pending_restart`, `node.binding_refused`.
@@ -43,8 +49,8 @@ Chaque issue est tracée : `node.binding_changed`,
 2. **Lire l'issue** :
    - « Enregistré » : terminé (typiquement un simple changement de nom DNS).
    - « Wings doit redémarrer » : sur la machine, `systemctl restart wings`,
-     puis **valider à nouveau la même modification**. L'étape 1 constate que le
-     daemon écoute à la nouvelle adresse et l'enregistre.
+     puis **valider à nouveau la même modification**. La vérification constate
+     que le daemon écoute à la nouvelle adresse et l'enregistre.
    - « Refusé » : le daemon n'a pas été joint, ou refuse les mises à jour du
      panel (`ignore_panel_config_updates`). Télécharger le fichier proposé, le
      déposer à la place de `/etc/pterodactyl/config.yml`, redémarrer Wings,
@@ -62,8 +68,9 @@ Cas typique : une modification est restée en « Wings doit redémarrer », puis
 la machine a redémarré d'elle-même des jours plus tard. Wings écoute sur les
 nouveaux ports, le panel appelle les anciens.
 
-**Revalider la même modification** depuis la fiche du node. L'étape 1 la
-constate et l'enregistre : c'est précisément le cas qu'elle couvre. Ne jamais
+**Revalider la même modification** depuis la fiche du node. La vérification
+à la nouvelle adresse la constate et l'enregistre : c'est précisément le cas
+qu'elle couvre. Ne jamais
 corriger en écrivant l'adresse en base à la main.
 
 ## Éprouver

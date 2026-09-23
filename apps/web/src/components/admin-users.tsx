@@ -23,7 +23,19 @@ import {
   RowActions,
   SelectMenu,
 } from "@gamedashboard/ui";
-import { Eye, Gauge, KeyRound, Search, Trash2, UserCog, Users } from "lucide-react";
+import {
+  Ban,
+  Eye,
+  Gauge,
+  KeyRound,
+  Mail,
+  Pencil,
+  RotateCcw,
+  Search,
+  Trash2,
+  UserCog,
+  Users,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState, useTransition } from "react";
@@ -38,6 +50,7 @@ import {
 import type { ResellerQuotaReport } from "@/server/api/reseller";
 import { impersonate } from "@/server/api/session";
 import { AdminUserCreate } from "./admin-user-create";
+import { type AccountGesture, AccountGestureDialog } from "./admin-user-edit";
 
 /**
  * Un champ vide vaut « sans limite », pas zéro.
@@ -71,6 +84,7 @@ export function AdminUsers({ initial }: { initial: AdminUser[] }) {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("all");
   const [toDelete, setToDelete] = useState<AdminUser | null>(null);
+  const [gesture, setGesture] = useState<AccountGesture | null>(null);
   /**
    * Le revendeur dont on modifie l'enveloppe, et les trois champs en cours.
    *
@@ -169,8 +183,20 @@ export function AdminUsers({ initial }: { initial: AdminUser[] }) {
           <div className="flex items-center gap-3">
             <Avatar name={row.original.name} size="sm" />
             <div className="min-w-0">
-              <p className="truncate font-semibold text-fg">{row.original.name}</p>
-              <p className="truncate text-xs text-muted">{row.original.email}</p>
+              <p className="flex flex-wrap items-center gap-2 font-semibold text-fg">
+                <span className="truncate">{row.original.name}</span>
+                {/* La suspension se voit sur la ligne, motif au survol : c'est
+                    la première question du support devant ce compte. */}
+                {row.original.suspendedAt ? (
+                  <Badge variant="danger" title={row.original.suspensionReason ?? undefined}>
+                    {t("suspendedBadge")}
+                  </Badge>
+                ) : null}
+              </p>
+              <p className="truncate text-xs text-muted">
+                {row.original.email}
+                {row.original.emailVerifiedAt === null ? ` · ${t("emailUnverified")}` : null}
+              </p>
             </div>
           </div>
         ),
@@ -269,6 +295,31 @@ export function AdminUsers({ initial }: { initial: AdminUser[] }) {
         size: 60,
         cell: ({ row }) => (
           <RowActions>
+            <DropdownItem
+              icon={<Pencil />}
+              disabled={pending}
+              onSelect={() => setGesture({ kind: "edit", user: row.original })}
+            >
+              {t("editAccount")}
+            </DropdownItem>
+            {/* Un compte suspendu n'a que faire d'un nouveau mot de passe :
+                l'API refuserait, l'entrée est donc éteinte. */}
+            <DropdownItem
+              icon={<Mail />}
+              disabled={pending || row.original.suspendedAt !== null}
+              onSelect={() => setGesture({ kind: "reset", user: row.original })}
+            >
+              {t("sendPasswordReset")}
+            </DropdownItem>
+            <DropdownItem
+              icon={row.original.suspendedAt ? <RotateCcw /> : <Ban />}
+              disabled={pending}
+              destructive={row.original.suspendedAt === null}
+              onSelect={() => setGesture({ kind: "suspend", user: row.original })}
+            >
+              {row.original.suspendedAt ? t("reactivateAccount") : t("suspendAccount")}
+            </DropdownItem>
+            <DropdownSeparator />
             {/* Les rôles attribuables sont ceux que l'API accepte ; « owner »
                 n'en est pas, il n'existe qu'à l'installation. */}
             {(["user", "reseller", "support", "admin"] as const)
@@ -509,6 +560,21 @@ export function AdminUsers({ initial }: { initial: AdminUser[] }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {gesture ? (
+        <AccountGestureDialog
+          gesture={gesture}
+          onClose={() => setGesture(null)}
+          onDone={(result) => {
+            setError(result.error);
+            setNotice(result.notice);
+            if (!result.error) {
+              setGesture(null);
+              router.refresh();
+            }
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={toDelete !== null}
