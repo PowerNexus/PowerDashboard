@@ -534,7 +534,7 @@
     "tabApplication": "Clé application",
     "tabRealtime": "Temps réel",
     "applicationWarning": "Ces routes ignorent la notion de propriétaire. Une clé application compromise donne accès à l'ensemble des serveurs : restreignez-la toujours à une liste d'adresses IP.",
-    "realtimeHint": "La console et les graphiques passent par un websocket, pas par l'API REST. Demandez un jeton à <c>POST /servers/{server}/ws-token</c>, puis connectez-vous au gateway. Le jeton vaut cinq minutes et ne porte que les portées de la clé qui l'a demandé.",
+    "realtimeHint": "La console et les graphiques passent par un websocket, pas par l'API REST. Demandez un jeton à <c>POST /servers/{server}/websocket</c> : la réponse donne l'adresse du websocket, ouvert directement sur le daemon de la machine, et le jeton à y présenter. Le jeton vaut dix minutes et ne porte que les portées de la clé qui l'a demandé.",
     "columnRoute": "Route",
     "columnGroup": "Domaine",
     "columnScope": "Portée requise",

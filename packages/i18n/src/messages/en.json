@@ -534,7 +534,7 @@
     "tabApplication": "Application key",
     "tabRealtime": "Real time",
     "applicationWarning": "These routes ignore ownership. A compromised application key grants access to every server: always restrict it to a list of IP addresses.",
-    "realtimeHint": "The console and the graphs go through a websocket, not the REST API. Ask for a token at <c>POST /servers/{server}/ws-token</c>, then connect to the gateway. The token lasts five minutes and carries only the scopes of the key that asked for it.",
+    "realtimeHint": "The console and the graphs go through a websocket, not the REST API. Ask for a token at <c>POST /servers/{server}/websocket</c>: the response gives the websocket address, opened directly on the machine's daemon, and the token to present there. The token lasts ten minutes and carries only the scopes of the key that asked for it.",
     "columnRoute": "Route",
     "columnGroup": "Area",
     "columnScope": "Required scope",
