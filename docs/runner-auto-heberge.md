@@ -73,10 +73,34 @@ cd /home/runner/actions-runner
 Le runner se met à jour tout seul ; il apparaît « Idle » dans
 **Settings → Actions → Runners**.
 
+### Sous WSL, sans systemd
+
+`svc.sh` s'appuie sur systemd : sous WSL sans systemd, il n'installe rien.
+Le runner se lance alors par `run.sh`, et WSL le démarre au boot avec Docker.
+Dans `/etc/wsl.conf`, section `[boot]` (à fusionner si elle existe déjà) :
+
+```ini
+[boot]
+command = service docker start; su - runner -c 'cd ~/actions-runner && nohup ./run.sh >> ~/runner.log 2>&1 &'
+```
+
+La commande s'applique au prochain démarrage de WSL. Pour la session en
+cours :
+
+```bash
+sudo service docker start
+sudo su - runner -c 'cd ~/actions-runner && nohup ./run.sh >> ~/runner.log 2>&1 &'
+tail -f /home/runner/runner.log   # « Listening for Jobs »
+```
+
+Arrêter le runner pendant un job fait échouer ce job : attendre qu'il soit
+« Idle » dans la page des runners.
+
 ## Vérifier
 
 Relancer la CI d'une PR (onglet *Checks* → *Re-run all jobs*). Les trois jobs
-doivent démarrer sur la machine : `journalctl -u 'actions.runner.*' -f`.
+doivent démarrer sur la machine : `journalctl -u 'actions.runner.*' -f`
+(ou `~/runner.log` sous WSL).
 
 ## Sécurité
 
