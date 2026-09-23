@@ -27,6 +27,10 @@ IMAGE=ghcr.io/zaproxy/zaproxy@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61e
 
 : "${DATABASE_URL:?DATABASE_URL manquante}"
 : "${APP_SECRET_KEY:?APP_SECRET_KEY manquante}"
+# Sans Docker, `docker run` échoue avec le code 1 — celui d'une alerte ZAP.
+# Le script annonçait alors « alerte à corriger » pour un scan qui n'avait
+# jamais eu lieu.
+docker info >/dev/null 2>&1 || { echo "Docker ne répond pas : le scan ne peut pas tourner." >&2; exit 3; }
 
 # ZAP tourne dans son conteneur sous un autre utilisateur que le runner. Il
 # écrit donc dans un dossier temporaire **hors** de l'espace de travail, ouvert

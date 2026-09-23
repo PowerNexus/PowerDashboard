@@ -357,6 +357,66 @@ describe("inventaire des dépendances des releases", () => {
 });
 
 /**
+ * Le scan ZAP (PLAN §5.4) : présent, reproductible, et honnête sur ce qu'il
+ * laisse passer.
+ */
+describe("scan ZAP de la CI", () => {
+  const ci = readFileSync(join(RACINE, ".github", "workflows", "ci.yml"), "utf8");
+  const script = readFileSync(join(RACINE, "infra", "ci", "zap-baseline.sh"), "utf8");
+  const regles = readFileSync(join(RACINE, "infra", "ci", "zap-regles.tsv"), "utf8")
+    .split("\n")
+    .filter((ligne) => ligne.trim() !== "" && !ligne.startsWith("#"));
+
+  it("tourne après les parcours, sur l'application compilée", () => {
+    const parcours = ci.indexOf("name: Parcours et accessibilité");
+    const scan = ci.indexOf("name: Scan ZAP");
+    expect(parcours).toBeGreaterThan(0);
+    expect(scan).toBeGreaterThan(parcours);
+    expect(ci.slice(scan, ci.indexOf("\n\n", scan))).toContain(
+      "run: bash infra/ci/zap-baseline.sh",
+    );
+  });
+
+  it("épingle l'image de ZAP par empreinte", () => {
+    expect(script).toMatch(
+      /^IMAGE=ghcr\.io\/zaproxy\/zaproxy@sha256:[0-9a-f]{64} # \d+\.\d+\.\d+$/m,
+    );
+  });
+
+  it("ne fait jamais taire un avertissement sans le dire", () => {
+    // Sans -I, un avertissement rend un code non nul : c'est ce qui fait
+    // échouer le job sur une alerte nouvelle.
+    expect(script).toMatch(/zap-baseline\.py -t "\$CIBLE" -c regles\.tsv/);
+    expect(script).not.toMatch(/zap-baseline\.py[^\n]* -I\b/);
+    // Sans -silent, ZAP télécharge ses règles du jour : le verdict ne
+    // dépendrait plus seulement de l'image épinglée.
+    expect(script).toMatch(/zap-baseline\.py[^\n]* -z -silent/);
+  });
+
+  it("ne confond pas un Docker absent avec une alerte", () => {
+    const controle = script.indexOf("docker info >/dev/null 2>&1 ||");
+    expect(controle).toBeGreaterThan(0);
+    expect(controle).toBeLessThan(script.indexOf("docker run --rm"));
+    expect(script.slice(controle, script.indexOf("\n", controle))).toContain("exit 3");
+  });
+
+  it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
+    expect(script).toContain("TRAVAIL=$(mktemp -d)");
+    expect(script).toContain('-v "$TRAVAIL:/zap/wrk:rw"');
+  });
+
+  it("justifie chaque exception", () => {
+    expect(regles.length).toBeGreaterThan(0);
+    for (const ligne of regles) {
+      const [id, niveau, raison] = ligne.split("\t");
+      expect(id).toMatch(/^\d+$/);
+      expect(["IGNORE", "INFO", "WARN", "FAIL"]).toContain(niveau);
+      expect((raison ?? "").length).toBeGreaterThan(40);
+    }
+  });
+});
+
+/**
  * Les captures de référence de la suite visuelle ne se prennent que sur le
  * runner, à la demande : une référence prise ailleurs ferait échouer la CI
  * sur des différences de rendu de polices que personne n'a introduites.
