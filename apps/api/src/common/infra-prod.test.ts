@@ -266,6 +266,16 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  it("ne téléversent le cache pnpm que depuis un runner de GitHub", () => {
+    const caches = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^\s*cache:\s*(.+)$/gm)].map((m) => m[1]),
+    );
+    expect(caches.length).toBe(4);
+    for (const cache of caches) {
+      expect(cache).toBe(`\${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}`);
+    }
+  });
+
   it("ne lancent jamais le code d'une PR venue d'un fork", () => {
     const [ci] = workflows as [string];
     const jobs = [...ci.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)].filter(([bloc]) =>

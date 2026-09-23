@@ -39,7 +39,10 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       # --frozen-lockfile : la CI échoue si le lockfile ne correspond pas au
       # package.json, plutôt que de résoudre silencieusement d'autres versions.
@@ -101,7 +104,10 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
@@ -181,7 +187,10 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
