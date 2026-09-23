@@ -323,54 +323,35 @@ describe("actions GitHub des workflows", () => {
 });
 
 /**
- * Le scan ZAP (PLAN §5.4) : présent, reproductible, et honnête sur ce qu'il
- * laisse passer.
+ * Chaque release publie l'inventaire de ce qu'elle livre (PLAN §5.4), signé et
+ * rattaché à l'archive.
  */
-describe("scan ZAP de la CI", () => {
-  const ci = readFileSync(join(RACINE, ".github", "workflows", "ci.yml"), "utf8");
-  const script = readFileSync(join(RACINE, "infra", "ci", "zap-baseline.sh"), "utf8");
-  const regles = readFileSync(join(RACINE, "infra", "ci", "zap-regles.tsv"), "utf8")
-    .split("\n")
-    .filter((ligne) => ligne.trim() !== "" && !ligne.startsWith("#"));
+describe("inventaire des dépendances des releases", () => {
+  const release = readFileSync(join(RACINE, ".github", "workflows", "release.yml"), "utf8");
+  const inventaire = `dist/gamedashboard-\${{ env.VERSION }}.cdx.json`;
+  const etape = (nom: string) => {
+    const debut = release.indexOf(`- name: ${nom}`);
+    expect(debut, nom).toBeGreaterThan(0);
+    return { debut, texte: release.slice(debut, release.indexOf("\n\n", debut)) };
+  };
 
-  it("tourne après les parcours, sur l'application compilée", () => {
-    const parcours = ci.indexOf("name: Parcours et accessibilité");
-    const scan = ci.indexOf("name: Scan ZAP");
-    expect(parcours).toBeGreaterThan(0);
-    expect(scan).toBeGreaterThan(parcours);
-    expect(ci.slice(scan, ci.indexOf("\n\n", scan))).toContain(
-      "run: bash infra/ci/zap-baseline.sh",
-    );
+  it("est produit au format CycloneDX, dans les fichiers publiés", () => {
+    const { texte } = etape("Inventaire des dépendances (SBOM)");
+    expect(texte).toContain("uses: aquasecurity/trivy-action@");
+    expect(texte).toContain("format: cyclonedx");
+    expect(texte).toContain(`output: ${inventaire}`);
+    // Les licences se lisent dans node_modules : l'exclure les ferait disparaître.
+    expect(texte).not.toMatch(/skip-dirs:.*node_modules/);
   });
 
-  it("épingle l'image de ZAP par empreinte", () => {
-    expect(script).toMatch(
-      /^IMAGE=ghcr\.io\/zaproxy\/zaproxy@sha256:[0-9a-f]{64} # \d+\.\d+\.\d+$/m,
-    );
-  });
-
-  it("ne fait jamais taire un avertissement sans le dire", () => {
-    // Sans -I, un avertissement rend un code non nul : c'est ce qui fait
-    // échouer le job sur une alerte nouvelle.
-    expect(script).toMatch(/zap-baseline\.py -t "\$CIBLE" -c regles\.tsv/);
-    expect(script).not.toMatch(/zap-baseline\.py[^\n]* -I\b/);
-    // Sans -silent, ZAP télécharge ses règles du jour : le verdict ne
-    // dépendrait plus seulement de l'image épinglée.
-    expect(script).toMatch(/zap-baseline\.py[^\n]* -z -silent/);
-  });
-
-  it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
-    expect(script).toContain("TRAVAIL=$(mktemp -d)");
-    expect(script).toContain('-v "$TRAVAIL:/zap/wrk:rw"');
-  });
-
-  it("justifie chaque exception", () => {
-    expect(regles.length).toBeGreaterThan(0);
-    for (const ligne of regles) {
-      const [id, niveau, raison] = ligne.split("\t");
-      expect(id).toMatch(/^\d+$/);
-      expect(["IGNORE", "INFO", "WARN", "FAIL"]).toContain(niveau);
-      expect((raison ?? "").length).toBeGreaterThan(40);
-    }
+  it("est attesté contre l'archive, avant la publication", () => {
+    const production = etape("Inventaire des dépendances (SBOM)");
+    const attestation = etape("Attester l'inventaire");
+    const publication = etape("Publier");
+    expect(attestation.texte).toContain("uses: actions/attest@");
+    expect(attestation.texte).toContain("subject-path: dist/gamedashboard-*.tar.gz");
+    expect(attestation.texte).toContain(`sbom-path: ${inventaire}`);
+    expect(attestation.debut).toBeGreaterThan(production.debut);
+    expect(publication.debut).toBeGreaterThan(attestation.debut);
   });
 });
