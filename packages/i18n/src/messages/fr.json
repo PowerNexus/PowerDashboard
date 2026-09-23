@@ -1109,6 +1109,25 @@
     "unknown": "Inconnu",
     "unreachableDaemon": "Daemon injoignable"
   },
+  "metricsHistory": {
+    "title": "Historique",
+    "description": "Moyenne par pas, maximum en pointillés. Un trou est une période sans mesure : serveur arrêté ou machine muette.",
+    "range": {
+      "1h": "1 h",
+      "24h": "24 h",
+      "7d": "7 j",
+      "30d": "30 j"
+    },
+    "cpu": "Processeur",
+    "memory": "Mémoire",
+    "disk": "Disque",
+    "network": "Réseau",
+    "networkHint": "Reçu ; envoyé en pointillés",
+    "players": "Joueurs",
+    "unavailable": "Historique indisponible",
+    "emptyTitle": "Aucune mesure sur cette période",
+    "emptyBody": "Le panel relève la consommation chaque minute tant que la machine répond, et garde trente jours. Un serveur récent, ou resté éteint, n'a encore rien à montrer."
+  },
   "quickAccess": {
     "title": "Accès rapide",
     "subtitle": "Vos serveurs, et ce qui arrive à échéance.",

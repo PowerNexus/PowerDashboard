@@ -1109,6 +1109,25 @@
     "unknown": "Unknown",
     "unreachableDaemon": "Daemon unreachable"
   },
+  "metricsHistory": {
+    "title": "History",
+    "description": "Average per step, maximum dotted. A gap is a period without measurements: server stopped or node silent.",
+    "range": {
+      "1h": "1 h",
+      "24h": "24 h",
+      "7d": "7 d",
+      "30d": "30 d"
+    },
+    "cpu": "CPU",
+    "memory": "Memory",
+    "disk": "Disk",
+    "network": "Network",
+    "networkHint": "Received; sent dotted",
+    "players": "Players",
+    "unavailable": "History unavailable",
+    "emptyTitle": "No measurements for this period",
+    "emptyBody": "The panel samples usage every minute while the node responds, and keeps thirty days. A new server, or one left off, has nothing to show yet."
+  },
   "quickAccess": {
     "title": "Quick access",
     "subtitle": "Your servers, and what is coming due.",

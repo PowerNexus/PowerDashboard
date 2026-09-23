@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { useServerSocket } from "@/lib/use-server-socket";
 import type { ClientServer } from "@/server/api/client";
 import { ServerBlockNotice } from "./server-block-notice";
+import { ServerMetricsHistory } from "./server-metrics-history";
 
 /** Fenêtre de mesures affichée dans les graphes, en secondes. */
 const WINDOW = 60;
@@ -289,6 +290,11 @@ export function ConsoleWorkspace({ server }: { server: ClientServer }) {
           <Skeleton className="h-9 w-80" />
         )}
       </div>
+
+      {/* Sous le direct, pas dans un onglet à part : la question « depuis
+          quand ? » se pose en regardant la courbe du moment. Lu en base, il
+          reste lisible quand le daemon se tait. */}
+      <ServerMetricsHistory server={server} />
     </div>
   );
 }
