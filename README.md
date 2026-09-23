@@ -30,15 +30,17 @@ découvre le projet. Chaque version est publiée **déjà compilée** dans les
 Releases du dépôt ; dans le dossier extrait :
 
 ```bash
-pnpm install        # dépendances
-pnpm configurer     # questions, paquets, base, certificat, services, premier administrateur
-pnpm start          # démarre le panel sous systemd (pnpm stop, restart, status, logs)
+pnpm app:install    # vérifie Node.js et pnpm, installe les dépendances
+pnpm app:setup      # questions, paquets, base, certificat, services, premier administrateur
+pnpm app:start      # démarre le panel sous systemd
 ```
 
-`pnpm configurer` et non `pnpm setup`, qui est une commande de pnpm lui-même
-(`pnpm run setup` fonctionne). Une machine de jeu se prépare avec
-`installer-wings.sh`, publié à côté de l'archive. Relancé sur une nouvelle
-version, `pnpm configurer` met à jour.
+Toutes les commandes d'exploitation sont sous `app:` — `pnpm app:help` les
+liste : `app:stop`, `app:restart`, `app:status`, `app:logs`, `app:admin`,
+`app:password`, `app:wings`, `app:release`. Le préfixe les met à l'abri des
+commandes de pnpm lui-même (`pnpm setup` en est une). Relancé sur une
+nouvelle version, `pnpm app:setup` met à jour. Une machine de jeu se
+prépare avec `installer-wings.sh`, publié à côté de l'archive.
 
 ## Démarrer (développement)
 

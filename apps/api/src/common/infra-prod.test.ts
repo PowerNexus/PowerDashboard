@@ -116,3 +116,78 @@ describe("contrôle des pages après livraison", () => {
     });
   }
 });
+
+/**
+ * Les commandes d'exploitation vivent sous `app:`.
+ *
+ * pnpm fait passer ses propres commandes avant les scripts du projet. Un
+ * script `setup` n'était donc jamais lancé par `pnpm setup` : pnpm réglait à
+ * la place son dossier global et modifiait le `.bashrc`, sans rien dire du
+ * panel. `restart` enchaîne de même d'autres scripts au lieu de lancer le
+ * sien.
+ */
+describe("commandes app: du package.json", () => {
+  const paquet = JSON.parse(readFileSync(join(RACINE, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+  const app = readFileSync(join(PROD, "app.sh"), "utf8");
+
+  /** Commandes de pnpm qui l'emportent sur un script du même nom. */
+  const INTEGREES = [
+    "add",
+    "audit",
+    "bin",
+    "config",
+    "create",
+    "deploy",
+    "dlx",
+    "env",
+    "exec",
+    "fetch",
+    "i",
+    "import",
+    "init",
+    "install",
+    "link",
+    "list",
+    "ls",
+    "outdated",
+    "pack",
+    "patch",
+    "prune",
+    "publish",
+    "rebuild",
+    "remove",
+    "restart",
+    "rm",
+    "root",
+    "setup",
+    "store",
+    "unlink",
+    "update",
+    "why",
+  ];
+
+  it("aucun script ne porte le nom d'une commande de pnpm", () => {
+    const captes = Object.keys(paquet.scripts).filter((nom) => INTEGREES.includes(nom));
+    expect(captes).toEqual([]);
+  });
+
+  const commandes = Object.entries(paquet.scripts).filter(([nom]) => nom.startsWith("app:"));
+
+  it("les commandes d'installation et de pilotage existent", () => {
+    const noms = commandes.map(([nom]) => nom);
+    for (const attendu of ["app:install", "app:setup", "app:start", "app:stop", "app:help"]) {
+      expect(noms).toContain(attendu);
+    }
+  });
+
+  for (const [nom, script] of commandes) {
+    const action = nom.slice("app:".length);
+    it(`${nom} passe par app.sh, qui la traite et la documente`, () => {
+      expect(script).toBe(`bash infra/prod/app.sh ${action}`);
+      expect(app).toMatch(new RegExp(`^\\s*${action}(\\s*\\|[^)]*)?\\)`, "m"));
+      expect(app).toContain(`pnpm ${nom}`);
+    });
+  }
+});

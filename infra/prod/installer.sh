@@ -2,12 +2,11 @@
 #
 # GameDashboard — installation guidée du panel sur un serveur neuf.
 #
-#   pnpm install && pnpm configurer          (depuis une archive publiée ou un clone)
+#   pnpm app:install && pnpm app:setup       (depuis une archive publiée ou un clone)
 #   sudo bash infra/prod/installer.sh        (équivalent, sans passer par pnpm)
 #
-# `pnpm configurer`, ou `pnpm run setup` — mais **pas** `pnpm setup` tout
-# court : c'est une commande de pnpm lui-même, qui configure son dossier
-# global et modifie le .bashrc, sans jamais lancer ce script.
+# Les commandes du projet sont toutes sous `app:` (voir infra/prod/app.sh) :
+# `pnpm setup` tout court est une commande de pnpm lui-même.
 #
 # Pensé pour quelqu'un qui n'a jamais vu le projet : il pose ses questions
 # (domaine, adresse de l'administrateur), vérifie ce qui peut l'être avant de
@@ -142,7 +141,7 @@ etape "Vérifications avant de commencer"
 # ---------------------------------------------------------------------------
 # Rien n'est modifié avant la fin de cette étape : un refus ici ne laisse
 # aucune installation à moitié faite.
-# `pnpm configurer` se tape sans sudo : le script demande lui-même les droits.
+# `pnpm app:setup` se tape sans sudo : le script demande lui-même les droits.
 if [ "$(id -u)" != 0 ]; then
   command -v sudo >/dev/null 2>&1 \
     || echec "Il faut les droits de root, et sudo est absent." "Se connecter en root, puis relancer."
@@ -153,7 +152,7 @@ fi
 [ -f "$SRC/package.json" ] && grep -q '"name": "gamedashboard"' "$SRC/package.json" \
   || echec "Ce script doit être lancé depuis le dossier du panel." \
     "Télécharger l'archive depuis la page Releases du dépôt, l'extraire, puis dans son dossier :" \
-    "pnpm install && pnpm configurer"
+    "pnpm app:install && pnpm app:setup"
 ok "Dépôt trouvé : $SRC"
 
 # shellcheck disable=SC1091
@@ -456,14 +455,14 @@ cat <<EOF
        (Compte › Sécurité).
     2. Configurer l'envoi de courriels (Administration › Paramètres).
     3. Installer Wings sur la machine qui fera tourner les jeux :
-         sudo bash infra/prod/installer-wings.sh
+         pnpm app:wings   (ici)   ou   sudo bash installer-wings.sh   (ailleurs)
        puis la déclarer dans Administration › Nodes.
 
   ${G}Sauvegardez dès maintenant $ENVDIR${Z} hors de cette machine :
   sa clé APP_SECRET_KEY déchiffre les secrets de la base. Sans elle, une
   sauvegarde de la base ne sert à rien.
 
-  Au quotidien, depuis ce dossier :
-    pnpm status | pnpm start | pnpm stop | pnpm restart | pnpm logs [api|web]
-  Mettre à jour : nouvelle archive (ou git pull), puis pnpm install && pnpm configurer
+  Au quotidien, depuis ce dossier (pnpm app:help pour la liste) :
+    pnpm app:status | app:start | app:stop | app:restart | app:logs [api|web]
+  Mettre à jour : nouvelle archive (ou git pull), puis pnpm app:install && pnpm app:setup
 EOF

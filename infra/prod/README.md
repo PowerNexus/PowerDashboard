@@ -7,7 +7,7 @@ installation en service aujourd'hui est la production locale
 dossier en est la version pour une vraie machine, et ce qui la distingue du
 local y est écrit.
 
-**Première installation** : `pnpm install && pnpm configurer` (ou
+**Première installation** : `pnpm app:install && pnpm app:setup` (ou
 `sudo bash infra/prod/installer.sh`), qui installe
 les paquets, obtient le certificat, appelle `deploy.sh` et crée le premier
 administrateur. Le pas à pas est dans [docs/installation.md](../../docs/installation.md) ;
@@ -54,8 +54,17 @@ l'identifiant de la construction ; `deploy.sh` saute la compilation quand il
 correspond à `.next/BUILD_ID`. L'API, elle, tourne sous `tsx` depuis ses
 sources : elle n'a pas d'étape de compilation (voir « Points ouverts »).
 
-`bash infra/release/assembler.sh v0.0.0-essai` reproduit une archive en
-local, après `pnpm build`.
+`pnpm app:release v0.0.0-essai` reproduit une archive en local, après
+`pnpm build`.
+
+## Commandes d'exploitation
+
+Toutes sous `app:`, toutes servies par `app.sh` : `pnpm app:help` les liste.
+Le préfixe n'est pas décoratif. pnpm fait passer ses propres commandes avant
+les scripts du projet : `pnpm setup` règle le dossier global de pnpm et
+modifie le `.bashrc` sans lancer l'installation, et `pnpm restart` enchaîne
+d'autres scripts au lieu d'en lancer un. Un script sans préfixe portant l'un
+de ces noms ne s'exécuterait jamais ; `infra-prod.test.ts` le refuse.
 
 ## Livrer une nouvelle version à la main
 
@@ -106,11 +115,12 @@ vhost qui le déclarerait déjà.
 ## Premier administrateur
 
 ```bash
-cd /opt/gamedashboard/app
-set -a; . /opt/gamedashboard/env/api.env; set +a
-/opt/gamedashboard/bin/pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
-  <email> <prénom> <nom>
+pnpm app:admin <email> <prénom> <nom>
 ```
+
+Depuis n'importe quel dossier du panel. Seule `DATABASE_URL` est transmise au
+script, pas la clé de chiffrement. `pnpm app:password <email>` tire de même un
+nouveau mot de passe pour un compte existant.
 
 Le mot de passe est tiré au sort et affiché une seule fois. Le script ne touche
 à rien si l'adresse existe déjà.

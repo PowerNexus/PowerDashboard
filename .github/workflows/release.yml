@@ -3,9 +3,9 @@ name: Release
 # Publie une version dans GitHub Releases : une archive du panel **déjà
 # compilé**, que l'on installe avec trois commandes.
 #
-#   pnpm install      les dépendances, aux versions exactes du lockfile
-#   pnpm configurer   domaine, base, certificat, services, premier compte
-#   pnpm start        démarre le panel sous systemd
+#   pnpm app:install  les dépendances, aux versions exactes du lockfile
+#   pnpm app:setup    domaine, base, certificat, services, premier compte
+#   pnpm app:start    démarre le panel sous systemd
 #
 # Se déclenche en poussant une étiquette :
 #
@@ -110,15 +110,16 @@ jobs:
           \`\`\`bash
           sha256sum -c $ARCHIVE.tar.gz.sha256      # l'archive est intacte
           tar -xzf $ARCHIVE.tar.gz && cd $ARCHIVE
-          pnpm install
-          pnpm configurer
-          pnpm start
+          pnpm app:install
+          pnpm app:setup
+          pnpm app:start
           \`\`\`
 
           Le guide pas à pas : [docs/installation.md](https://github.com/${{ github.repository }}/blob/$VERSION/docs/installation.md).
           Machine de jeu : \`installer-wings.sh\`, ci-dessous, se télécharge seul.
+          Toutes les commandes : \`pnpm app:help\`.
 
-          Mettre à jour une installation : extraire la nouvelle archive, puis \`pnpm install && pnpm configurer\`
+          Mettre à jour une installation : extraire la nouvelle archive, puis \`pnpm app:install && pnpm app:setup\`
           dans son dossier. Comptes, secrets et base sont conservés.
           EOF
 

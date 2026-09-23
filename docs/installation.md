@@ -13,7 +13,7 @@ Comptez **30 à 45 minutes**, dont une bonne partie à attendre.
 | [1. Comprendre en deux minutes](#1-comprendre-en-deux-minutes) | — | 2 min |
 | [2. Ce qu'il vous faut](#2-ce-quil-vous-faut) | — | 5 min |
 | [3. Préparer les noms de domaine](#3-préparer-les-noms-de-domaine) | chez votre registraire | 5 min |
-| [4. Installer le panel](#4-installer-le-panel) — `pnpm install`, `pnpm configurer`, `pnpm start` | machine du panel | 10 min |
+| [4. Installer le panel](#4-installer-le-panel) — `pnpm app:install`, `app:setup`, `app:start` | machine du panel | 10 min |
 | [5. Première connexion](#5-première-connexion) | navigateur | 5 min |
 | [6. Ajouter une machine de jeu](#6-ajouter-une-machine-de-jeu-wings) | machine de jeu + navigateur | 10 min |
 | [7. Créer un premier serveur](#7-créer-un-premier-serveur-de-jeu) | navigateur | 5 min |
@@ -210,17 +210,16 @@ téléchargez-le à nouveau.
 ### 4.4 Trois commandes
 
 ```bash
-pnpm install        # les dépendances, une à deux minutes
-pnpm configurer     # l'installation guidée : quelques questions, puis tout se fait seul
-pnpm start          # démarre le panel (déjà fait par pnpm configurer la première fois)
+pnpm app:install    # vérifie Node.js et pnpm, installe les dépendances (une à deux minutes)
+pnpm app:setup      # l'installation guidée : quelques questions, puis tout se fait seul
+pnpm app:start      # démarre le panel (déjà fait par app:setup la première fois)
 ```
 
-> ⚠ **`pnpm configurer`, et non `pnpm setup`.** `pnpm setup` est une
-> commande de pnpm lui-même, qui règle son dossier global et modifie votre
-> `.bashrc`, sans jamais lancer l'installation du panel. Si vous tenez au mot
-> anglais : `pnpm run setup` est équivalent à `pnpm configurer`.
+Toutes les commandes du panel commencent par **`app:`** — `pnpm app:help`
+les liste. N'oubliez pas le préfixe : `pnpm setup` tout court est une
+commande de pnpm lui-même, qui ne lance rien du panel.
 
-`pnpm configurer` demande lui-même les droits d'administrateur (votre mot
+`pnpm app:setup` demande lui-même les droits d'administrateur (votre mot
 de passe `sudo`, si vous n'êtes pas root).
 
 Le script pose **quatre questions**, puis récapitule et demande
@@ -283,7 +282,7 @@ Viennent ensuite, sans intervention :
 
 > ⚠ **Notez le mot de passe maintenant.** Il n'est enregistré nulle part en
 > clair. Perdu, il se réinitialise avec
-> `apps/api/scripts/reset-password.mts`, voir [§ 9](#9-en-cas-de-problème).
+> `pnpm app:password moi@mondomaine.fr`, voir [§ 9](#9-en-cas-de-problème).
 
 ### 4.5 Sauvegarder la clé maître — tout de suite
 
@@ -306,7 +305,7 @@ Pour une installation automatisée (Ansible, cloud-init…), toutes les
 réponses se donnent en options :
 
 ```bash
-pnpm configurer --oui \
+pnpm app:setup --oui \
   --domaine panel.mondomaine.fr --courriel moi@mondomaine.fr \
   --prenom Alex --nom Martin
 ```
@@ -352,7 +351,7 @@ Le panel est en ligne mais ne peut encore rien héberger : il lui faut un node.
 panel et lancez :
 
 ```bash
-sudo bash infra/prod/installer-wings.sh
+pnpm app:wings
 ```
 
 **Sur une autre machine**, le script se suffit à lui-même. Il est publié
@@ -451,13 +450,13 @@ Téléchargez et vérifiez la nouvelle archive comme à l'étape 4.3, puis :
 
 ```bash
 tar -xzf gamedashboard-v1.1.0.tar.gz && cd gamedashboard-v1.1.0
-pnpm install
-pnpm configurer
+pnpm app:install
+pnpm app:setup
 ```
 
-(Depuis un clone git : `git pull && pnpm install && pnpm configurer`.)
+(Depuis un clone git : `git pull && pnpm app:install && pnpm app:setup`.)
 
-`pnpm configurer` reconnaît l'installation existante : il ne pose aucune
+`pnpm app:setup` reconnaît l'installation existante : il ne pose aucune
 question, ne touche ni aux comptes ni aux secrets, installe la nouvelle
 version, applique les migrations de base et redémarre. Le panel est indisponible une trentaine de
 secondes ; **les serveurs de jeu, eux, ne s'arrêtent pas** (ils vivent sur
@@ -471,11 +470,14 @@ Depuis le dossier du panel (n'importe quelle version extraite) :
 
 | Commande | Effet |
 |---|---|
-| `pnpm status` | état des deux services, adresse et version installée |
-| `pnpm start` | démarre le panel et attend qu'il réponde |
-| `pnpm stop` | l'arrête — les serveurs de jeu continuent de tourner |
-| `pnpm restart` | l'arrête puis le redémarre |
-| `pnpm logs` | journaux en direct (`pnpm logs api` ou `pnpm logs web` pour un seul) ; `Ctrl+C` pour sortir |
+| `pnpm app:status` | état des deux services, adresse et version installée |
+| `pnpm app:start` | démarre le panel et attend qu'il réponde |
+| `pnpm app:stop` | l'arrête — les serveurs de jeu continuent de tourner |
+| `pnpm app:restart` | l'arrête puis le redémarre |
+| `pnpm app:logs` | journaux en direct (`pnpm app:logs api` ou `web` pour un seul) ; `Ctrl+C` pour sortir |
+| `pnpm app:admin <email> <prénom> <nom>` | crée un autre compte administrateur |
+| `pnpm app:password <email>` | tire un nouveau mot de passe pour un compte, affiché une fois |
+| `pnpm app:help` | la liste complète |
 
 Ces commandes parlent à systemd, qui fait tourner le panel : il redémarre
 aussi tout seul avec la machine. Elles demandent les droits
@@ -505,7 +507,7 @@ serveur.
    sudo systemctl stop gamedashboard-api gamedashboard-web
    sudo tar xzf gamedashboard-env.tgz -C /opt/gamedashboard
    sudo -u postgres pg_restore --clean --if-exists -d gamedashboard gamedashboard-2026-09-23.dump
-   pnpm configurer                       # depuis le dossier du panel : réaligne le mot de passe de la base et redémarre
+   pnpm app:setup                        # depuis le dossier du panel : réaligne le mot de passe de la base et redémarre
    ```
 
 ---
@@ -520,14 +522,15 @@ régénèrent jamais un secret existant.
 |---|---|---|
 | « Let's Encrypt n'a pas pu vérifier… » | DNS pas encore propagé, ou port 80 fermé | `getent hosts panel.mondomaine.fr` doit donner l'adresse de la machine ; ouvrir le port 80 chez l'hébergeur ; relancer. Après cinq échecs, Let's Encrypt bloque une heure. |
 | La construction s'arrête sur `Killed` | Mémoire épuisée | Relancer et accepter le fichier d'échange, ou en créer un à la main (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`). |
-| `pnpm setup` a affiché « export PNPM_HOME=… » et rien installé | C'est la commande de pnpm, pas celle du panel | Lancer `pnpm configurer`. La ligne ajoutée à `~/.bashrc` par pnpm est sans danger et peut être retirée. |
+| `pnpm setup` a affiché « export PNPM_HOME=… » et rien installé | Préfixe `app:` oublié : c'est la commande de pnpm | Lancer `pnpm app:setup`. La ligne ajoutée à `~/.bashrc` par pnpm est sans danger et peut être retirée. |
 | `pnpm : commande introuvable` | corepack pas activé | `sudo corepack enable`, voir l'étape 4.2. |
-| « Le panel n'est pas encore installé » sur `pnpm start` | `pnpm configurer` n'a pas abouti | Relancer `pnpm configurer`. |
-| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `pnpm configurer`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
+| « Le panel n'est pas encore installé » sur `pnpm app:start` | `pnpm app:setup` n'a pas abouti | Relancer `pnpm app:setup`. |
+| `Missing script: app:…` | Commande mal tapée | `pnpm app:help` donne la liste exacte. |
+| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `pnpm app:setup`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
 | `nginx -t` échoue sur un autre fichier | Un autre site de la machine est mal configuré | Le message nomme le fichier fautif. Le panel n'y touche pas ; corriger ce site, puis relancer. |
-| Page « 502 Bad Gateway » | Un service est arrêté | `pnpm status`, puis `pnpm logs`. `pnpm start` le relance. |
+| Page « 502 Bad Gateway » | Un service est arrêté | `pnpm app:status`, puis `pnpm app:logs`. `pnpm app:start` le relance. |
 | L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre la sauvegarde de l'étape 4.5. **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
-| Mot de passe administrateur perdu | — | `cd /opt/gamedashboard/app/apps/api && sudo env DATABASE_URL="$(sudo grep '^DATABASE_URL=' /opt/gamedashboard/env/api.env \| cut -d= -f2-)" ./node_modules/.bin/tsx scripts/reset-password.mts moi@mondomaine.fr` |
+| Mot de passe administrateur perdu | — | `pnpm app:password moi@mondomaine.fr` depuis le dossier du panel : un nouveau mot de passe s'affiche une fois. La double authentification et les sessions ouvertes sont conservées. |
 | Le node reste « Injoignable » | Wings arrêté, port 8080 fermé, ou nom de domaine différent entre le node et le certificat | Sur le node : `journalctl -u wings -n 50`. Voir aussi le [runbook machine injoignable](./runbooks/machine-injoignable.md). |
 | `wings configure` répond 401 ou 403 | Clé expirée (trente minutes) ou déjà utilisée | *Configurer le daemon › Émettre une nouvelle clé*. |
 | La console d'un serveur reste vide | Node déclaré en `http` alors que le panel est en `https`, ou proxy Cloudflare actif | Déclarer le node en `https` ; nuage gris sur Cloudflare. |
@@ -543,7 +546,7 @@ avant : elle ne doit contenir aucun mot de passe).
 ## Annexe A — Installation manuelle, sans le script
 
 Pour qui veut tout maîtriser, ou pour une machine qui a déjà nginx,
-PostgreSQL et Node.js. `pnpm configurer` (`infra/prod/installer.sh`) ne fait rien d'autre que ceci :
+PostgreSQL et Node.js. `pnpm app:setup` (`infra/prod/installer.sh`) ne fait rien d'autre que ceci :
 
 1. **Prérequis** : Node.js 24 ou plus avec `corepack`, PostgreSQL 17 ou
    plus en service, nginx, certbot, `rsync`, `openssl`, `sudo`.
@@ -563,10 +566,9 @@ PostgreSQL et Node.js. `pnpm configurer` (`infra/prod/installer.sh`) ne fait rie
    [`infra/prod/README.md`](../infra/prod/README.md).
 5. **Administrateur** :
    ```bash
-   cd /opt/gamedashboard/app/apps/api
-   sudo env DATABASE_URL="$(sudo grep '^DATABASE_URL=' /opt/gamedashboard/env/api.env | cut -d= -f2-)" \
-     ./node_modules/.bin/tsx scripts/create-admin.mts moi@mondomaine.fr Alex Martin
+   pnpm app:admin moi@mondomaine.fr Alex Martin
    ```
+   Le script ne reçoit que `DATABASE_URL`, lue dans `/opt/gamedashboard/env/api.env`.
 
 Pour Wings sans script : la [documentation de Wings](https://pterodactyl.io/wings/1.0/installing.html)
 s'applique telle quelle — le panel remplace seulement celui de Pterodactyl
@@ -574,7 +576,7 @@ dans l'étape « configure ».
 
 ## Annexe B — Ce que les scripts modifient sur la machine
 
-Rien n'est caché. `pnpm configurer` (`infra/prod/installer.sh`) :
+Rien n'est caché. `pnpm app:setup` (`infra/prod/installer.sh`) :
 
 | Quoi | Où |
 |---|---|
