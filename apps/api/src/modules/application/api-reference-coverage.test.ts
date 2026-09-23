@@ -116,6 +116,35 @@ describe("documentation de l'API", () => {
     expect(documentees().length).toBeGreaterThan(50);
   });
 
+  /*
+   * Non-régression : l'aide de la page API, écrite dans les catalogues de
+   * traduction et non dans le catalogue de routes, annonçait encore
+   * `POST /servers/{server}/ws-token` — une route qui n'a jamais existé sous
+   * ce nom. Le test ci-dessous ne la voyait pas, puisqu'il ne lit que le
+   * catalogue. Toute route citée en `<c>VERBE /chemin</c>` dans un message
+   * doit donc, elle aussi, exister sous l'un des préfixes publics.
+   */
+  it("ne cite dans les textes de l'interface que des routes existantes", () => {
+    const messages = join(RACINE, "packages", "i18n", "src", "messages");
+    const citees: string[] = [];
+    for (const fichier of readdirSync(messages).filter((nom) => nom.endsWith(".json"))) {
+      const texte = readFileSync(join(messages, fichier), "utf8");
+      for (const m of texte.matchAll(/<c>(GET|POST|PUT|PATCH|DELETE) (\/[^<\s]*)<\/c>/g)) {
+        citees.push(`${fichier} ${m[1]} ${m[2]}`);
+      }
+    }
+
+    const absentes = citees.filter((citation) => {
+      const [, verbe, chemin] = citation.split(" ");
+      return !Object.values(PREFIXES).some((prefixe) =>
+        routes.has(normalise(`${verbe} ${prefixe}${chemin}`)),
+      );
+    });
+
+    expect(citees.length).toBeGreaterThan(0);
+    expect(absentes).toEqual([]);
+  });
+
   it("ne documente que des routes existantes", () => {
     const absentes = documentees()
       .filter(({ route }) => !routes.has(normalise(route)))

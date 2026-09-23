@@ -7,7 +7,7 @@
 
 [Unit]
 Description=GameDashboard — Interface
-Documentation=https://yhbeta.matheol.fr
+Documentation=file:///opt/gamedashboard/app/infra/prod/README.md
 After=network-online.target gamedashboard-api.service
 # `Wants` et non `Requires` : si l'API tombe, l'interface doit rester debout
 # pour afficher l'écran « API injoignable » plutôt que de disparaître avec elle.

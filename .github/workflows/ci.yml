@@ -59,11 +59,13 @@ jobs:
       # Le schéma Drizzle et les migrations doivent rester en phase. Sans cette
       # vérification, une colonne ajoutée au schéma sans migration ne se verrait
       # qu'au déploiement, face à une base qui ne la possède pas.
+      # `db:check` et non `db:generate` seul : sans terminal, drizzle-kit
+      # sort en succès même quand il s'arrête sur une question (voir
+      # packages/db/scripts/check-migrations.mjs).
       - name: Migrations à jour
         run: |
-          pnpm --filter @gamedashboard/db db:generate
-          git diff --exit-code packages/db/migrations \
-            || { echo "::error::Schéma modifié sans migration générée. Lancez pnpm --filter @gamedashboard/db db:generate."; exit 1; }
+          pnpm db:check \
+            || { echo "::error::Schéma et migrations désaccordés. Lancez pnpm db:generate et relisez la migration produite."; exit 1; }
 
       # Même raison, pour l'autre contrat : une route ajoutée au catalogue sans
       # régénérer la spécification donnerait un `openapi.json` qui décrit une

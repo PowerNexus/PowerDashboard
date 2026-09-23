@@ -5,37 +5,43 @@ Panel de gestion de serveurs de jeu basé sur Docker. Voir [PLAN.md](./PLAN.md) 
 ## Structure
 
 ```
-apps/web            Next.js 16 (client + admin)
+apps/web            Next.js 16 : espace client, revendeur, administration
+apps/api            NestJS : API client, applicative, contrat Wings, balayages de fond
 packages/ui         Design system (@gamedashboard/ui)
-packages/contracts  Schémas Zod + types partagés (@gamedashboard/contracts)
+packages/contracts  Schémas Zod, règles métier partagées, catalogue d'API
 packages/db         Schéma Drizzle + migrations PostgreSQL (@gamedashboard/db)
-packages/auth       Primitives d'authentification (@gamedashboard/auth)
+packages/auth       Mots de passe, chiffrement des secrets, TOTP, jetons
 packages/i18n       Catalogues FR/EN et choix de langue (@gamedashboard/i18n)
+packages/mysql      Provisionnement des bases MySQL des clients
+packages/sdk        Client TypeScript pour les intégrateurs
 packages/config     Presets TypeScript partagés
 infra/docker        Services de développement (compose)
+infra/local         Production locale sur Codiax et bancs contre un Wings réel
+infra/prod          Modèle de production sous systemd
+infra/eggs          Eggs maison (Minecraft Java unifié)
+docs/               ADR, runbooks, guide du contributeur, reprise Pterodactyl
 ```
 
 ## Démarrer
 
-L'interface seule ne demande rien d'autre — les données sont encore simulées :
-
 ```bash
 pnpm install
-pnpm dev:web        # http://localhost:3000
-```
-
-Pour travailler sur la base de données :
-
-```bash
 pnpm services:up    # PostgreSQL, Redis, MinIO, Mailpit
-pnpm db:migrate     # applique le schéma
+cp apps/api/.env.example apps/api/.env          # renseigner APP_SECRET_KEY
+cp apps/web/.env.example apps/web/.env.local
+pnpm db:migrate
+pnpm dev            # API sur :3201, interface sur http://localhost:3000
 ```
+
+Le premier compte administrateur se crée par
+`pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts <email> <prénom> <nom>`.
 
 `pnpm services:down` arrête les conteneurs **en conservant les données**. Pour
 repartir d'une base vierge, il faut ajouter `-v` à la main : effacer des volumes
 ne doit pas être ce qui arrive quand on se trompe de commande.
 
 Détails et identifiants : [infra/docker/README.md](./infra/docker/README.md).
+Règles du dépôt et gestes courants : [docs/contribuer.md](./docs/contribuer.md).
 
 ## Le daemon n'est pas réécrit
 
@@ -48,44 +54,25 @@ pas mTLS).
 
 ## État d'avancement
 
-**Phase 0 terminée. Interface client complète en maquette navigable.**
+**V1 terminée.** Le panel fonctionne de bout en bout contre un Wings réel :
+les dix bancs de [infra/local](./infra/local/README.md) l'éprouvent (cycle de
+vie d'un serveur, SFTP, sauvegardes, console, bases MySQL, revendeurs,
+transfert entre deux daemons, rotation du jeton de node, planificateur).
 
-| Route | Contenu |
+| Espace | Écrans |
 |---|---|
-| `/dashboard` | KPIs, bandeau d'annonce, grille de cartes serveur |
-| `/servers` | Liste des serveurs |
-| `/login` | Authentification (Google, e-mail, captcha) |
-| `/design` | Vitrine de tous les composants, dans les deux thèmes |
-| `/account` | Profil, thème, langue, préférences de notification |
-| `/account/security` | Mot de passe, passkeys, TOTP, sessions actives |
-| `/account/api-keys` | Clés API avec matrice de portées |
-| `/api` | Référence API : routes par clé, événements temps réel, SSO OAuth 2.0 |
-| `/status` | État des nodes et incidents en cours |
-| `/servers/new` | Assistant de création en quatre étapes |
-| `/server/[id]` | Console live, barre d'état dépliable, alimentation, graphes |
-| `/server/[id]/files` | Navigateur de fichiers avec fil d'Ariane et actions |
-| `/server/[id]/backups` | Sauvegardes, quota, progression, verrouillage |
-| `/server/[id]/databases` | Bases MySQL et quota |
-| `/server/[id]/users` | Sous-utilisateurs, invitation, matrice de permissions |
-| `/server/[id]/schedules` | Tâches planifiées avec constructeur cron |
-| `/server/[id]/network` | Allocations de ports |
-| `/server/[id]/settings` | Identité, variables d'egg, SFTP, zone de danger |
-| `/server/[id]/activity` | Journal d'audit filtrable |
-| `/server/[id]/marketplace` | Plugins et mods, compatibilité et mises à jour |
-| `/server/[id]/files/edit` | Éditeur Monaco avec détection de langage |
-| `/admin` | Santé de l'infrastructure, capacité par node, derniers serveurs |
-| `/admin/nodes` | Nodes, capacité, maintenance, heartbeat |
-| `/admin/servers` | Tous les serveurs, recherche et filtres node/état |
-| `/admin/users` | Comptes, rôles, état 2FA |
-| `/admin/eggs` | Catalogue par famille de jeu, import/export JSON |
-| `/admin/settings` | Marque, SMTP, stockage S3, sécurité, feature flags |
+| Client | `/` tableau de bord, `/servers`, `/servers/new`, `/account` (profil, sécurité, clés API), `/status` |
+| Serveur | `/server/[id]` console et graphes, `files` (et éditeur), `backups`, `databases`, `users`, `schedules`, `network`, `settings`, `activity`, `marketplace`, `engine`, `webhooks` |
+| Revendeur | `/reseller` : parc, clients, serveurs, marque et domaine propre, clés applicatives, webhooks, réglages |
+| Administration | `/admin` : nodes, serveurs, comptes, eggs, hôtes MySQL, montages, domaines, annonces, incidents, API, audit, réglages |
+| Connexion | `/login`, `/register`, `/forgot`, `/reset`, `/verify`, `/invitation/[token]`, `/sso/[token]` |
 
-La palette de commandes s'ouvre avec `Ctrl+K` depuis n'importe quelle page : navigation,
-changement de serveur, recherche. Le centre de notifications est dans le header.
-
-Les données viennent de `apps/web/src/lib/mock.ts` et `mock-server.ts`. Elles seront
-remplacées par le SDK et le websocket quand l'API existera. Aucun backend n'est
-nécessaire pour lancer l'app.
+La référence de l'API se lit sur l'écran `/admin/api` et dans
+[openapi.json](./openapi.json), tous deux tirés du même catalogue
+([ADR 0003](./docs/adr/0003-catalogue-api-source-unique.md)). La palette de
+commandes s'ouvre avec `Ctrl+K`. L'écran `/design` montre tous les composants
+dans les deux thèmes, sur des données de démonstration (`apps/web/src/lib/mock.ts`,
+son seul lecteur).
 
 ### Composants de `@gamedashboard/ui`
 
@@ -138,12 +125,12 @@ aucune clé, n'en garde aucune orpheline, et emploie les mêmes variables. Une
 traduction manquante ne lève jamais d'erreur — elle affiche du français à un
 anglophone, ce que seul un test peut rattraper.
 
-**État de la migration.** La coquille de l'application est traduite (navigation
-du panel, de l'administration et d'un serveur, langue du document, métadonnées).
-**Le contenu des pages reste en français en dur** : les 30 routes sont à
-reprendre une par une. Le motif à suivre est celui des layouts —
-`await getTranslations("nav")` dans un composant serveur, `useTranslations` dans
-un composant client.
+**État de la migration.** Toute l'interface est traduite. Seule la page hors
+ligne reste bilingue à dessein : elle s'affiche sans réseau ni session, donc
+sans langue connue. Le motif est `await getTranslations("…")` dans un composant
+serveur, `useTranslations("…")` dans un composant client. Une route citée dans
+un texte (`<c>POST /servers/{server}/websocket</c>`) est vérifiée contre l'API
+par `api-reference-coverage.test.ts`.
 
 ## Configuration
 
@@ -203,18 +190,19 @@ ne rattrape pas : essayé, mesuré, sans effet sur le web.
 ## Vérifications
 
 ```bash
-pnpm test        # Vitest : 173 tests sur la logique métier
-pnpm typecheck   # TypeScript strict sur les six paquets
 pnpm lint        # Biome
-pnpm db:generate # doit ne rien produire si le schéma et les migrations sont en phase
+pnpm typecheck   # TypeScript strict sur tous les paquets
+pnpm test        # Vitest ; avec DATABASE_URL, les tests d'intégration aussi
+pnpm db:check    # échoue si le schéma et les migrations ne sont pas en phase
+pnpm openapi     # openapi.json doit rester identique au fichier versionné
+pnpm e2e         # Playwright contre l'API réelle et PostgreSQL
 ```
 
-Les tests couvrent ce qui a des règles, pas le rendu : seuils de heartbeat et
-précédence entre maintenance et injoignabilité, comparaison de versions du daemon,
-compatibilité des plugins avec le chargeur et la version de jeu, presets de
-permissions, formatage des tailles et des durées, expressions cron.
-
-Le rendu sera couvert par Storybook et Playwright quand l'API existera.
+Les tests unitaires couvrent ce qui a des règles, pas le rendu : seuils de
+heartbeat et précédence entre maintenance et injoignabilité, permissions,
+jetons Wings, chiffrement des secrets, planificateur, catalogue d'API. Le
+parcours et l'accessibilité (axe) sont couverts par Playwright, le contrat
+Wings par les bancs d'[infra/local](./infra/local/README.md).
 
 ## Conventions
 

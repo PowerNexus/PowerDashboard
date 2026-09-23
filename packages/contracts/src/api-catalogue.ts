@@ -63,7 +63,7 @@ export const CLIENT_ROUTES: ApiRoute[] = [
   {
     method: "POST",
     path: "/servers/{server}/websocket",
-    summary: "Obtenir un jeton websocket de cinq minutes pour la console.",
+    summary: "Obtenir un jeton websocket de dix minutes pour la console.",
     scope: "console.read",
     group: "Serveurs",
   },

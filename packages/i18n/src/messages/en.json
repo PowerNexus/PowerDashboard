@@ -534,7 +534,7 @@
     "tabApplication": "Application key",
     "tabRealtime": "Real time",
     "applicationWarning": "These routes ignore ownership. A compromised application key grants access to every server: always restrict it to a list of IP addresses.",
-    "realtimeHint": "The console and the graphs go through a websocket, not the REST API. Ask for a token at <c>POST /servers/{server}/ws-token</c>, then connect to the gateway. The token lasts five minutes and carries only the scopes of the key that asked for it.",
+    "realtimeHint": "The console and the graphs go through a websocket, not the REST API. Ask for a token at <c>POST /servers/{server}/websocket</c>: the response gives the websocket address, opened directly on the machine's daemon, and the token to present there. The token lasts ten minutes and carries only the scopes of the key that asked for it.",
     "columnRoute": "Route",
     "columnGroup": "Area",
     "columnScope": "Required scope",
@@ -1886,5 +1886,36 @@
       "abandoned": "Abandoned",
       "pending": "Pending"
     }
+  },
+  "errorPage": {
+    "subtitle": "GameDashboard panel",
+    "recovering": "The API is answering again. Reloading…",
+    "exhaustedTitle": "The API answers, but the page still fails",
+    "exhaustedBadge": "Recovery stopped",
+    "exhaustedBody": "The panel retried {count} times without success. The cause is therefore not — or no longer — the API: check its logs, then try again.",
+    "genericTitle": "Something went wrong",
+    "genericDetail": "Detail",
+    "reference": "Reference:",
+    "databaseTitle": "The database is not answering",
+    "databaseBadge": "API online",
+    "databaseBody": "The API is running but cannot reach PostgreSQL. Restarting it would change nothing: it is the database that needs to be brought back.",
+    "timeoutTitle": "The API is taking too long to answer",
+    "timeoutBody": "The connection was accepted, but no answer arrived in time. This is not a stopped process: look instead for a saturated database, a blocked query or a node that does not hand back control.",
+    "downTitle": "The API is not answering",
+    "downBody": "The panel reads its data from the API, which is not running. Start it in a second terminal: the page will resume by itself as soon as it answers.",
+    "needsPostgres": "It also needs PostgreSQL:",
+    "probeChecking": "Checking…",
+    "probeOk": "Back",
+    "probeDegraded": "Database unreachable",
+    "probeOffline": "Offline",
+    "noteRecovering": "The API is answering again. Reloading…",
+    "noteNext": "Checking again every {seconds} seconds.",
+    "technicalDetail": "Technical detail",
+    "retry": "Retry now"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "This page does not exist or you do not have access to it.",
+    "home": "Back to home"
   }
 }

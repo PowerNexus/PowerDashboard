@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -236,6 +236,12 @@ export const sessions = pgTable(
     uniqueIndex("session_token_hash_unique").on(table.tokenHash),
     index("session_user_idx").on(table.userId),
     index("session_expiry_idx").on(table.expiresAt),
+    // Partiel, comme la migration 0022 l'a créé : presque toutes les sessions
+    // ont `impersonator_id` nul, et l'index ne sert qu'à retrouver les prises
+    // en main.
+    index("session_impersonator_idx")
+      .on(table.impersonatorId)
+      .where(sql`${table.impersonatorId} is not null`),
   ],
 );
 
@@ -485,6 +491,9 @@ export const applicationKeys = pgTable(
     // Émettre une clé d'amorçage retire la précédente du même node : la
     // recherche se fait à chaque ouverture de la fenêtre de configuration.
     index("application_key_node_idx").on(table.nodeId),
+    // Créé par la migration 0033 : le périmètre d'une clé de revendeur se
+    // résout par cette colonne à chaque appel.
+    index("application_keys_reseller_idx").on(table.resellerId),
   ],
 );
 
@@ -672,5 +681,11 @@ export const resellerBrandings = pgTable(
     certificateFailure: text("certificate_failure"),
     ...timestamps,
   },
-  (table) => [index("reseller_branding_domain_idx").on(table.domain)],
+  (table) => [
+    // Partiel, comme la migration 0020 l'a créé : seul un domaine vérifié est
+    // cherché à la résolution de la marque d'une requête.
+    index("reseller_branding_domain_idx")
+      .on(table.domain)
+      .where(sql`${table.domainVerifiedAt} is not null`),
+  ],
 );

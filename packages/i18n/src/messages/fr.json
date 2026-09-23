@@ -534,7 +534,7 @@
     "tabApplication": "Clé application",
     "tabRealtime": "Temps réel",
     "applicationWarning": "Ces routes ignorent la notion de propriétaire. Une clé application compromise donne accès à l'ensemble des serveurs : restreignez-la toujours à une liste d'adresses IP.",
-    "realtimeHint": "La console et les graphiques passent par un websocket, pas par l'API REST. Demandez un jeton à <c>POST /servers/{server}/ws-token</c>, puis connectez-vous au gateway. Le jeton vaut cinq minutes et ne porte que les portées de la clé qui l'a demandé.",
+    "realtimeHint": "La console et les graphiques passent par un websocket, pas par l'API REST. Demandez un jeton à <c>POST /servers/{server}/websocket</c> : la réponse donne l'adresse du websocket, ouvert directement sur le daemon de la machine, et le jeton à y présenter. Le jeton vaut dix minutes et ne porte que les portées de la clé qui l'a demandé.",
     "columnRoute": "Route",
     "columnGroup": "Domaine",
     "columnScope": "Portée requise",
@@ -1886,5 +1886,36 @@
       "abandoned": "Abandonné",
       "pending": "En attente"
     }
+  },
+  "errorPage": {
+    "subtitle": "Panel GameDashboard",
+    "recovering": "L'API répond de nouveau. Rechargement…",
+    "exhaustedTitle": "L'API répond, mais la page échoue encore",
+    "exhaustedBadge": "Reprise interrompue",
+    "exhaustedBody": "Le panel a retenté {count} fois sans succès. La cause n'est donc pas — ou plus — l'API : regardez ses journaux, puis réessayez.",
+    "genericTitle": "Une erreur est survenue",
+    "genericDetail": "Détail",
+    "reference": "Référence :",
+    "databaseTitle": "La base de données ne répond pas",
+    "databaseBadge": "API en ligne",
+    "databaseBody": "L'API tourne mais ne parvient pas à joindre PostgreSQL. La relancer n'y changerait rien : c'est la base qu'il faut remettre en route.",
+    "timeoutTitle": "L'API met trop de temps à répondre",
+    "timeoutBody": "La connexion a été acceptée, mais aucune réponse n'est arrivée dans le délai imparti. Ce n'est pas un processus arrêté : cherchez plutôt une base saturée, une requête bloquée ou un node qui ne rend pas la main.",
+    "downTitle": "L'API ne répond pas",
+    "downBody": "Le panel lit ses données depuis l'API, qui ne tourne pas. Démarrez-la dans un second terminal : la page reprendra d'elle-même dès qu'elle répondra.",
+    "needsPostgres": "Elle a aussi besoin de PostgreSQL :",
+    "probeChecking": "Vérification…",
+    "probeOk": "De retour",
+    "probeDegraded": "Base injoignable",
+    "probeOffline": "Hors ligne",
+    "noteRecovering": "L'API répond de nouveau. Rechargement en cours…",
+    "noteNext": "Nouvelle vérification toutes les {seconds} secondes.",
+    "technicalDetail": "Détail technique",
+    "retry": "Réessayer maintenant"
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "Cette page n'existe pas ou vous n'y avez pas accès.",
+    "home": "Retour à l'accueil"
   }
 }

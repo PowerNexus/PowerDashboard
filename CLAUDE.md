@@ -34,7 +34,8 @@ pnpm lint          # Biome
 pnpm typecheck
 pnpm test          # Vitest
 pnpm openapi       # régénère openapi.json depuis packages/contracts/src/api-catalogue.ts
-pnpm db:generate   # doit ne rien produire si schéma et migrations sont en phase
+pnpm db:generate   # produit la migration d'un changement de schéma
+pnpm db:check      # échoue si schéma et migrations ne sont pas en phase
 ```
 
 La CI (`.github/workflows/ci.yml`) refuse un schéma sans migration et un catalogue d'API sans `openapi.json` régénéré.
@@ -51,13 +52,12 @@ Fait, avec tests de non-régression :
 - **OpenAPI + SDK** : catalogue unique `packages/contracts/src/api-catalogue.ts`, SDK écrit à la main dans `packages/sdk`.
 - **Egg Minecraft Java unifié** : `infra/eggs/minecraft-java/`.
 - **Machine injoignable** : `nodes.unreachableSince` (seul écrivain : `node-health-watcher.service.ts`) → `nodeOutageBlock()` (`packages/contracts/src/server.ts`) → blocage complet de l'interface serveur.
+- **Rechiffrement des secrets** : `rekey-secrets.mts` reprend le format `v3:` (il le sautait, une rotation de la clé maître perdait tout) ; cœur testé dans `apps/api/src/common/rekey.ts`.
+- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node, machine injoignable et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`). README à jour.
+- **Schéma et migrations en phase** : instantané `0038`, migration `0038_constraint_names`, `pnpm db:check` (drizzle-kit sort en succès même quand il s'arrête sur une question).
+- **Certificats des revendeurs** : un certificat expiré n'est plus « actif » (`certificateStanding`).
+- **Traduction complète** : page d'erreur et page introuvable ; routes citées dans les textes vérifiées contre l'API.
 
-**Reste à faire — `docs/`**, dernier chantier V1 : ADR, runbooks, guide du contributeur.
-Seul `docs/reprise-pterodactyl.md` existe.
+**La V1 est terminée.** GitHub Actions est suspendu (facture impayée) : les vérifications se font en local — `pnpm lint && pnpm typecheck && DATABASE_URL=… pnpm test && pnpm db:check && pnpm build`, puis `pnpm e2e`.
 
-ADR à rédiger (décisions déjà tranchées, raisons dans le code et PLAN) :
-Wings conservé tel quel · Argon2id plutôt que bcrypt · catalogue d'API comme source unique de la spécification · SDK écrit plutôt que généré · machine muette comme état de premier rang · dépôt sur ext4 plutôt que `drvfs`.
-
-Matière des runbooks : rotation du jeton de node (`POST /admin/nodes/:id/token/rotate`, refusée si le daemon ne répond pas ; banc `infra/local/verifier-rotation.sh`), perte ou changement de sel d'`APP_SECRET_KEY` (`packages/auth/src/secrets.ts`, `apps/api/scripts/rekey-secrets.mts`), `infra/local/README.md`, `infra/prod/README.md`.
-
-À vérifier avec Matheo : `infra/prod/README.md` décrit encore une « bêta publique », probablement périmée.
+- **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).

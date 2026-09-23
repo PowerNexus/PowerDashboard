@@ -69,7 +69,6 @@ export function ResellerSettings({ level }: { level: PlatformAccess }) {
             const choisi = niveau === level;
 
             return (
-              // biome-ignore lint/a11y/noLabelWithoutControl: l'input est à l'intérieur.
               <label
                 key={niveau}
                 className={[

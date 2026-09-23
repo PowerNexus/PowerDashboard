@@ -149,15 +149,6 @@
       color-mix(in srgb, var(--gd-accent-500) 6%, #07060c);
   }
 
-  /* Sur le fond sombre imposé, le gris « muted » du thème clair deviendrait
-     illisible : la teinte du texte suit le fond, pas le thème. */
-  .gd-splash-cover .gd-splash-label {
-    color: color-mix(in srgb, #ffffff 70%, transparent);
-  }
-  .gd-splash-cover .gd-splash-name {
-    color: #ffffff;
-  }
-
   /*
    * Le calque de démarrage, par-dessus la page qui se rend derrière.
    *
@@ -267,6 +258,16 @@
 
   .gd-splash-label {
     animation: gd-splash-pulse 4.3s ease-in-out infinite;
+  }
+
+  /* Sur le fond sombre imposé, le gris « muted » du thème clair deviendrait
+     illisible : la teinte du texte suit le fond, pas le thème. Placé après les
+     règles de base qu'il surcharge, comme le veut l'ordre des spécificités. */
+  .gd-splash-cover .gd-splash-label {
+    color: color-mix(in srgb, #ffffff 70%, transparent);
+  }
+  .gd-splash-cover .gd-splash-name {
+    color: #ffffff;
   }
 
   /*

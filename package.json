@@ -21,6 +21,7 @@
     "services:down": "docker compose -f infra/docker/compose.dev.yml down",
     "services:logs": "docker compose -f infra/docker/compose.dev.yml logs -f",
     "db:generate": "pnpm --filter @gamedashboard/db db:generate",
+    "db:check": "pnpm --filter @gamedashboard/db db:check",
     "db:migrate": "pnpm --filter @gamedashboard/db db:migrate",
     "db:studio": "pnpm --filter @gamedashboard/db db:studio"
   },

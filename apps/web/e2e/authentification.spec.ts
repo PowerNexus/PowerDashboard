@@ -1,12 +1,11 @@
-
 import {
   BOUTON_CONNEXION,
   CHAMP_EMAIL,
   CHAMP_MDP,
   COMPTE,
+  expect,
   fermerAvertissement,
   seConnecter,
-  expect,
   test,
 } from "./fixtures";
 

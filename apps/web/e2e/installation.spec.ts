@@ -1,4 +1,3 @@
-
 import { expect, fermerAvertissement, test } from "./fixtures";
 
 /**
@@ -114,5 +113,21 @@ test.describe("surface publique", () => {
     const reponse = await page.goto("/cette-page-n-existe-pas");
     expect(reponse?.status()).toBe(404);
     await expect(page.getByText(/introuvable|not found/i).first()).toBeVisible();
+  });
+
+  /*
+   * Non-régression : la page introuvable et la page d'erreur étaient écrites
+   * en français en dur, seules de toute l'interface. Un visiteur anglophone
+   * — sans compte, donc sans langue enregistrée — les lisait en français.
+   */
+  test("une page inconnue parle la langue du navigateur", async ({ browser }) => {
+    const anglais = await browser.newContext({ locale: "en-US" });
+    const page = await anglais.newPage();
+
+    await page.goto("/cette-page-n-existe-pas");
+
+    await expect(page.getByText("Page not found")).toBeVisible();
+    await expect(page.getByText("Page introuvable")).toHaveCount(0);
+    await anglais.close();
   });
 });

@@ -12,6 +12,7 @@ import {
 } from "@gamedashboard/ui";
 import { DatabaseZap, PlugZap, RotateCcw, ServerCrash, Timer } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { startTransition, useCallback, useEffect, useState } from "react";
 import { apiFailureFromDigest } from "@/lib/api-status";
 
@@ -56,6 +57,7 @@ export default function PanelError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("errorPage");
   /**
    * Le `digest` fait foi ; le message ne sert que de repli en développement.
    *
@@ -140,7 +142,7 @@ export default function PanelError({
    * Le même écran que le premier chargement referme la boucle.
    */
   if (failure && probe === "ok" && !exhausted) {
-    return <SplashScreen cover label="L'API répond de nouveau. Rechargement…" />;
+    return <SplashScreen cover label={t("recovering")} />;
   }
 
   /**
@@ -154,13 +156,10 @@ export default function PanelError({
     return (
       <Shell
         icon={<ServerCrash className="size-8 text-danger-ink" />}
-        title="L'API répond, mais la page échoue encore"
-        status={<Badge variant="warning">Reprise interrompue</Badge>}
+        title={t("exhaustedTitle")}
+        status={<Badge variant="warning">{t("exhaustedBadge")}</Badge>}
       >
-        <p className="text-muted">
-          Le panel a retenté {MAX_AUTO_RECOVERIES} fois sans succès. La cause n'est donc pas — ou
-          plus — l'API : regardez ses journaux, puis réessayez.
-        </p>
+        <p className="text-muted">{t("exhaustedBody", { count: MAX_AUTO_RECOVERIES })}</p>
         <TechnicalDetail error={error} />
         <Retry onClick={retry} />
       </Shell>
@@ -169,16 +168,13 @@ export default function PanelError({
 
   if (!failure) {
     return (
-      <Shell
-        icon={<ServerCrash className="size-8 text-danger-ink" />}
-        title="Une erreur est survenue"
-      >
-        <AlertBanner variant="danger" title="Détail">
+      <Shell icon={<ServerCrash className="size-8 text-danger-ink" />} title={t("genericTitle")}>
+        <AlertBanner variant="danger" title={t("genericDetail")}>
           {error.message}
         </AlertBanner>
         {error.digest ? (
           <p className="text-faint text-xs">
-            Référence : <span className="gd-mono">{error.digest}</span>
+            {t("reference")} <span className="gd-mono">{error.digest}</span>
           </p>
         ) : null}
         <Retry onClick={retry} />
@@ -192,13 +188,10 @@ export default function PanelError({
     return (
       <Shell
         icon={<DatabaseZap className="size-8 text-warning-ink" />}
-        title="La base de données ne répond pas"
-        status={<Badge variant="warning">API en ligne</Badge>}
+        title={t("databaseTitle")}
+        status={<Badge variant="warning">{t("databaseBadge")}</Badge>}
       >
-        <p className="text-muted">
-          L'API tourne mais ne parvient pas à joindre PostgreSQL. La relancer n'y changerait rien :
-          c'est la base qu'il faut remettre en route.
-        </p>
+        <p className="text-muted">{t("databaseBody")}</p>
         <CodeBlock title="bash" code="pnpm services:up" />
         <ProbeNote probe={probe} />
         <Retry onClick={retry} />
@@ -210,14 +203,10 @@ export default function PanelError({
     return (
       <Shell
         icon={<Timer className="size-8 text-warning-ink" />}
-        title="L'API met trop de temps à répondre"
+        title={t("timeoutTitle")}
         status={<ProbeBadge probe={probe} />}
       >
-        <p className="text-muted">
-          La connexion a été acceptée, mais aucune réponse n'est arrivée dans le délai imparti. Ce
-          n'est pas un processus arrêté : cherchez plutôt une base saturée, une requête bloquée ou
-          un node qui ne rend pas la main.
-        </p>
+        <p className="text-muted">{t("timeoutBody")}</p>
         <ProbeNote probe={probe} />
         <TechnicalDetail error={error} />
         <Retry onClick={retry} />
@@ -228,17 +217,13 @@ export default function PanelError({
   return (
     <Shell
       icon={<PlugZap className="size-8 text-danger-ink" />}
-      title="L'API ne répond pas"
+      title={t("downTitle")}
       status={<ProbeBadge probe={probe} />}
     >
-      <p className="text-muted">
-        Le panel lit ses données depuis l'API, qui ne tourne pas. Démarrez-la dans un second
-        terminal : la page reprendra d'elle-même dès qu'elle répondra.
-      </p>
+      <p className="text-muted">{t("downBody")}</p>
       <CodeBlock title="bash" code="pnpm --filter @gamedashboard/api dev" />
       <p className="text-muted text-sm">
-        Elle a aussi besoin de PostgreSQL :{" "}
-        <span className="gd-mono text-xs">pnpm services:up</span>.
+        {t("needsPostgres")} <span className="gd-mono text-xs">pnpm services:up</span>.
       </p>
       <ProbeNote probe={probe} />
       <TechnicalDetail error={error} />
@@ -258,13 +243,14 @@ function Shell({
   status?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("errorPage");
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col justify-center px-6 py-12">
       <Card>
         <CardHeader
           icon={icon}
           title={title}
-          description="Panel GameDashboard"
+          description={t("subtitle")}
           actions={status ?? undefined}
         />
         <CardBody className="flex flex-col gap-4">{children}</CardBody>
@@ -275,18 +261,18 @@ function Shell({
 
 /** L'état de la sonde, dit sans jargon : la page se surveille toute seule. */
 function ProbeBadge({ probe }: { probe: Probe }) {
-  if (probe === "checking") return <Badge variant="neutral">Vérification…</Badge>;
-  if (probe === "ok") return <Badge variant="success">De retour</Badge>;
-  if (probe === "degraded") return <Badge variant="warning">Base injoignable</Badge>;
-  return <Badge variant="danger">Hors ligne</Badge>;
+  const t = useTranslations("errorPage");
+  if (probe === "checking") return <Badge variant="neutral">{t("probeChecking")}</Badge>;
+  if (probe === "ok") return <Badge variant="success">{t("probeOk")}</Badge>;
+  if (probe === "degraded") return <Badge variant="warning">{t("probeDegraded")}</Badge>;
+  return <Badge variant="danger">{t("probeOffline")}</Badge>;
 }
 
 function ProbeNote({ probe }: { probe: Probe }) {
+  const t = useTranslations("errorPage");
   return (
     <p className="text-faint text-xs">
-      {probe === "ok"
-        ? "L'API répond de nouveau. Rechargement en cours…"
-        : `Nouvelle vérification toutes les ${PROBE_INTERVAL_MS / 1000} secondes.`}
+      {probe === "ok" ? t("noteRecovering") : t("noteNext", { seconds: PROBE_INTERVAL_MS / 1000 })}
     </p>
   );
 }
@@ -299,9 +285,10 @@ function ProbeNote({ probe }: { probe: Probe }) {
  * une pile d'appels apprend surtout qu'on n'a rien prévu pour ce cas.
  */
 function TechnicalDetail({ error }: { error: Error & { digest?: string } }) {
+  const t = useTranslations("errorPage");
   return (
     <details className="text-faint text-sm">
-      <summary className="cursor-pointer">Détail technique</summary>
+      <summary className="cursor-pointer">{t("technicalDetail")}</summary>
       <p className="gd-mono mt-2 text-xs">{error.message}</p>
       {error.digest ? <p className="gd-mono mt-1 text-xs">digest : {error.digest}</p> : null}
     </details>
@@ -309,10 +296,11 @@ function TechnicalDetail({ error }: { error: Error & { digest?: string } }) {
 }
 
 function Retry({ onClick }: { onClick: () => void }) {
+  const t = useTranslations("errorPage");
   return (
     <div>
       <Button onClick={onClick}>
-        <RotateCcw /> Réessayer maintenant
+        <RotateCcw /> {t("retry")}
       </Button>
     </div>
   );

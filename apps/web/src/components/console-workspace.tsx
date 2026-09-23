@@ -34,7 +34,7 @@ export function ConsoleWorkspace({ server }: { server: ClientServer }) {
   const t = useTranslations("console");
   const tm = useTranslations("metrics");
   const router = useRouter();
-  const { phase, state, stats, lines, install, send, power, append } = useServerSocket(
+  const { phase, state, stats, lines, install, send, power } = useServerSocket(
     server.id,
     // Le node est nommé dans les messages du daemon : sur un compte qui tient
     // plusieurs serveurs, savoir quelle machine parle vaut mieux que de lire
