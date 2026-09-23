@@ -323,6 +323,40 @@ describe("actions GitHub des workflows", () => {
 });
 
 /**
+ * Chaque release publie l'inventaire de ce qu'elle livre (PLAN §5.4), signé et
+ * rattaché à l'archive.
+ */
+describe("inventaire des dépendances des releases", () => {
+  const release = readFileSync(join(RACINE, ".github", "workflows", "release.yml"), "utf8");
+  const inventaire = `dist/gamedashboard-\${{ env.VERSION }}.cdx.json`;
+  const etape = (nom: string) => {
+    const debut = release.indexOf(`- name: ${nom}`);
+    expect(debut, nom).toBeGreaterThan(0);
+    return { debut, texte: release.slice(debut, release.indexOf("\n\n", debut)) };
+  };
+
+  it("est produit au format CycloneDX, dans les fichiers publiés", () => {
+    const { texte } = etape("Inventaire des dépendances (SBOM)");
+    expect(texte).toContain("uses: aquasecurity/trivy-action@");
+    expect(texte).toContain("format: cyclonedx");
+    expect(texte).toContain(`output: ${inventaire}`);
+    // Les licences se lisent dans node_modules : l'exclure les ferait disparaître.
+    expect(texte).not.toMatch(/skip-dirs:.*node_modules/);
+  });
+
+  it("est attesté contre l'archive, avant la publication", () => {
+    const production = etape("Inventaire des dépendances (SBOM)");
+    const attestation = etape("Attester l'inventaire");
+    const publication = etape("Publier");
+    expect(attestation.texte).toContain("uses: actions/attest@");
+    expect(attestation.texte).toContain("subject-path: dist/gamedashboard-*.tar.gz");
+    expect(attestation.texte).toContain(`sbom-path: ${inventaire}`);
+    expect(attestation.debut).toBeGreaterThan(production.debut);
+    expect(publication.debut).toBeGreaterThan(attestation.debut);
+  });
+});
+
+/**
  * Le scan ZAP (PLAN §5.4) : présent, reproductible, et honnête sur ce qu'il
  * laisse passer.
  */
