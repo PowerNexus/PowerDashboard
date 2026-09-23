@@ -40,6 +40,7 @@ import { consumeChallenge, issueChallenge, readChallenge } from "./login-challen
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
+import { SecurityAlertService } from "./security-alert.service";
 import { SESSION_COOKIE, SessionGuard } from "./session.guard";
 import {
   SESSION_TTL_MS,
@@ -48,6 +49,7 @@ import {
   type SessionUser,
 } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
+import { trustedCountry, trustedProxiesSetting } from "./sign-in-origin";
 import { SshKeyRepository, type SshKeySummary } from "./ssh-key.repository";
 import { SsoDisabledError, SsoExchangeError, SsoService } from "./sso.service";
 import { TurnstileService } from "./turnstile.service";
@@ -190,6 +192,11 @@ interface Reply {
 interface ClientRequest {
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
+  /**
+   * Interlocuteur direct de l'API — nginx ou le serveur de rendu, pas le
+   * navigateur. Sert à décider si l'en-tête de pays est digne de foi.
+   */
+  socket?: { remoteAddress?: string };
   user?: SessionUser;
   sessionToken?: string;
 }
@@ -214,6 +221,7 @@ export class AuthController {
     @Inject(BrandingService) private readonly branding: BrandingService,
     @Inject(SshKeyRepository) private readonly sshKeys: SshKeyRepository,
     @Inject(TurnstileService) private readonly turnstile: TurnstileService,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
   ) {}
 
   /**
@@ -288,7 +296,7 @@ export class AuthController {
     const valid = await verifyPassword(digest, parsed.data.password);
 
     if (!user || !valid) {
-      await this.users.recordAttempt(parsed.data.email, request.ip ?? null, false);
+      await this.recordFailure(parsed.data.email, request, user);
       // Délai progressif : gênant pour une énumération automatisée, invisible
       // pour quelqu'un qui se trompe deux fois. Le verrou, lui, est plus haut.
       await pause(throttle.delayMs);
@@ -382,7 +390,7 @@ export class AuthController {
       : await this.twoFactor.verifyCode(sealed.userId, parsed.data.code ?? "");
 
     if (!accepted) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
@@ -407,6 +415,30 @@ export class AuthController {
     // durant, depuis un autre onglet ou un autre poste.
     consumeChallenge(parsed.data.challenge);
     await this.issueSession(user.id, request, reply, sealed.method ?? "password");
+  }
+
+  /**
+   * Consigne un échec, et prévient le titulaire au cinquième d'affilée (§5.1).
+   *
+   * `account` est nul pour une adresse inconnue : il n'y a alors personne à
+   * prévenir. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
+   * l'alerte part en tâche détachée, sans rien attendre ni rien renvoyer, si
+   * bien qu'un compte existant et une adresse inventée répondent pareil et
+   * dans le même temps.
+   */
+  private async recordFailure(
+    email: string,
+    request: ClientRequest,
+    account: { id: string; email: string } | null,
+  ): Promise<void> {
+    await this.users.recordAttempt(email, request.ip ?? null, false);
+    if (!account) return;
+    this.alerts.afterFailure({
+      userId: account.id,
+      email: account.email,
+      ip: request.ip ?? null,
+      host: arrivalHost(request),
+    });
   }
 
   /**
@@ -452,7 +484,18 @@ export class AuthController {
   ): Promise<void> {
     const payload = await this.issuer.issue(
       userId,
-      { ip: request.ip ?? null, userAgent: headerValue(request.headers["user-agent"]) },
+      {
+        ip: request.ip ?? null,
+        userAgent: headerValue(request.headers["user-agent"]),
+        // Le pays n'est cru que s'il arrive d'un intermédiaire de
+        // `TRUSTED_PROXIES` ; il n'y a pas de base GeoIP pour le deviner.
+        country: trustedCountry(
+          request.headers,
+          request.socket?.remoteAddress,
+          trustedProxiesSetting(),
+        ),
+        host: arrivalHost(request),
+      },
       reply,
       authMethod,
     );
@@ -588,7 +631,7 @@ export class AuthController {
     if (throttle === null) return;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.currentPassword))) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe actuel incorrect.", problems: [] });
       return;
@@ -1755,7 +1798,7 @@ export class AuthController {
       // Pas de délai progressif : une signature ne se devine pas par essais
       // successifs, contrairement à six chiffres. Le ralentissement viserait
       // un risque qui n'existe pas ici.
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
     }
@@ -1795,7 +1838,7 @@ export class AuthController {
     if (throttle === null) return null;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.password))) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe incorrect." });
       return null;

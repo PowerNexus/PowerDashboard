@@ -152,6 +152,10 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
    * depuis quelle adresse », et une trace qui commence le jour où on ouvre
    * l'écran ne répond à rien.
    */
+  // Toute ouverture de session, quel qu'en soit le chemin. Le pays y est noté
+  // quand un frontal de confiance l'a fourni : c'est ce qui permet de
+  // reconnaître un « nouveau pays » sans colonne dédiée.
+  "account.login": { category: "account", label: "Connexion" },
   "account.password": { category: "account", label: "Mot de passe modifié" },
   "account.2fa_enabled": { category: "account", label: "Double authentification activée" },
   "account.2fa_disabled": { category: "account", label: "Double authentification désactivée" },

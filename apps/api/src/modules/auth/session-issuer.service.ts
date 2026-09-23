@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { SecurityAlertService } from "./security-alert.service";
 import { SESSION_COOKIE } from "./session.guard";
 import { SESSION_TTL_MS, SessionRepository } from "./session.repository";
 import { UserRepository } from "./user.repository";
@@ -24,6 +25,13 @@ import { UserRepository } from "./user.repository";
 export interface SessionOrigin {
   ip: string | null;
   userAgent: string | null;
+  /**
+   * Pays, seulement quand un intermédiaire de confiance l'a fourni (voir
+   * `trustedCountry`). Absent, l'alerte de nouvel appareil n'en parle pas.
+   */
+  country?: string | null;
+  /** Domaine d'arrivée : marque et lien du courriel d'alerte. */
+  host?: string | null;
 }
 
 /** Ce qu'il a besoin de faire à la réponse. Fastify le satisfait tel quel. */
@@ -36,6 +44,7 @@ export class SessionIssuerService {
   constructor(
     @Inject(SessionRepository) private readonly sessions: SessionRepository,
     @Inject(UserRepository) private readonly users: UserRepository,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
   ) {}
 
   /**
@@ -67,6 +76,27 @@ export class SessionIssuerService {
      * être écrite serait absurde.
      */
     void this.users.noteLogin(userId);
+
+    /*
+     * Nouvel appareil ou nouveau réseau ? (§5.1)
+     *
+     * Ici, parce que c'est ici que passent **toutes** les connexions : mot de
+     * passe (avec ou sans second facteur), clé d'accès, authentification
+     * unique, lien venu de la facturation, inscription, invitation. Une alerte
+     * posée dans chaque route aurait oublié la moins fréquentée — et c'est par
+     * elle qu'entre celui qu'on n'attend pas.
+     *
+     * Détachée : la réponse n'attend ni la base ni le serveur SMTP.
+     */
+    this.alerts.afterSignIn({
+      userId,
+      token,
+      ip: origin.ip,
+      userAgent: origin.userAgent,
+      country: origin.country ?? null,
+      host: origin.host ?? null,
+      authMethod,
+    });
 
     /*
      * La ligne lue en base porte le condensat du mot de passe. Seuls les champs

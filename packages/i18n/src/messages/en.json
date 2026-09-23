@@ -1962,5 +1962,26 @@
     "title": "Page not found",
     "description": "This page does not exist or you do not have access to it.",
     "home": "Back to home"
+  },
+  "securityAlerts": {
+    "failureSubject": "Failed sign-in attempts on your {brand} account",
+    "failureTitle": "Failed sign-in attempts",
+    "failureBody": "{count} sign-in attempts on your account failed in a row. The last one came from {ip}, on {time}.",
+    "failureAdvice": "If this was not you, someone may be trying to guess your password. Change it and turn on two-factor authentication:",
+    "failureReassure": "If this was you, there is nothing to do. After ten failures, sign-ins to this account are paused for a few minutes.",
+    "newDeviceSubject": "New sign-in to your {brand} account",
+    "newDeviceTitle": "Sign-in from a new device",
+    "newDeviceBody": "Your account was just opened from a device or network it had never used before.",
+    "newDeviceSummary": "New sign-in: {device}, address {ip}, on {time}.",
+    "detailDevice": "Device: {device}",
+    "detailIp": "IP address: {ip}",
+    "detailCountry": "Country: {country}",
+    "detailTime": "Time: {time}",
+    "newDeviceAdvice": "If this was not you, sign out your other sessions and change your password:",
+    "newDeviceReassure": "If this was you, you can ignore this message.",
+    "deviceOn": "{browser} on {platform}",
+    "unknownDevice": "unidentified device",
+    "unknownIp": "unknown",
+    "footer": "This security message is sent regardless of your notification settings."
   }
 }
