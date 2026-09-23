@@ -151,10 +151,37 @@ justifie après un changement structurel, et avant de pousser.
   réel ([`infra/local/README.md`](../infra/local/README.md)). Ils ne tournent
   que sur Codiax, pas en CI ni en session distante. À lancer après toute
   modification de ce que le panel envoie à Wings ou de ce qu'il en reçoit.
-- **E2E** : `pnpm e2e` (Playwright), contre l'API réelle et PostgreSQL.
+- **E2E** : `pnpm e2e` (Playwright), contre l'API réelle et PostgreSQL. La
+  même suite porte :
+  - **Lighthouse** (`e2e/performance.spec.ts`), profil bureau : performance,
+    accessibilité et bonnes pratiques à 90 au moins, référencement à 80. Les
+    scores s'écrivent au journal, même au vert ;
+  - **les régressions visuelles** (`e2e/visuel.spec.ts`) : chaque écran
+    comparé à sa capture de référence, bureau et mobile.
 
-On teste ce qui a des règles (seuils, précédences, permissions, formats), pas
-le rendu.
+On teste ce qui a des règles (seuils, précédences, permissions, formats) ; le
+rendu, lui, n'est tenu que par les captures.
+
+### Captures de référence
+
+Elles se prennent **sur le runner et nulle part ailleurs** : le rendu des
+polices change d'une machine à l'autre, et une capture prise sur un poste ou
+dans une session distante ferait échouer la CI sur des différences
+d'anticrénelage.
+
+- **Une capture manque** (écran ajouté) : son test est sauté, et le dit.
+- **Un écran a changé, et c'est voulu** : la CI échoue sur la différence.
+  Lancer *Actions › Captures de référence › Run workflow* sur la branche : le
+  workflow reprend toutes les captures sur le runner et les commite. Son
+  commit ne relance pas la CI ; pousser ensuite, ou relancer la CI.
+- **Un écran a changé sans le vouloir** : c'est ce que la suite est là pour
+  attraper. Le rapport Playwright montre l'image attendue, l'image obtenue et
+  leur différence.
+
+Ce qui change d'une exécution à l'autre sans que l'interface change se déclare
+dans le code : `<time>` et `data-instable` sont masqués d'un aplat,
+`data-instable-liste` est retiré de la capture (une liste dont la longueur
+varie).
 
 ## Ce que la CI refuse
 

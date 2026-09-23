@@ -1,0 +1,11 @@
+/*
+ * Feuille injectée pendant les captures de la suite visuelle, et seulement
+ * pendant elles (`e2e/visuel.spec.ts`).
+ *
+ * Ce qui change de taille d'une exécution à l'autre — une liste qui s'allonge
+ * à chaque connexion, celles des autres tests comprises — est retiré de la
+ * capture : masqué, il garderait sa hauteur variable.
+ */
+[data-instable-liste] {
+  display: none;
+}

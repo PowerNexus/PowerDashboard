@@ -55,6 +55,7 @@ Fait, avec tests de non-régression :
 - **Planificateur** parallélisé avec garde `enVol` (`apps/api/src/modules/scheduler/schedule-runner.service.ts`).
 - **Balayages de fond** centralisés dans `battre()` (`apps/api/src/common/background-tick.ts`) : un rejet non rattrapé tuait le processus sous Node 24.
 - **Changement d'egg** transactionnel, synchronisé avant réinstallation.
+- **Lighthouse et régressions visuelles** (PLAN §12.1, §12.2) : `apps/web/e2e/performance.spec.ts` (profil bureau, seuils 90) et `e2e/visuel.spec.ts` (captures bureau et mobile). Les références ne se prennent **que sur le runner**, par le workflow manuel `captures.yml` ; une référence absente saute son test. Contenu variable : `<time>`/`data-instable` masqués, `data-instable-liste` retiré (`e2e/captures.css`). Voir `docs/contribuer.md`.
 - **Transferts perdus** : un transfert sans compte rendu depuis `TRANSFER_STALE_MS` est clos par `ServerTransferReaperService` (le serveur restait bloqué « en transfert ») ; bascule et retour en arrière verrouillent la ligne du transfert (`server-transfer.integration.test.ts`).
 - **SBOM des releases** (PLAN §5.4) : `release.yml` produit `gamedashboard-vX.Y.Z.cdx.json` (CycloneDX, Trivy, dépendances livrées avec licences), l'atteste contre l'archive (`actions/attest`) et le publie ; vérifié par `infra-prod.test.ts`.
 - **Mots de passe** : bcrypt reconnu et réécrit en Argon2id à la première connexion (`packages/auth/src/password.ts`).

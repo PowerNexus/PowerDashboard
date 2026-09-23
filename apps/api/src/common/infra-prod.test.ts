@@ -241,7 +241,7 @@ describe("CLI autonome (gamedashboard.sh)", () => {
  */
 describe("actions GitHub des workflows", () => {
   const dossier = join(RACINE, ".github", "workflows");
-  const workflows = ["ci.yml", "release.yml"].map((nom) =>
+  const workflows = ["ci.yml", "release.yml", "captures.yml"].map((nom) =>
     readFileSync(join(dossier, nom), "utf8"),
   );
   const actions = workflows.flatMap((texte) =>
@@ -260,7 +260,7 @@ describe("actions GitHub des workflows", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(cibles.length).toBe(4);
+    expect(cibles.length).toBe(5);
     for (const cible of cibles) {
       expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}`);
     }
@@ -270,7 +270,7 @@ describe("actions GitHub des workflows", () => {
     const caches = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*cache:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(caches.length).toBe(4);
+    expect(caches.length).toBe(5);
     for (const cache of caches) {
       expect(cache).toBe(`\${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}`);
     }
@@ -353,5 +353,28 @@ describe("inventaire des dépendances des releases", () => {
     expect(attestation.texte).toContain(`sbom-path: ${inventaire}`);
     expect(attestation.debut).toBeGreaterThan(production.debut);
     expect(publication.debut).toBeGreaterThan(attestation.debut);
+  });
+});
+
+/**
+ * Les captures de référence de la suite visuelle ne se prennent que sur le
+ * runner, à la demande : une référence prise ailleurs ferait échouer la CI
+ * sur des différences de rendu de polices que personne n'a introduites.
+ */
+describe("workflow des captures de référence", () => {
+  const captures = readFileSync(join(RACINE, ".github", "workflows", "captures.yml"), "utf8");
+
+  it("ne se lance qu'à la main", () => {
+    const declencheurs = captures.slice(
+      captures.indexOf("\non:"),
+      captures.indexOf("\nconcurrency:"),
+    );
+    expect(declencheurs.trim()).toBe("on:\n  workflow_dispatch:");
+  });
+
+  it("reprend toutes les captures de la suite visuelle, et les pousse sur la branche lancée", () => {
+    expect(captures).toContain("playwright test e2e/visuel.spec.ts --update-snapshots=all");
+    expect(captures).toContain("git add apps/web/e2e/visuel.spec.ts-snapshots");
+    expect(captures).toContain(`git push origin "HEAD:\${{ github.ref_name }}"`);
   });
 });
