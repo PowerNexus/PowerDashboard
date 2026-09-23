@@ -884,7 +884,9 @@
     "emptyBody": "No event matches these filters.",
     "previous": "Previous page",
     "next": "Next page",
-    "pageNumber": "Page {page}"
+    "pageNumber": "Page {page}",
+    "exportCsv": "Export as CSV",
+    "exportJsonl": "Export as JSON"
   },
   "databaseHosts": {
     "metaTitle": "MySQL hosts",
@@ -1713,15 +1715,13 @@
     "preset": "Preset",
     "presetHint": "Ticks a set of permissions. Adjust them after: the boxes are what counts, not the preset.",
     "presetViewer": "Viewer",
-    "presetViewerHint": "Read only",
     "presetModerator": "Moderator",
-    "presetModeratorHint": "Console and power",
     "presetDeveloper": "Developer",
-    "presetDeveloperHint": "Everything but access management",
     "editTitle": "Edit permissions",
     "editBody": "{name} — open consoles will be closed so the change takes effect.",
     "removeTitle": "Remove this access?",
-    "removeBody": "{name} loses access to this server, and their console closes immediately."
+    "removeBody": "{name} loses access to this server, and their console closes immediately.",
+    "presetCount": "{count, plural, one {# permission} other {# permissions}}"
   },
   "webhooks": {
     "title": "Outbound callbacks",
@@ -1983,5 +1983,18 @@
     "unknownDevice": "unidentified device",
     "unknownIp": "unknown",
     "footer": "This security message is sent regardless of your notification settings."
+  },
+  "subuserPresets": {
+    "title": "Subuser presets",
+    "description": "The permissions each preset ticks in the invitation form, on every server of the platform.",
+    "existingTitle": "Existing access does not change",
+    "existingBody": "A subuser's permissions are copied when they are invited. Changing a preset only affects future invitations: nobody gains or loses a right retroactively.",
+    "savedBody": "Future invitations will start from these presets.",
+    "preset": "Preset",
+    "customized": "Changed by the platform",
+    "default": "Default values",
+    "reset": "Restore default values",
+    "resetTitle": "Restore the default presets?",
+    "resetBody": "The three presets go back to the values shipped with the panel. Existing subusers keep their permissions."
   }
 }

@@ -884,7 +884,9 @@
     "emptyBody": "Aucun événement ne correspond à ces filtres.",
     "previous": "Page précédente",
     "next": "Page suivante",
-    "pageNumber": "Page {page}"
+    "pageNumber": "Page {page}",
+    "exportCsv": "Exporter en CSV",
+    "exportJsonl": "Exporter en JSON"
   },
   "databaseHosts": {
     "metaTitle": "Hôtes MySQL",
@@ -1713,15 +1715,13 @@
     "preset": "Préréglage",
     "presetHint": "Coche un ensemble de permissions. Ajustez-les ensuite : ce sont les cases qui font foi, pas le préréglage.",
     "presetViewer": "Lecteur",
-    "presetViewerHint": "Consultation seule",
     "presetModerator": "Modérateur",
-    "presetModeratorHint": "Console et alimentation",
     "presetDeveloper": "Développeur",
-    "presetDeveloperHint": "Tout sauf la gestion des accès",
     "editTitle": "Modifier les permissions",
     "editBody": "{name} — les consoles déjà ouvertes seront fermées pour appliquer le changement.",
     "removeTitle": "Retirer cet accès ?",
-    "removeBody": "{name} n'aura plus accès à ce serveur, et sa console sera fermée immédiatement."
+    "removeBody": "{name} n'aura plus accès à ce serveur, et sa console sera fermée immédiatement.",
+    "presetCount": "{count, plural, one {# permission} other {# permissions}}"
   },
   "webhooks": {
     "title": "Rappels sortants",
@@ -1983,5 +1983,18 @@
     "unknownDevice": "appareil non identifié",
     "unknownIp": "inconnue",
     "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification."
+  },
+  "subuserPresets": {
+    "title": "Préréglages des sous-utilisateurs",
+    "description": "Les permissions que chaque préréglage coche dans le formulaire d'invitation, sur tous les serveurs de la plateforme.",
+    "existingTitle": "Les accès existants ne changent pas",
+    "existingBody": "Les permissions d'un sous-utilisateur sont recopiées au moment de son invitation. Modifier un préréglage ne concerne que les invitations suivantes : personne ne gagne ni ne perd un droit rétroactivement.",
+    "savedBody": "Les prochaines invitations partiront de ces préréglages.",
+    "preset": "Préréglage",
+    "customized": "Modifié par la plateforme",
+    "default": "Valeurs par défaut",
+    "reset": "Rétablir les valeurs par défaut",
+    "resetTitle": "Rétablir les préréglages par défaut ?",
+    "resetBody": "Les trois préréglages reprennent les valeurs livrées avec le panel. Les sous-utilisateurs existants gardent leurs permissions."
   }
 }

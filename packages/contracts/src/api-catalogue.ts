@@ -213,6 +213,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
   },
   {
     method: "GET",
+    path: "/servers/{server}/subusers/presets",
+    summary:
+      "Presets de permissions proposés à l'invitation, tels que l'administration les a définis.",
+    scope: "subusers.read",
+    group: "Accès",
+  },
+  {
+    method: "GET",
     path: "/servers/{server}/activity",
     summary: "Journal d'audit du serveur, paginé par curseur.",
     scope: "activity.read",

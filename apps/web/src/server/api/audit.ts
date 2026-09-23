@@ -1,3 +1,4 @@
+import { AuditFilters } from "@gamedashboard/contracts";
 import { apiFetch } from "./client";
 
 /**
@@ -26,14 +27,24 @@ export interface AuditPage {
   hasMore: boolean;
 }
 
-export async function fetchAudit(params: {
-  query?: string;
-  event?: string;
-  page?: number;
-}): Promise<AuditPage> {
+/**
+ * Les filtres que l'API comprend, tirés du schéma qu'elle applique.
+ *
+ * La page les relaie tous : l'export reprend l'adresse entière, et une liste
+ * qui en ignorerait un montrerait autre chose que le fichier. Lus dans le
+ * schéma plutôt que recopiés, un filtre ajouté à l'API arrive ici sans qu'on y
+ * pense.
+ */
+export const AUDIT_FILTER_KEYS = AuditFilters.keyof().options;
+
+export async function fetchAudit(
+  params: Partial<Record<(typeof AUDIT_FILTER_KEYS)[number], string>> & { page?: number },
+): Promise<AuditPage> {
   const search = new URLSearchParams();
-  if (params.query) search.set("query", params.query);
-  if (params.event) search.set("event", params.event);
+  for (const key of AUDIT_FILTER_KEYS) {
+    const value = params[key];
+    if (value) search.set(key, value);
+  }
   if (params.page && params.page > 1) search.set("page", String(params.page));
 
   const suffix = search.toString();

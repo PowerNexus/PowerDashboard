@@ -1,6 +1,11 @@
 "use client";
 
-import { PERMISSION_GROUPS, ROLE_PRESETS, type SubuserRolePreset } from "@gamedashboard/contracts";
+import {
+  DELEGABLE_ROLE_PRESETS,
+  type DelegableRolePreset,
+  PERMISSION_GROUPS,
+  type RolePresets,
+} from "@gamedashboard/contracts";
 import {
   AlertBanner,
   Avatar,
@@ -36,12 +41,12 @@ import {
   updateSubuser,
 } from "@/server/api/subusers";
 
-/** Présets proposés à l'invitation. « owner » n'en est pas : il ne se délègue pas. */
-const PRESETS: { value: Exclude<SubuserRolePreset, "owner">; key: string }[] = [
-  { value: "viewer", key: "presetViewer" },
-  { value: "moderator", key: "presetModerator" },
-  { value: "developer", key: "presetDeveloper" },
-];
+/** Libellé de chaque préset. « owner » n'en est pas : il ne se délègue pas. */
+const PRESET_LABELS: Record<DelegableRolePreset, string> = {
+  viewer: "presetViewer",
+  moderator: "presetModerator",
+  developer: "presetDeveloper",
+};
 
 /**
  * Personnes ayant accès au serveur.
@@ -50,15 +55,21 @@ const PRESETS: { value: Exclude<SubuserRolePreset, "owner">; key: string }[] = [
  * depuis un rôle : redéfinir un préset ne doit pas élargir rétroactivement les
  * droits de quelqu'un invité des mois plus tôt. Le préset ne sert donc qu'à
  * pré-cocher des cases au moment de l'invitation.
+ *
+ * Les présets viennent de l'API, pas du code : l'administration de la
+ * plateforme peut les redéfinir, et le formulaire doit cocher ce qu'elle a
+ * décidé.
  */
 export function SubusersWorkspace({
   serverId,
   initial,
   invites,
+  presets,
 }: {
   serverId: string;
   initial: Subuser[];
   invites: ServerInvite[];
+  presets: RolePresets;
 }) {
   const t = useTranslations("subusers");
   const tc = useTranslations("common");
@@ -68,7 +79,7 @@ export function SubusersWorkspace({
   const [editing, setEditing] = useState<Subuser | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [permissions, setPermissions] = useState<string[]>([...ROLE_PRESETS.moderator]);
+  const [permissions, setPermissions] = useState<string[]>([...presets.moderator]);
   const [pending, startTransition] = useTransition();
 
   const run = useCallback(
@@ -166,7 +177,7 @@ export function SubusersWorkspace({
             <Button
               disabled={pending}
               onClick={() => {
-                setPermissions([...ROLE_PRESETS.moderator]);
+                setPermissions([...presets.moderator]);
                 setEmail("");
                 setInviteOpen(true);
               }}
@@ -272,11 +283,14 @@ export function SubusersWorkspace({
                   <SelectMenu
                     id={id}
                     value=""
-                    onValueChange={(v) => setPermissions([...ROLE_PRESETS[v as SubuserRolePreset]])}
-                    options={PRESETS.map((preset) => ({
-                      value: preset.value,
-                      label: t(preset.key),
-                      description: t(`${preset.key}Hint`),
+                    onValueChange={(v) => setPermissions([...presets[v as DelegableRolePreset]])}
+                    // Le nombre de cases plutôt qu'une description figée :
+                    // l'administration peut redéfinir un préset, et « consultation
+                    // seule » deviendrait alors un mensonge affiché à l'écran.
+                    options={DELEGABLE_ROLE_PRESETS.map((preset) => ({
+                      value: preset,
+                      label: t(PRESET_LABELS[preset]),
+                      description: t("presetCount", { count: presets[preset].length }),
                     }))}
                   />
                 )}
