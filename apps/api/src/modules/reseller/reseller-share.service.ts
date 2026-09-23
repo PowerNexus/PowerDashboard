@@ -154,13 +154,13 @@ export class ResellerShareService {
          * reste lisible et laisse l'index `(server_id, at)` faire son travail.
          */
         memBytes: sql<number | null>`(
-          select m.mem_bytes from ${serverMetrics} m
+          select m.mem_bytes::float8 from ${serverMetrics} m
           where m.server_id = ${servers.id}
             and m.at > now() - interval '${sql.raw(String(MEASUREMENT_MAX_AGE_MS / 1000))} seconds'
           order by m.at desc limit 1
         )`,
         diskBytes: sql<number | null>`(
-          select m.disk_bytes from ${serverMetrics} m
+          select m.disk_bytes::float8 from ${serverMetrics} m
           where m.server_id = ${servers.id}
             and m.at > now() - interval '${sql.raw(String(MEASUREMENT_MAX_AGE_MS / 1000))} seconds'
           order by m.at desc limit 1

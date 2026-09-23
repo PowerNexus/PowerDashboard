@@ -349,8 +349,14 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       await login(account.email, PASSWORD, HOME);
       await alerts.settled();
 
-      // Un serveur SMTP qui ne répond jamais : la connexion ne doit pas l'attendre.
-      mail.send.mockImplementation(() => new Promise(() => {}));
+      // Un serveur SMTP qui ne répond pas : la connexion ne doit pas l'attendre.
+      let liberer: (() => void) | undefined;
+      mail.send.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            liberer = resolve;
+          }),
+      );
       const started = Date.now();
       const reply = await login(account.email, PASSWORD, {
         ip: "198.51.100.9",
@@ -359,6 +365,16 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       expect(reply.statusCode).toBe(200);
       expect(reply.cookies.size).toBe(1);
       expect(Date.now() - started).toBeLessThan(5_000);
+
+      /*
+       * L'envoi est libéré, puis attendu, **avant** de rendre la main.
+       *
+       * Un envoi laissé pendant pour toujours gardait sa tâche en vol : elle
+       * écrivait encore en base pendant que le test suivant vidait les tables,
+       * et le `truncate` finissait une fois sur trois en interblocage.
+       */
+      liberer?.();
+      await alerts.settled();
     });
 
     it("un envoi qui échoue n'abat rien et laisse la cloche", async () => {

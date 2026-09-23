@@ -274,7 +274,7 @@ export class QuotaEnforcerService implements OnModuleInit, OnModuleDestroy {
         name: servers.name,
         nodeId: servers.nodeId,
         memBytes: sql<number>`(
-          select m.mem_bytes from ${serverMetrics} m
+          select m.mem_bytes::float8 from ${serverMetrics} m
           where m.server_id = ${servers.id} and m.at > now() - interval '5 minutes'
           order by m.at desc limit 1
         )`,
