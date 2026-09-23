@@ -14,7 +14,6 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -54,8 +53,6 @@ export interface DomainState {
 
 @Injectable()
 export class BrandingService {
-  private readonly logger = new Logger(BrandingService.name);
-
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(PlatformSettingsService) private readonly settings: PlatformSettingsService,

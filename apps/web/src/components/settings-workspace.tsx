@@ -12,7 +12,6 @@ import {
   PageTemplate,
   SelectMenu,
   SettingsSection,
-  SettingToggle,
 } from "@gamedashboard/ui";
 import { RotateCcw, Settings } from "lucide-react";
 import Link from "next/link";

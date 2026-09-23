@@ -108,7 +108,7 @@ export function certificateStanding(
     certificateAttemptedAt: string | null;
     certificateFailure: string | null;
   },
-  now: number = Date.now(),
+  _now: number = Date.now(),
 ): CertificateStanding {
   // Un domaine non vérifié n'est pas en attente de certificat : rien ne prouve
   // encore qu'il appartienne à ce revendeur, et rien ne sera demandé pour lui.

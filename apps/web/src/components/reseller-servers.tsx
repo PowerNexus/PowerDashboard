@@ -21,7 +21,7 @@ import {
 import { Pause, Play, Search, Server, SlidersHorizontal, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import type { ResellerServer } from "@/server/api/reseller";
 import {
   deleteResellerServer,
@@ -106,12 +106,15 @@ export function ResellerServers({ servers }: { servers: ResellerServer[] }) {
   const [offre, setOffre] = useState<Record<string, string>>({});
   const [pending, startTransition] = useTransition();
 
-  const run = (action: () => Promise<{ error: string | null }>) =>
-    startTransition(async () => {
-      const result = await action();
-      setError(result.error);
-      if (!result.error) router.refresh();
-    });
+  const run = useCallback(
+    (action: () => Promise<{ error: string | null }>) =>
+      startTransition(async () => {
+        const result = await action();
+        setError(result.error);
+        if (!result.error) router.refresh();
+      }),
+    [router],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -256,7 +259,7 @@ export function ResellerServers({ servers }: { servers: ResellerServer[] }) {
         },
       },
     ],
-    [t, tc, ta, pending],
+    [t, tc, ta, pending, run],
   );
 
   return (

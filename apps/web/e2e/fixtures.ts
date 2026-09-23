@@ -19,7 +19,7 @@ import { test as base, expect, type Page } from "@playwright/test";
  * La valeur est celle du composant ; si elle change, l'avertissement
  * reparaîtra et la suite le dira aussitôt.
  */
-export const test = base.extend<{ avertissementLu: void }>({
+export const test = base.extend<{ avertissementLu: undefined }>({
   avertissementLu: [
     async ({ context }, use) => {
       await context.addInitScript(() => {
@@ -30,7 +30,7 @@ export const test = base.extend<{ avertissementLu: void }>({
           // reste là pour ce cas.
         }
       });
-      await use();
+      await use(undefined);
     },
     { auto: true },
   ],
