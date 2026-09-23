@@ -27,6 +27,7 @@ import { NodeConfigurationService } from "./node-configuration.service";
 import { NodeLoadService } from "./node-load.service";
 import { PlatformSettingsService } from "./platform-settings.service";
 import { ServerTransferService } from "./server-transfer.service";
+import { ServerTransferReaperService } from "./server-transfer-reaper.service";
 import { StaffTwoFactorGuard } from "./staff-2fa.guard";
 
 @Module({
@@ -71,6 +72,9 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     AdminActionsService,
     AdminUsersService,
     ServerTransferService,
+    // Sans lui, un transfert dont aucun daemon ne rapporte l'issue laissait le
+    // serveur bloqué pour toujours.
+    ServerTransferReaperService,
     // Sans hôte déclaré, la fonction « bases de données » de l'espace client
     // est complète mais inutilisable : c'est cet écran qui la met en service.
     DatabaseHostsService,
