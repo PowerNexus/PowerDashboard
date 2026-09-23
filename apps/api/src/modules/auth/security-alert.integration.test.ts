@@ -140,10 +140,12 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       {} as never,
       mailer,
       platform,
-      branding,
       {} as never,
       { accepts: async () => true } as never,
       alerts,
+      // Le courrier de compte (réinitialisation, vérification) n'est pas en
+      // jeu ici : la connexion n'y touche pas.
+      {} as never,
     );
   });
 

@@ -1,6 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { encryptSecret } from "@gamedashboard/auth";
 import {
+  type CapacityRefusal,
+  capacityRefusals,
+  type NodeSettingsInput,
+} from "@gamedashboard/contracts";
+import {
+  allocations,
   type Database,
   locations,
   nodeCategories,
@@ -15,7 +21,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 /**
@@ -336,6 +342,238 @@ export class InfrastructureService {
   }
 
   /**
+   * Fiche d'un node : tout ce que l'écran de modification présente.
+   *
+   * Le jeton n'en fait pas partie, ni en clair ni chiffré : il a sa propre
+   * route, sous garde d'écriture et consignée au journal.
+   */
+  async nodeDetail(nodeId: string) {
+    const [row] = await this.db
+      .select({
+        id: nodes.id,
+        name: nodes.name,
+        locationId: nodes.locationId,
+        category: nodes.category,
+        subcategory: nodes.subcategory,
+        fqdn: nodes.fqdn,
+        scheme: nodes.scheme,
+        daemonPort: nodes.daemonPort,
+        daemonSftpPort: nodes.daemonSftpPort,
+        memoryMb: nodes.memoryMb,
+        memoryOverallocate: nodes.memoryOverallocate,
+        diskMb: nodes.diskMb,
+        diskOverallocate: nodes.diskOverallocate,
+        cpuCores: nodes.cpuCores,
+        isPublic: nodes.public,
+        maintenance: nodes.maintenanceMode,
+        ownerId: nodes.ownerId,
+        wingsVersion: nodes.wingsVersion,
+        lastHeartbeatAt: nodes.lastHeartbeatAt,
+        unreachableSince: nodes.unreachableSince,
+        tokenId: nodes.daemonTokenId,
+        tokenRotatedAt: nodes.daemonTokenRotatedAt,
+        createdAt: nodes.createdAt,
+      })
+      .from(nodes)
+      .where(eq(nodes.id, nodeId))
+      .limit(1);
+    if (!row) throw new NotFoundException("Node introuvable.");
+
+    // Renommés : `memoryMb` est la capacité de la machine, et l'allocation
+    // posée par-dessus sous le même nom l'effaçait.
+    const allocated = await this.allocatedOn(this.db, nodeId);
+    return {
+      ...row,
+      memoryAllocatedMb: allocated.memoryMb,
+      diskAllocatedMb: allocated.diskMb,
+      servers: allocated.servers,
+    };
+  }
+
+  /**
+   * Modifie les réglages d'un node qui ne concernent que le panel.
+   *
+   * La liaison — adresse, protocole, ports — n'est **pas** ici : elle vit aussi
+   * dans le `config.yml` de la machine, et passe par
+   * `NodeConfigurationService.rebind`, qui ne l'enregistre qu'une fois le
+   * daemon d'accord.
+   *
+   * **La capacité ne descend pas sous ce qui est promis.** Une limite vendue à
+   * un client est un engagement ; réduire la machine en dessous ferait mentir
+   * les jauges et laisserait le placement croire qu'un node plein a de la
+   * place — ou l'inverse, le déclarer saturé à jamais. Le refus dit combien
+   * manque, et quoi faire.
+   *
+   * Le node est verrouillé pendant la vérification : deux modifications
+   * simultanées ne doivent pas se contredire après avoir chacune passé le
+   * contrôle.
+   */
+  async updateNodeSettings(nodeId: string, input: NodeSettingsInput): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const locked = await tx.execute(
+        sql`select 1 from ${nodes} where ${nodes.id} = ${nodeId} for update`,
+      );
+      if (locked.length === 0) throw new NotFoundException("Node introuvable.");
+
+      const [location] = await tx
+        .select({ id: locations.id })
+        .from(locations)
+        .where(eq(locations.id, input.locationId));
+      if (!location) throw new BadRequestException("Localisation inconnue.");
+
+      const refusals = capacityRefusals(input, await this.allocatedOn(tx, nodeId));
+      if (refusals.length > 0) throw new ConflictException(describeRefusals(refusals));
+
+      await tx
+        .update(nodes)
+        .set({
+          name: input.name,
+          locationId: input.locationId,
+          // Chaîne vide vaut « non classé » : un choix possible, pas un champ oublié.
+          category: input.category || null,
+          subcategory: input.category ? input.subcategory || null : null,
+          memoryMb: input.memoryMb,
+          memoryOverallocate: input.memoryOverallocate,
+          diskMb: input.diskMb,
+          diskOverallocate: input.diskOverallocate,
+          cpuCores: input.cpuCores,
+          public: input.isPublic,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(nodes.id, nodeId));
+    });
+  }
+
+  /** Ce qui est accordé aux serveurs d'un node, en mémoire et en disque. */
+  private async allocatedOn(
+    db: Pick<Database, "select">,
+    nodeId: string,
+  ): Promise<{ memoryMb: number; diskMb: number; servers: number }> {
+    const [row] = await db
+      .select({
+        memoryMb: sql<number>`coalesce(sum(${servers.memoryMb}), 0)::int`,
+        diskMb: sql<number>`coalesce(sum(${servers.diskMb}), 0)::int`,
+        servers: sql<number>`count(*)::int`,
+      })
+      .from(servers)
+      .where(eq(servers.nodeId, nodeId));
+    return row ?? { memoryMb: 0, diskMb: 0, servers: 0 };
+  }
+
+  /* --- Ports --------------------------------------------------------------- */
+
+  /**
+   * Le stock de ports d'un node, avec le serveur qui occupe chacun.
+   *
+   * Un port est « occupé » de deux façons, et il faut les deux : comme port
+   * **principal** d'un serveur (`servers.allocation_id`), ou comme port
+   * **supplémentaire** (`allocations.server_id`). Ne regarder que la seconde
+   * présenterait comme libre le port sur lequel le serveur écoute.
+   */
+  async allocationsOf(nodeId: string) {
+    const [node] = await this.db
+      .select({ id: nodes.id })
+      .from(nodes)
+      .where(eq(nodes.id, nodeId))
+      .limit(1);
+    if (!node) throw new NotFoundException("Node introuvable.");
+
+    return this.db
+      .select({
+        id: allocations.id,
+        ip: allocations.ip,
+        ipAlias: allocations.ipAlias,
+        port: allocations.port,
+        notes: allocations.notes,
+        serverId: sql<string | null>`coalesce(${allocations.serverId}, ${servers.id})`,
+        serverName: sql<string | null>`coalesce(
+          (select s.name from ${servers} s where s.id = ${allocations.serverId}),
+          ${servers.name}
+        )`,
+        isPrimary: sql<boolean>`${servers.id} is not null`,
+      })
+      .from(allocations)
+      .leftJoin(servers, eq(servers.allocationId, allocations.id))
+      .where(eq(allocations.nodeId, nodeId))
+      .orderBy(asc(allocations.ip), asc(allocations.port));
+  }
+
+  /**
+   * Retire des ports du stock d'un node.
+   *
+   * **Tout ou rien.** Si un seul des ports demandés est occupé par un serveur,
+   * rien n'est retiré et le refus les nomme tous, avec le serveur qui les
+   * tient. Retirer « ce qui pouvait l'être » laisserait l'administrateur
+   * deviner lesquels sont partis ; le lui dire et le laisser décocher est plus
+   * honnête.
+   *
+   * Un port occupé ne se retire jamais d'ici : le serveur y écoute, et le lui
+   * arracher le rendrait injoignable au prochain démarrage. On le libère depuis
+   * le serveur, ou en supprimant le serveur.
+   *
+   * Les lignes sont verrouillées le temps du contrôle : un serveur créé entre
+   * la vérification et la suppression ne doit pas perdre le port qu'on vient
+   * de lui attribuer.
+   */
+  async removeAllocations(nodeId: string, ids: string[]): Promise<{ removed: number }> {
+    const unique = [...new Set(ids)];
+
+    return this.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({
+          id: allocations.id,
+          ip: allocations.ip,
+          port: allocations.port,
+          extraOf: allocations.serverId,
+        })
+        .from(allocations)
+        .where(and(eq(allocations.nodeId, nodeId), inArray(allocations.id, unique)))
+        .for("update");
+
+      if (rows.length !== unique.length) {
+        throw new NotFoundException(
+          "Certains ports demandés n'existent pas sur ce node (déjà retirés, ou d'une autre machine). Rechargez la liste.",
+        );
+      }
+
+      const primaries = await tx
+        .select({ allocationId: servers.allocationId, name: servers.name })
+        .from(servers)
+        .where(inArray(servers.allocationId, unique));
+      const extras = await tx
+        .select({ id: servers.id, name: servers.name })
+        .from(servers)
+        .where(
+          inArray(
+            servers.id,
+            rows.flatMap((row) => (row.extraOf ? [row.extraOf] : [])),
+          ),
+        );
+
+      const holder = (row: (typeof rows)[number]): string | null =>
+        primaries.find((p) => p.allocationId === row.id)?.name ??
+        extras.find((e) => e.id === row.extraOf)?.name ??
+        null;
+
+      const busy = rows.flatMap((row) => {
+        const name = holder(row);
+        return name === null ? [] : [`${row.ip}:${row.port} (${name})`];
+      });
+      if (busy.length > 0) {
+        throw new ConflictException(
+          `Rien n'a été retiré : ${busy.length === 1 ? "ce port est utilisé" : "ces ports sont utilisés"} par un serveur — ${busy.join(", ")}. Décochez-les, ou libérez-les depuis le serveur concerné, puis recommencez.`,
+        );
+      }
+
+      const deleted = await tx
+        .delete(allocations)
+        .where(and(eq(allocations.nodeId, nodeId), inArray(allocations.id, unique)))
+        .returning({ id: allocations.id });
+      return { removed: deleted.length };
+    });
+  }
+
+  /**
    * Retire une machine du parc.
    *
    * Refusé tant qu'elle héberge des serveurs : la contrainte existe en base,
@@ -361,4 +599,25 @@ export class InfrastructureService {
 
     if (!deleted) throw new NotFoundException("Node introuvable.");
   }
+}
+
+/** Mégaoctets en clair, en gigaoctets dès que c'est plus lisible. */
+function readableMb(mb: number): string {
+  return mb >= 1024
+    ? `${(mb / 1024).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} Go`
+    : `${mb} Mo`;
+}
+
+/**
+ * Le refus d'une baisse de capacité, en une phrase qui dit quoi faire.
+ *
+ * Exportée pour être vérifiée : c'est le texte que l'administrateur lira, et
+ * un chiffre inversé y serait une erreur de conduite, pas de style.
+ */
+export function describeRefusals(refusals: CapacityRefusal[]): string {
+  const parts = refusals.map(
+    (r) =>
+      `${r.resource === "memory" ? "mémoire" : "disque"} : ${readableMb(r.capacityMb)} demandés (surallocation comprise), mais ${readableMb(r.allocatedMb)} sont déjà promis aux serveurs de cette machine`,
+  );
+  return `Capacité insuffisante — ${parts.join(" ; ")}. Gardez au moins ce qui est promis, augmentez la surallocation, ou déplacez des serveurs d'abord.`;
 }

@@ -164,6 +164,7 @@ export class SessionRepository {
         timezone: users.timezone,
         emailVerifiedAt: users.emailVerifiedAt,
         avatarUrl: users.avatarUrl,
+        suspendedAt: users.suspendedAt,
         authMethod: sessions.authMethod,
         impersonatorId: sessions.impersonatorId,
         // Jointure à gauche sur une seconde vue de `users` : la ligne existe
@@ -181,6 +182,15 @@ export class SessionRepository {
     // Expirée ou révoquée : la ligne reste en base pour que l'utilisateur
     // puisse constater la fermeture depuis /account/security.
     if (tokenValidity(row) !== "valid") return null;
+    /*
+     * Un compte suspendu ne passe plus, **même avec une session vivante**.
+     *
+     * La suspension révoque déjà les sessions ouvertes ; ce contrôle en est la
+     * seconde ceinture, pour celle qui serait ouverte entre la lecture et la
+     * révocation, ou par un chemin qu'on n'aurait pas prévu. Lire l'état à
+     * chaque requête ne coûte rien : la ligne du compte est déjà jointe.
+     */
+    if (row.suspendedAt !== null) return null;
 
     await this.touch(tokenHash, row.lastSeenAt);
 
@@ -188,6 +198,7 @@ export class SessionRepository {
       expiresAt: _e,
       revokedAt: _r,
       lastSeenAt: _l,
+      suspendedAt: _s,
       impersonatorId,
       impersonatorEmail,
       ...user

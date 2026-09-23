@@ -129,12 +129,27 @@ export class SftpAuthService {
     if (!server) return refuse();
 
     const [account] = await this.db
-      .select({ id: users.id, email: users.email, passwordHash: users.passwordHash })
+      .select({
+        id: users.id,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        suspendedAt: users.suspendedAt,
+      })
       .from(users)
       .where(sql`lower(${users.email}) = ${split.label.toLowerCase()}`)
       .limit(1);
 
     if (!account) return refuse();
+    /*
+     * Compte suspendu : refus, avant même de regarder la preuve.
+     *
+     * Le SFTP est la porte qui ne passe ni par une session ni par une clé
+     * d'API ; sans ce contrôle, un compte suspendu garderait l'accès complet
+     * aux fichiers de ses serveurs. Le refus est le même que pour un mot de
+     * passe faux : le protocole ne sait rien dire d'autre, et en dire plus
+     * renseignerait sur l'état du compte.
+     */
+    if (account.suspendedAt !== null) return refuse();
 
     const proof = await this.verify(account, request);
     if (!proof) return refuse();

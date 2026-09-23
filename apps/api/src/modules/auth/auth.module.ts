@@ -5,6 +5,7 @@ import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { BrandingService } from "../reseller/branding.service";
+import { AccountMailService } from "./account-mail.service";
 import { ApiKeyRepository } from "./api-key.repository";
 import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
@@ -65,6 +66,9 @@ import { UserRepository } from "./user.repository";
     BrandingService,
     SshKeyRepository,
     TurnstileService,
+    // Les courriers porteurs de jeton, partagés avec l'administration qui
+    // déclenche une réinitialisation ou revérifie une adresse changée.
+    AccountMailService,
   ],
   // Exporté pour que le module client puisse protéger ses routes sans
   // redéclarer la logique de session.
@@ -83,6 +87,10 @@ import { UserRepository } from "./user.repository";
     // avant d'ouvrir sa session.
     UserRepository,
     BillingSsoService,
+    AccountMailService,
+    // Sort pour la suspension d'un compte : les liens déjà envoyés meurent
+    // avec elle, et la règle vit avec les jetons.
+    AuthTokenRepository,
     databaseProvider,
   ],
 })

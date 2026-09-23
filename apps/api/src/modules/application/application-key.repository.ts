@@ -1,5 +1,5 @@
 import { apiKeyPrefix, hashToken, ipAllowed, tokensMatch } from "@gamedashboard/auth";
-import { applicationKeys, type Database } from "@gamedashboard/db";
+import { applicationKeys, type Database, users } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
@@ -72,8 +72,12 @@ export class ApplicationKeyRepository {
         resellerId: applicationKeys.resellerId,
         singleUse: applicationKeys.singleUse,
         consumedAt: applicationKeys.consumedAt,
+        resellerSuspendedAt: users.suspendedAt,
       })
       .from(applicationKeys)
+      // Jointure externe : une clé de la plateforme n'a pas de revendeur, et
+      // une jointure ordinaire la ferait disparaître.
+      .leftJoin(users, eq(applicationKeys.resellerId, users.id))
       .where(eq(applicationKeys.prefix, prefix))
       .limit(1);
 
@@ -88,6 +92,14 @@ export class ApplicationKeyRepository {
     // sens même de l'usage unique, et distinguer les deux dirait à qui la
     // présente qu'il tient une vraie clé, arrivée trop tard.
     if (row.consumedAt) return null;
+    /*
+     * Les clés d'un revendeur suspendu se taisent avec son compte.
+     *
+     * Sa boutique continuerait sinon de créer et de supprimer des serveurs au
+     * nom d'un compte que la plateforme vient d'arrêter. Rien n'est révoqué :
+     * les clés reviennent telles quelles à la réactivation.
+     */
+    if (row.resellerSuspendedAt) return null;
     if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
     if (!ipAllowed(row.allowedIps, clientIp ?? null)) return null;
 

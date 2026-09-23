@@ -9,13 +9,11 @@ import {
   MetricBar,
   PageHeader,
   PageTemplate,
-  RelativeTime,
-  StatusDot,
 } from "@gamedashboard/ui";
 import { HardDrive } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { nodeStatusOf } from "@/lib/node-health";
 import type { ResellerNode } from "@/server/api/reseller";
+import { NodeStatusLine } from "./node-status-line";
 
 /**
  * Machines du revendeur.
@@ -33,7 +31,6 @@ import type { ResellerNode } from "@/server/api/reseller";
  */
 export async function ResellerNodes({ nodes }: { nodes: ResellerNode[] }) {
   const t = await getTranslations("reseller");
-  const ts = await getTranslations("nodeStatus");
   const tc = await getTranslations("common");
 
   if (nodes.length === 0) {
@@ -54,19 +51,13 @@ export async function ResellerNodes({ nodes }: { nodes: ResellerNode[] }) {
     >
       <div className="grid gap-4 lg:grid-cols-2">
         {nodes.map((node) => {
-          const status = nodeStatusOf(node);
           const shared = node.tenancy === "shared";
           return (
             <Card key={node.id}>
               <CardHeader
                 title={
                   <span className="flex flex-wrap items-center gap-2">
-                    <StatusDot
-                      tone={status === "online" ? "success" : "warning"}
-                      label={ts(status)}
-                    />
                     {node.name}
-                    {status !== "online" ? <Badge variant="warning">{ts(status)}</Badge> : null}
                     {/* Le mode de mise à disposition, dit sur chaque machine :
                         un parc mélange les deux, et rien d'autre à l'écran ne
                         distingue une tranche d'un matériel entier. */}
@@ -78,6 +69,9 @@ export async function ResellerNodes({ nodes }: { nodes: ResellerNode[] }) {
                 description={<span className="gd-mono text-xs">{node.fqdn}</span>}
               />
               <CardBody className="flex flex-col gap-4">
+                {/* L'état en clair, depuis quand, et ce qu'il veut dire pour
+                    les serveurs — le même libellé que côté administration. */}
+                <NodeStatusLine node={node} detailed />
                 <p className="text-muted text-xs">
                   {shared ? t("tenancySharedHint") : t("tenancyDedicatedHint")}
                 </p>
@@ -123,14 +117,6 @@ export async function ResellerNodes({ nodes }: { nodes: ResellerNode[] }) {
                       // communs — le texte le précise plus bas.
                       label: t("ports"),
                       value: t("portsOf", { free: node.freePorts, total: node.totalPorts }),
-                    },
-                    {
-                      label: t("lastHeartbeat"),
-                      value: node.lastHeartbeatAt ? (
-                        <RelativeTime value={node.lastHeartbeatAt} />
-                      ) : (
-                        t("neverSeen")
-                      ),
                     },
                   ]}
                 />

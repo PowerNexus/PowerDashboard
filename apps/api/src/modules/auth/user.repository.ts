@@ -63,6 +63,22 @@ export class UserRepository {
   }
 
   /**
+   * Le compte est-il suspendu ?
+   *
+   * Un compte disparu répond `true` : on ne va pas ouvrir une session pour une
+   * ligne qui n'existe plus, et « refuser » est la seule réponse sûre.
+   */
+  async isSuspended(id: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ suspendedAt: users.suspendedAt })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+
+    return !row || row.suspendedAt !== null;
+  }
+
+  /**
    * Marque l'adresse comme vérifiée.
    *
    * La condition `is null` fait partie de la requête : sans elle, un lien rejoué

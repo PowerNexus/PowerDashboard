@@ -91,7 +91,12 @@ export class BillingSsoService {
     }
 
     const [compte] = await this.db
-      .select({ id: users.id, role: users.role, email: users.email })
+      .select({
+        id: users.id,
+        role: users.role,
+        email: users.email,
+        suspendedAt: users.suspendedAt,
+      })
       .from(users)
       .where(cible)
       .limit(1);
@@ -103,6 +108,20 @@ export class BillingSsoService {
       throw new NotFoundException(
         "Aucun compte ne correspond. Créez-le d'abord par POST /api/v1/application/users : " +
           "le panel n'ouvre pas de session pour un client qu'il ne connaît pas.",
+      );
+    }
+
+    /*
+     * Un compte suspendu ne reçoit pas de lien.
+     *
+     * La session serait de toute façon refusée à la consommation
+     * (`SessionIssuerService`) ; le dire dès l'émission épargne au facturier
+     * de rediriger son client vers une page d'erreur, et lui donne une raison
+     * lisible à afficher de son côté.
+     */
+    if (compte.suspendedAt !== null) {
+      throw new ForbiddenException(
+        "Ce compte est suspendu dans le panel : aucun lien de connexion n'est émis tant qu'il n'est pas réactivé.",
       );
     }
 

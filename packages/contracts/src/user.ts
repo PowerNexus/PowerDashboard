@@ -26,3 +26,30 @@ export type User = z.infer<typeof User>;
  * ne l'avait. Un schéma que rien n'applique et qui décrit une règle fausse est
  * un piège pour qui viendra s'y fier.
  */
+
+/**
+ * Ce que l'administration modifie d'un compte.
+ *
+ * Ni le rôle — il a sa route, avec ses gardes — ni le mot de passe : un
+ * administrateur ne choisit jamais le secret d'un autre, il déclenche la
+ * réinitialisation et l'intéressé choisit lui-même.
+ */
+export const AdminUserPatch = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  nameFirst: z.string().trim().min(1).max(100),
+  nameLast: z.string().trim().min(1).max(100),
+  locale: z.enum(["fr", "en"]),
+});
+export type AdminUserPatch = z.infer<typeof AdminUserPatch>;
+
+/**
+ * Suspension d'un compte, ou sa levée.
+ *
+ * Le motif est exigé à la suspension : c'est la première chose que le support
+ * voudra savoir quand le client appellera.
+ */
+export const UserSuspensionInput = z.discriminatedUnion("suspended", [
+  z.object({ suspended: z.literal(true), reason: z.string().trim().min(1).max(500) }),
+  z.object({ suspended: z.literal(false) }),
+]);
+export type UserSuspensionInput = z.infer<typeof UserSuspensionInput>;

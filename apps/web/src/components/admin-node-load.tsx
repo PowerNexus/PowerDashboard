@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertBanner, Dialog, DialogContent, EmptyState, SparkChart } from "@gamedashboard/ui";
+import { AlertBanner, Card, CardBody, CardHeader, EmptyState, SparkChart } from "@gamedashboard/ui";
 import { Activity } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState, useTransition } from "react";
@@ -20,13 +20,7 @@ import { loadNodeSeries, type NodeLoadPoint } from "@/server/api/admin-actions";
  */
 const WINDOWS = ["6h", "24h", "7j"];
 
-export function AdminNodeLoad({
-  node,
-  onClose,
-}: {
-  node: { id: string; name: string };
-  onClose: () => void;
-}) {
+export function AdminNodeLoad({ node }: { node: { id: string; name: string } }) {
   const t = useTranslations("nodeLoad");
   const tc = useTranslations("common");
   const [window_, setWindow] = useState("24h");
@@ -49,8 +43,11 @@ export function AdminNodeLoad({
   }, [load, window_]);
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent size="lg" title={t("title", { name: node.name })} description={t("hint")}>
+    // Posée dans la vue d'ensemble de la fiche, et non plus dans une fenêtre :
+    // c'est la première chose qu'on regarde en ouvrant une machine.
+    <Card>
+      <CardHeader title={t("title", { name: node.name })} description={t("hint")} />
+      <CardBody>
         <div className="flex flex-col gap-4">
           {error ? (
             <AlertBanner variant="danger" title={tc("actionRefused")}>
@@ -97,7 +94,7 @@ export function AdminNodeLoad({
               ceux des serveurs, pas ceux de la machine. */}
           <p className="text-faint text-xs">{t("scope")}</p>
         </div>
-      </DialogContent>
-    </Dialog>
+      </CardBody>
+    </Card>
   );
 }

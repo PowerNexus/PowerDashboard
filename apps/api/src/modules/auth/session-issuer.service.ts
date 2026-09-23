@@ -1,8 +1,12 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import { SecurityAlertService } from "./security-alert.service";
 import { SESSION_COOKIE } from "./session.guard";
 import { SESSION_TTL_MS, SessionRepository } from "./session.repository";
 import { UserRepository } from "./user.repository";
+
+/** Ce que lit quelqu'un dont le compte est suspendu, quelle que soit la porte. */
+export const ACCOUNT_SUSPENDED_MESSAGE =
+  "Ce compte est suspendu. Contactez le support de votre hébergeur pour en connaître la raison.";
 
 /**
  * Le seul endroit qui ouvre une session.
@@ -59,6 +63,23 @@ export class SessionIssuerService {
     reply: CookieSink,
     authMethod: string,
   ): Promise<{ user: unknown }> {
+    /*
+     * Un compte suspendu n'entre par **aucune** porte.
+     *
+     * Le contrôle est ici parce que c'est le seul point par lequel passent
+     * toutes les connexions — mot de passe, second facteur, clé d'accès,
+     * fournisseur d'identité, lien de la facturation, invitation. Le poser dans
+     * chaque contrôleur ferait autant d'endroits à ne pas oublier, et c'est
+     * toujours le chemin le moins fréquenté qu'on oublie.
+     *
+     * Le refus arrive après la preuve d'identité : seul celui qui tient déjà le
+     * mot de passe ou la clé apprend que le compte est suspendu. Le motif, lui,
+     * reste au support — c'est une note interne, pas un message au client.
+     */
+    if (await this.users.isSuspended(userId)) {
+      throw new ForbiddenException(ACCOUNT_SUSPENDED_MESSAGE);
+    }
+
     const token = await this.sessions.create(userId, {
       ip: origin.ip,
       userAgent: origin.userAgent,
