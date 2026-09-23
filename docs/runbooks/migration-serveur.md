@@ -72,45 +72,31 @@ Le client est prévenu dans les deux cas (`server.transferred`,
 
 ## Serveur bloqué « en transfert »
 
-Le panel ne clôt pas de lui-même un transfert dont aucun daemon ne rapporte
-l'issue : un daemon mort en pleine copie, un compte rendu perdu. Au bout de
-deux heures (`TRANSFER_STALE_MS`), le node d'arrivée perd seulement le droit
-de lire la configuration du serveur. Le serveur, lui, reste en `transferring`,
-et toute action lui est refusée.
+Un daemon mort en pleine copie, un compte rendu perdu : aucun des deux bouts
+ne rapporte l'issue. Le panel clôt alors le transfert **de lui-même** au bout
+de deux heures (`TRANSFER_STALE_MS`) : un balayage passe toutes les cinq
+minutes (`ServerTransferReaperService`) et traite le transfert comme un échec
+rapporté. Le port réservé est rendu, le serveur redevient disponible sur son
+node de départ, le client reçoit « Déplacement interrompu » et le webhook
+`server.transfer_failed` part avec le motif « Aucun compte rendu des daemons
+en deux heures ».
 
-1. **Repérer** les transferts sans nouvelles depuis plus de deux heures :
-   ```sql
-   select t.server_id, f.name as depart, d.name as arrivee, t.created_at
-   from server_transfers t
-   join nodes f on f.id = t.from_node_id
-   join nodes d on d.id = t.to_node_id
-   where t.state = 'running' and t.created_at < now() - interval '2 hours';
-   ```
-2. **Vérifier que rien ne tourne encore** sur le node d'arrivée :
-   `journalctl -u wings -n 200` ne doit plus montrer de réception pour ce
-   serveur. Un transfert lent mais vivant se laisse finir.
-3. **Faire à la main ce que fait `rollback()`**, et rien d'autre, dans une
-   transaction (`sudo -u postgres psql gamedashboard`) :
-   ```sql
-   \set serveur '<uuid>'
-   begin;
-   update allocations a set server_id = null, updated_at = now()
-     from server_transfers t
-    where t.server_id = :'serveur' and t.state = 'running'
-      and a.server_id = t.server_id and a.node_id = t.to_node_id;
-   update server_transfers
-      set state = 'failed', failure_reason = 'Clos à la main : aucun compte rendu du daemon.', updated_at = now()
-    where server_id = :'serveur' and state = 'running';
-   update servers set state = null, updated_at = now()
-    where id = :'serveur' and state = 'transferring';
-   commit;
-   ```
-   C'est sans risque pour les fichiers : la base désignait toujours le node de
-   départ, qui garde sa copie jusqu'à la bascule.
-4. **Nettoyer l'arrivée** : un conteneur ou un volume à cet identifiant sur le
+C'est sans risque pour les fichiers : la base désignait toujours le node de
+départ, qui garde sa copie jusqu'à la bascule. Un accusé de réception arrivé
+après la clôture est refusé, et la bascule comme le retour en arrière
+verrouillent la ligne du transfert : les deux ne peuvent pas se croiser.
+
+**Un serveur de plus de deux heures de copie** (plusieurs centaines de
+gigaoctets sur une liaison lente) sera clos avant la fin. Le déplacer en
+dehors des heures chargées, ou alléger son volume d'abord.
+
+Après une clôture :
+
+1. **Nettoyer l'arrivée** : un conteneur ou un volume à cet identifiant sur le
    node d'arrivée est une copie partielle. L'effacer, en vérifiant bien qu'il
    s'agit de la machine d'**arrivée**.
-5. Redémarrer le serveur depuis sa console. Relancer le transfert si besoin.
+2. Redémarrer le serveur depuis sa console, et relancer le déplacement si
+   besoin.
 
 ## Ce que le transfert ne sait pas faire
 
