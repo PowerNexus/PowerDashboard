@@ -1,43 +1,13 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
-const isProduction = process.env.NODE_ENV === "production";
-
 /**
- * Politique de sécurité de contenu.
+ * En-têtes fixes, identiques pour toute réponse.
  *
- * Ce que chaque source autorise, et pourquoi elle est là :
- * - `cdn.jsdelivr.net` : Monaco, que `@monaco-editor/react` charge depuis ce
- *   CDN par défaut (scripts, feuilles de style, police codicon). Ses workers
- *   sont des `blob:`.
- * - `challenges.cloudflare.com` : Turnstile, un script et un cadre.
- * - `connect-src https: wss:` : la console et les envois de fichiers parlent
- *   **directement** aux nodes Wings, dont les hôtes sont ceux que l'admin
- *   déclare — impossible de les énumérer ici.
- * - `img-src https:` : logos et favicons des revendeurs, hébergés chez eux.
- * - `'unsafe-inline'` sur les scripts : Next injecte ses scripts d'amorçage
- *   en ligne ; les retirer demande un nonce posé par un middleware, qui n'est
- *   pas encore en place. `object-src 'none'` et `base-uri 'self'` ferment
- *   les contournements classiques en attendant.
- * - En développement, Turbopack a besoin d'`eval` et d'un websocket en clair.
+ * La CSP n'est pas ici : son nonce change à chaque requête, elle est donc
+ * posée par `src/proxy.ts`.
  */
-const contentSecurityPolicy = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://cdn.jsdelivr.net https://challenges.cloudflare.com`,
-  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-  "img-src 'self' data: blob: https:",
-  "font-src 'self' data: https://cdn.jsdelivr.net",
-  `connect-src 'self' https: wss:${isProduction ? "" : " http: ws:"}`,
-  "worker-src 'self' blob:",
-  "frame-src https://challenges.cloudflare.com",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join("; ");
-
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: contentSecurityPolicy },
   // Le panel n'est jamais encadré : redondant avec `frame-ancestors`, pour
   // les navigateurs qui ne lisent pas la CSP.
   { key: "X-Frame-Options", value: "DENY" },
@@ -49,6 +19,21 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
   },
+  /*
+   * La fenêtre du panel ne partage pas son contexte avec une page d'un autre
+   * site qu'elle ouvrirait, ou qui l'aurait ouverte : un onglet malveillant
+   * ne peut ni la manipuler par `window.opener`, ni l'observer (PLAN §5.4).
+   * Rien n'en pâtit : le SSO passe par des redirections, pas par une
+   * fenêtre surgissante, et les onglets ouverts par le panel le sont déjà en
+   * `noopener`.
+   *
+   * Pas de `Cross-Origin-Embedder-Policy`, et c'est un choix. Il ne protège
+   * rien par lui-même : il sert à obtenir l'isolation cross-origin
+   * (`SharedArrayBuffer`), dont le panel n'a pas l'usage. Et il imposerait à
+   * toute ressource d'un autre site d'y consentir — les logos des revendeurs,
+   * hébergés chez eux, et le cadre de Turnstile disparaîtraient.
+   */
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   // HSTS est posé par nginx, qui termine TLS : ici il ne s'appliquerait pas
   // en développement et ferait doublon en production.
 ];

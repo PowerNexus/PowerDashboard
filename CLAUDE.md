@@ -55,6 +55,7 @@ Fait, avec tests de non-régression :
 - **Planificateur** parallélisé avec garde `enVol` (`apps/api/src/modules/scheduler/schedule-runner.service.ts`).
 - **Balayages de fond** centralisés dans `battre()` (`apps/api/src/common/background-tick.ts`) : un rejet non rattrapé tuait le processus sous Node 24.
 - **Changement d'egg** transactionnel, synchronisé avant réinstallation.
+- **CSP à nonce + COOP** (PLAN §5.4) : `apps/web/src/proxy.ts` tire un nonce par requête, `script-src 'nonce-…' 'strict-dynamic'` sans `'unsafe-inline'` (`lib/content-security-policy.ts`) ; balise écrite à la main = `nonce={nonce}` (lu dans `x-nonce`) ; toute page doit être rendue à la demande. `Cross-Origin-Opener-Policy: same-origin` ; pas de COEP, par choix (commentaire de `next.config.ts`). Non-régression : `apps/web/e2e/securite.spec.ts`.
 - **Mots de passe** : bcrypt reconnu et réécrit en Argon2id à la première connexion (`packages/auth/src/password.ts`).
 - **Reprise Pterodactyl** : `apps/api/scripts/import-pterodactyl.mts`, voir `docs/reprise-pterodactyl.md`.
 - **OpenAPI + SDK** : catalogue unique `packages/contracts/src/api-catalogue.ts`, SDK écrit à la main dans `packages/sdk`.
