@@ -169,7 +169,9 @@ jobs:
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
-    timeout-minutes: 25
+    # Cinq minutes de plus pour le scan ZAP, dont le premier passage télécharge
+    # l'image (1,5 Go) sur la machine du runner.
+    timeout-minutes: 30
 
     # Une vraie base : l'interface est éprouvée contre l'API réelle, qui parle
     # à PostgreSQL. Une API simulée validerait le panel contre une fiction.
@@ -244,6 +246,22 @@ jobs:
 
       - name: Parcours et accessibilité
         run: pnpm e2e
+
+      # Scan passif de l'application compilée : en-têtes, CSP, cookies,
+      # formulaires (PLAN §5.4). Une alerte nouvelle fait échouer le job ; les
+      # exceptions acceptées sont dans infra/ci/zap-regles.tsv, chacune avec sa
+      # raison.
+      - name: Scan ZAP
+        run: bash infra/ci/zap-baseline.sh zap-rapport
+
+      - name: Rapport ZAP
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zap-rapport
+          path: zap-rapport
+          retention-days: 7
 
       # Seulement en cas d'échec : c'est précisément quand la suite est rouge
       # qu'on a besoin des traces et des captures ; une suite verte n'a rien à
