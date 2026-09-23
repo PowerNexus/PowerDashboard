@@ -30,3 +30,6 @@ infra/docker/wings/config.yml
 
 # Réglages Claude Code propres à un poste (outils locaux, permissions).
 .claude/settings.local.json
+
+# Rapport du scan ZAP (infra/ci/zap-baseline.sh)
+zap-rapport/
