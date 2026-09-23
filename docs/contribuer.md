@@ -111,8 +111,19 @@ CI vérifie que la spécification est à jour
 ### Modifier le schéma
 
 1. Modifier `packages/db/src/schema/`.
-2. `pnpm db:generate`, relire la migration produite, la commiter.
-3. `pnpm db:generate` ne doit plus rien produire. La CI le vérifie.
+2. `pnpm db:generate`, relire la migration produite, la commiter **avec son
+   instantané** (`migrations/meta/NNNN_snapshot.json`).
+3. `pnpm db:check` doit répondre « Schéma et migrations en phase ».
+
+**Une migration écrite à la main** (trigger, index partiel, reprise de
+données) se génère d'abord avec `pnpm db:generate --custom`, qui produit un
+fichier SQL vide *et* son instantané, puis se remplit. Sans instantané,
+drizzle-kit compare le schéma à un état ancien. C'est arrivé aux
+migrations 0027 à 0037, et la migration 0038 a dû en réparer les suites.
+
+Ne pas se fier au code de sortie de `drizzle-kit generate` : sans terminal, il
+s'arrête sur ses questions de renommage et sort quand même en succès.
+`db:check` lit sa sortie pour cette raison.
 
 Les migrations sont **rétro-compatibles** (expand/contract) : on ajoute la
 nouvelle colonne, on bascule le code, puis on retire l'ancienne dans une

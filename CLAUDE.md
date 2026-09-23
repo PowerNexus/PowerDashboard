@@ -34,7 +34,8 @@ pnpm lint          # Biome
 pnpm typecheck
 pnpm test          # Vitest
 pnpm openapi       # régénère openapi.json depuis packages/contracts/src/api-catalogue.ts
-pnpm db:generate   # doit ne rien produire si schéma et migrations sont en phase
+pnpm db:generate   # produit la migration d'un changement de schéma
+pnpm db:check      # échoue si schéma et migrations ne sont pas en phase
 ```
 
 La CI (`.github/workflows/ci.yml`) refuse un schéma sans migration et un catalogue d'API sans `openapi.json` régénéré.

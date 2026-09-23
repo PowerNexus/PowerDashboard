@@ -206,7 +206,7 @@ ne rattrape pas : essayé, mesuré, sans effet sur le web.
 pnpm test        # Vitest : 173 tests sur la logique métier
 pnpm typecheck   # TypeScript strict sur les six paquets
 pnpm lint        # Biome
-pnpm db:generate # doit ne rien produire si le schéma et les migrations sont en phase
+pnpm db:check    # échoue si le schéma et les migrations ne sont pas en phase
 ```
 
 Les tests couvrent ce qui a des règles, pas le rendu : seuils de heartbeat et
