@@ -452,6 +452,14 @@ export const APPLICATION_ROUTES: ApiRoute[] = [
     group: "Comptes",
   },
   {
+    method: "POST",
+    path: "/users/sso-link",
+    summary:
+      "Lien de connexion d'un client, désigné par userId ou externalId. Vaut deux minutes, sert une fois ; refusé pour le personnel.",
+    scope: "users.sso",
+    group: "Comptes",
+  },
+  {
     method: "GET",
     path: "/servers?ownerId={user}",
     summary: "Lister les serveurs, éventuellement ceux d'un seul client.",
@@ -471,6 +479,14 @@ export const APPLICATION_ROUTES: ApiRoute[] = [
     summary:
       "Créer un serveur pour un client, par offre + localisation ou par node + ressources. Accepte Idempotency-Key.",
     scope: "servers.create",
+    group: "Serveurs",
+  },
+  {
+    method: "PATCH",
+    path: "/servers/{server}",
+    summary:
+      "Changer les limites d'un serveur (mémoire, disque, CPU, swap, allocations, sauvegardes, bases). Seuls les champs envoyés changent.",
+    scope: "servers.resize",
     group: "Serveurs",
   },
   {

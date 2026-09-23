@@ -1,4 +1,4 @@
-import type { PowerSignal } from "@gamedashboard/contracts";
+import type { PowerSignal, ServerLimitsPatch } from "@gamedashboard/contracts";
 
 /**
  * Client TypeScript de l'API GameDashboard.
@@ -113,15 +113,44 @@ export class GameDashboardClient {
     return this.call("POST", "/api/v1/application/servers", input);
   }
 
-  suspendServer(serverId: string): Promise<unknown> {
-    return this.call("POST", `/api/v1/application/servers/${encodeURIComponent(serverId)}/suspend`);
+  /**
+   * Suspendre et rétablir passent par **une seule** route, `suspension`, avec
+   * un booléen. Ces deux méthodes appelaient `…/suspend` et `…/unsuspend`, qui
+   * n'ont jamais existé dans l'API applicative : chaque appel rendait 404.
+   */
+  suspendServer(serverId: string, reason?: string): Promise<unknown> {
+    return this.call(
+      "POST",
+      `/api/v1/application/servers/${encodeURIComponent(serverId)}/suspension`,
+      { suspended: true, ...(reason ? { reason } : {}) },
+    );
   }
 
   unsuspendServer(serverId: string): Promise<unknown> {
     return this.call(
       "POST",
-      `/api/v1/application/servers/${encodeURIComponent(serverId)}/unsuspend`,
+      `/api/v1/application/servers/${encodeURIComponent(serverId)}/suspension`,
+      { suspended: false },
     );
+  }
+
+  /** Changer les limites : seuls les champs fournis changent. */
+  resizeServer(serverId: string, limits: ServerLimitsPatch): Promise<unknown> {
+    return this.call(
+      "PATCH",
+      `/api/v1/application/servers/${encodeURIComponent(serverId)}`,
+      limits,
+    );
+  }
+
+  /**
+   * Lien de connexion d'un client, derrière le bouton « Gérer mon serveur » du
+   * facturier. Le désigner par son identifiant **chez vous** (`externalId`)
+   * évite de tenir une table de correspondance. Le lien vaut deux minutes et
+   * ne sert qu'une fois : le demander au clic, jamais à l'avance.
+   */
+  ssoLink(client: { externalId: string } | { userId: string }): Promise<unknown> {
+    return this.call("POST", "/api/v1/application/users/sso-link", client);
   }
 
   terminateServer(serverId: string): Promise<unknown> {
