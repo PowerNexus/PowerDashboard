@@ -150,7 +150,17 @@ chmod 755 "$ROOT/bin/pnpm"
 export PATH="$ROOT/bin:$PATH"
 
 pnpm install --frozen-lockfile
-pnpm turbo run build --filter=@gamedashboard/web
+
+# Une archive publiée (GitHub Releases) arrive avec l'interface construite
+# par la CI : son fichier RELEASE porte l'identifiant de cette construction.
+# S'il correspond à celui du dossier .next, reconstruire ne ferait que
+# refaire la même chose, en demandant au serveur 1,5 Go de mémoire.
+if [ -f RELEASE ] && [ -f apps/web/.next/BUILD_ID ] \
+  && grep -qx "build_id=$(cat apps/web/.next/BUILD_ID)" RELEASE; then
+  echo "  Interface déjà construite ($(sed -n 's/^version=//p' RELEASE)) : construction sautée"
+else
+  pnpm turbo run build --filter=@gamedashboard/web
+fi
 
 say "Migrations"
 # Seule la variable dont la migration a besoin est passée : exporter tout
@@ -267,7 +277,11 @@ essai_page() {
     RAISON="$code  ATTENDU $attendu_code"
     return 1
   fi
-  if grep -q "Une erreur est survenue" "$corps"; then
+  # Le texte **rendu** (entre balises), pas le texte seul : chaque page
+  # embarque le catalogue de traductions, où la même phrase figure en JSON
+  # (`"genericTitle":"Une erreur est survenue"`). Cherchée seule, elle
+  # déclarait en échec toutes les pages, donc toute livraison.
+  if grep -q ">Une erreur est survenue<" "$corps"; then
     RAISON="$code  FRONTIERE D ERREUR"
     return 1
   fi

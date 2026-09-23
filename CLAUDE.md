@@ -62,3 +62,4 @@ Fait, avec tests de non-régression :
 
 - **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).
 - **Installation guidée** : `infra/prod/installer.sh` (panel) et `installer-wings.sh` (machine de jeu), guide pas à pas `docs/installation.md`. Le vhost démarre sur une machine neuve (map `$gd_connection`, `tls-intermediate.conf` livré, `http2` adapté à nginx < 1.25.1) — `infra-prod.test.ts`.
+- **Releases** : `release.yml` (étiquette `v*`) rejoue `ci.yml`, compile, assemble (`infra/release/assembler.sh`) et publie l'archive compilée. Côté serveur : `pnpm install`, `pnpm configurer` (**pas** `pnpm setup`, commande intégrée de pnpm), `pnpm start|stop|status|logs` (`infra/prod/panel.sh`, systemd). Le contrôle de fin de `deploy.sh` cherche `>Une erreur est survenue<` : le texte seul est dans le catalogue embarqué de chaque page.

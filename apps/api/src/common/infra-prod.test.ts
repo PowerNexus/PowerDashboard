@@ -86,3 +86,33 @@ describe("infra/prod/panel.conf", () => {
     expect(deploy).not.toMatch(/^DOMAIN=panel\.example\.fr$/m);
   });
 });
+
+/**
+ * Le contrôle de fin de livraison reconnaît l'écran d'erreur à son titre.
+ *
+ * Chaque page embarque le catalogue de traductions, où ce titre figure en
+ * JSON (`"genericTitle":"Une erreur est survenue"`). Cherché seul, il se
+ * trouvait donc dans **toutes** les pages : chaque livraison était déclarée
+ * en échec à sa dernière étape. Seul le texte rendu, entre deux balises,
+ * désigne l'écran d'erreur.
+ */
+describe("contrôle des pages après livraison", () => {
+  const catalogue = JSON.parse(
+    readFileSync(join(RACINE, "packages", "i18n", "src", "messages", "fr.json"), "utf8"),
+  ) as { errorPage: { genericTitle: string } };
+  const titre = catalogue.errorPage.genericTitle;
+  const scripts = {
+    "infra/prod/deploy.sh": deploy,
+    "infra/local/install.sh": readFileSync(join(RACINE, "infra", "local", "install.sh"), "utf8"),
+  };
+
+  for (const [chemin, contenu] of Object.entries(scripts)) {
+    it(`${chemin} cherche le titre rendu, pas le texte du catalogue`, () => {
+      const recherches = [...contenu.matchAll(/grep -q "([^"]*)" "\$corps"/g)].map(
+        (m) => m[1] ?? "",
+      );
+      const surErreur = recherches.filter((motif) => motif.includes(titre));
+      expect(surErreur).toEqual([`>${titre}<`]);
+    });
+  }
+});

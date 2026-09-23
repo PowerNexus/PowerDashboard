@@ -13,7 +13,7 @@ Comptez **30 à 45 minutes**, dont une bonne partie à attendre.
 | [1. Comprendre en deux minutes](#1-comprendre-en-deux-minutes) | — | 2 min |
 | [2. Ce qu'il vous faut](#2-ce-quil-vous-faut) | — | 5 min |
 | [3. Préparer les noms de domaine](#3-préparer-les-noms-de-domaine) | chez votre registraire | 5 min |
-| [4. Installer le panel](#4-installer-le-panel) | machine du panel | 15 min |
+| [4. Installer le panel](#4-installer-le-panel) — `pnpm install`, `pnpm configurer`, `pnpm start` | machine du panel | 10 min |
 | [5. Première connexion](#5-première-connexion) | navigateur | 5 min |
 | [6. Ajouter une machine de jeu](#6-ajouter-une-machine-de-jeu-wings) | machine de jeu + navigateur | 10 min |
 | [7. Créer un premier serveur](#7-créer-un-premier-serveur-de-jeu) | navigateur | 5 min |
@@ -155,25 +155,73 @@ Si l'hébergeur vous a donné un utilisateur autre que root (souvent `debian`
 ou `ubuntu`), connectez-vous avec lui : toutes les commandes ci-dessous
 commencent déjà par `sudo`.
 
-### 4.2 Récupérer le code
+### 4.2 Installer Node.js et pnpm
+
+Le panel est livré prêt à l'emploi, mais il lui faut Node.js 24 pour
+fonctionner, et pnpm pour installer ses dépendances :
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git
-git clone https://github.com/PowerNexus/PowerDashboard.git
-cd PowerDashboard
+sudo apt-get update && sudo apt-get install -y curl
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash -
+sudo apt-get install -y nodejs
+sudo corepack enable        # fournit pnpm, à la version exacte que le projet demande
+node -v                     # doit afficher v24.x
 ```
 
-> **Le dépôt est privé ?** `git clone` demande alors un identifiant et un mot
-> de passe. Le mot de passe n'est **pas** celui de votre compte GitHub mais un
-> *jeton d'accès* : GitHub › Settings › Developer settings › Personal access
-> tokens › Fine-grained tokens, accès en **lecture seule** au seul dépôt
-> PowerDashboard. Collez-le quand `git` demande le mot de passe.
+### 4.3 Télécharger le panel
 
-### 4.3 Lancer l'installation
+Chaque version est publiée sur la page **Releases** du dépôt
+(`https://github.com/PowerNexus/PowerDashboard/releases`), **déjà compilée** :
+votre serveur n'a rien à construire, et une petite machine suffit. Prenez
+la plus récente (étiquetée *Latest*) et téléchargez les deux fichiers
+`gamedashboard-vX.Y.Z.tar.gz` et `gamedashboard-vX.Y.Z.tar.gz.sha256`.
+
+- **Dépôt public** : copiez le lien du fichier et téléchargez-le directement
+  sur la machine :
+  ```bash
+  curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz
+  curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz.sha256
+  ```
+- **Dépôt privé** : téléchargez les deux fichiers dans votre navigateur (où
+  vous êtes connecté à GitHub), puis envoyez-les sur la machine :
+  ```bash
+  # depuis votre ordinateur, dans le dossier des téléchargements
+  scp gamedashboard-v1.0.0.tar.gz* root@panel.mondomaine.fr:
+  ```
+
+Puis, sur la machine :
 
 ```bash
-sudo bash infra/prod/installer.sh
+sha256sum -c gamedashboard-v1.0.0.tar.gz.sha256   # doit répondre « OK »
+tar -xzf gamedashboard-v1.0.0.tar.gz
+cd gamedashboard-v1.0.0
 ```
+
+`OK` prouve que le fichier est arrivé intact. Autre chose qu'`OK` :
+téléchargez-le à nouveau.
+
+> **Préférez-vous git ?** `git clone https://github.com/PowerNexus/PowerDashboard.git`
+> fonctionne aussi, et la suite est identique. Le panel est alors compilé sur
+> votre serveur pendant l'installation : comptez cinq minutes de plus et
+> 2 Go de mémoire. Pour un dépôt privé, `git` demande un *jeton d'accès* en
+> guise de mot de passe (GitHub › Settings › Developer settings › Personal
+> access tokens › Fine-grained, lecture seule sur ce dépôt).
+
+### 4.4 Trois commandes
+
+```bash
+pnpm install        # les dépendances, une à deux minutes
+pnpm configurer     # l'installation guidée : quelques questions, puis tout se fait seul
+pnpm start          # démarre le panel (déjà fait par pnpm configurer la première fois)
+```
+
+> ⚠ **`pnpm configurer`, et non `pnpm setup`.** `pnpm setup` est une
+> commande de pnpm lui-même, qui règle son dossier global et modifie votre
+> `.bashrc`, sans jamais lancer l'installation du panel. Si vous tenez au mot
+> anglais : `pnpm run setup` est équivalent à `pnpm configurer`.
+
+`pnpm configurer` demande lui-même les droits d'administrateur (votre mot
+de passe `sudo`, si vous n'êtes pas root).
 
 Le script pose **quatre questions**, puis récapitule et demande
 confirmation. Rien n'est modifié sur la machine avant cette confirmation.
@@ -182,7 +230,7 @@ confirmation. Rien n'est modifié sur la machine avant cette confirmation.
 GameDashboard — installation du panel
 
 [1/9] Vérifications avant de commencer
-  ✔ Dépôt trouvé : /root/PowerDashboard
+  ✔ Dépôt trouvé : /root/gamedashboard-v1.0.0
   ✔ Système : Debian GNU/Linux 12 (bookworm)
   ✔ Architecture : x86_64
   • Mémoire : 3915 Mo, fichier d'échange : 0 Mo
@@ -216,9 +264,9 @@ Viennent ensuite, sans intervention :
 | 3. Le domaine pointe-t-il ici ? | Vérifie l'enregistrement DNS. Derrière une box ou un NAT, l'avertissement est normal. |
 | 4. Paquets du système | nginx, certbot et quelques outils. Fichier d'échange si la mémoire est juste. |
 | 5. Node.js et PostgreSQL | Node.js 24 et PostgreSQL 18 depuis leurs dépôts officiels. Un PostgreSQL déjà installé est réutilisé. |
-| 6. Copie du panel | Le code est copié dans `/opt/gamedashboard/app`. Votre clone reste un simple espace de travail. |
+| 6. Copie du panel | Le panel est copié dans `/opt/gamedashboard/app`, d'où il tourne. Le dossier téléchargé peut ensuite être supprimé. |
 | 7. Certificat HTTPS | Let's Encrypt, renouvelé ensuite tout seul. |
-| 8. Construction et démarrage | **La plus longue : 5 à 10 minutes.** Base de données, secrets, construction du site, services, puis contrôle que les pages s'affichent vraiment. |
+| 8. Construction et démarrage | **La plus longue.** Base de données, secrets, services, puis contrôle que les pages s'affichent vraiment. Depuis une archive publiée, la compilation est déjà faite : deux à trois minutes. Depuis git, compter 5 à 10 minutes de plus. |
 | 9. Premier administrateur | Crée votre compte. |
 
 À la fin :
@@ -237,7 +285,7 @@ Viennent ensuite, sans intervention :
 > clair. Perdu, il se réinitialise avec
 > `apps/api/scripts/reset-password.mts`, voir [§ 9](#9-en-cas-de-problème).
 
-### 4.4 Sauvegarder la clé maître — tout de suite
+### 4.5 Sauvegarder la clé maître — tout de suite
 
 Le dossier `/opt/gamedashboard/env/` contient `APP_SECRET_KEY`, la clé qui
 chiffre les secrets rangés en base (jetons des nodes, mots de passe des bases
@@ -252,13 +300,13 @@ scp -r root@panel.mondomaine.fr:/opt/gamedashboard/env ./gamedashboard-env-sauve
 Rangez cette copie comme un mot de passe : dans un gestionnaire de secrets,
 pas dans un dossier partagé.
 
-### 4.5 Sans aucune question
+### 4.6 Sans aucune question
 
 Pour une installation automatisée (Ansible, cloud-init…), toutes les
 réponses se donnent en options :
 
 ```bash
-sudo bash infra/prod/installer.sh --oui \
+pnpm configurer --oui \
   --domaine panel.mondomaine.fr --courriel moi@mondomaine.fr \
   --prenom Alex --nom Martin
 ```
@@ -301,16 +349,19 @@ Le panel est en ligne mais ne peut encore rien héberger : il lui faut un node.
 ### 6.1 Installer Wings sur la machine de jeu
 
 **Si les jeux tournent sur la machine du panel**, restez dans le dossier du
-dépôt et lancez :
+panel et lancez :
 
 ```bash
 sudo bash infra/prod/installer-wings.sh
 ```
 
-**Sur une autre machine**, le script se copie seul, sans le reste du dépôt :
+**Sur une autre machine**, le script se suffit à lui-même. Il est publié
+seul sur la page Releases (`installer-wings.sh`, avec son `.sha256`) :
+téléchargez-le comme l'archive à l'étape 4.3, ou copiez-le depuis la
+machine du panel :
 
 ```bash
-# depuis la machine du panel (ou votre ordinateur)
+# depuis la machine du panel
 scp infra/prod/installer-wings.sh root@node1.mondomaine.fr:
 ssh root@node1.mondomaine.fr
 sudo bash installer-wings.sh
@@ -396,34 +447,39 @@ sudo ufw allow 25565:25575/tcp && sudo ufw allow 25565:25575/udp
 
 ### Mettre à jour
 
+Téléchargez et vérifiez la nouvelle archive comme à l'étape 4.3, puis :
+
 ```bash
-cd ~/PowerDashboard
-git pull
-sudo bash infra/prod/installer.sh
+tar -xzf gamedashboard-v1.1.0.tar.gz && cd gamedashboard-v1.1.0
+pnpm install
+pnpm configurer
 ```
 
-Le script reconnaît l'installation existante : il ne pose aucune question,
-ne touche ni aux comptes ni aux secrets, reconstruit, applique les
-migrations de base et redémarre. Le panel est indisponible une trentaine de
+(Depuis un clone git : `git pull && pnpm install && pnpm configurer`.)
+
+`pnpm configurer` reconnaît l'installation existante : il ne pose aucune
+question, ne touche ni aux comptes ni aux secrets, installe la nouvelle
+version, applique les migrations de base et redémarre. Le panel est indisponible une trentaine de
 secondes ; **les serveurs de jeu, eux, ne s'arrêtent pas** (ils vivent sur
 les nodes).
 
 Pour mettre Wings à jour, relancez `installer-wings.sh` sur chaque node.
 
-### Voir ce qui se passe
+### Démarrer, arrêter, surveiller
 
-```bash
-systemctl status gamedashboard-api gamedashboard-web   # état des deux services
-journalctl -u gamedashboard-api -f                     # journaux de l'API, en direct
-journalctl -u gamedashboard-web -f                     # journaux du site
-journalctl -u wings -f                                 # sur un node
-```
+Depuis le dossier du panel (n'importe quelle version extraite) :
 
-### Redémarrer
+| Commande | Effet |
+|---|---|
+| `pnpm status` | état des deux services, adresse et version installée |
+| `pnpm start` | démarre le panel et attend qu'il réponde |
+| `pnpm stop` | l'arrête — les serveurs de jeu continuent de tourner |
+| `pnpm restart` | l'arrête puis le redémarre |
+| `pnpm logs` | journaux en direct (`pnpm logs api` ou `pnpm logs web` pour un seul) ; `Ctrl+C` pour sortir |
 
-```bash
-sudo systemctl restart gamedashboard-api gamedashboard-web
-```
+Ces commandes parlent à systemd, qui fait tourner le panel : il redémarre
+aussi tout seul avec la machine. Elles demandent les droits
+d'administrateur d'elles-mêmes. Sur un node : `journalctl -u wings -f`.
 
 ### Sauvegarder
 
@@ -449,7 +505,7 @@ serveur.
    sudo systemctl stop gamedashboard-api gamedashboard-web
    sudo tar xzf gamedashboard-env.tgz -C /opt/gamedashboard
    sudo -u postgres pg_restore --clean --if-exists -d gamedashboard gamedashboard-2026-09-23.dump
-   sudo bash infra/prod/installer.sh     # réaligne le mot de passe de la base et redémarre
+   pnpm configurer                       # depuis le dossier du panel : réaligne le mot de passe de la base et redémarre
    ```
 
 ---
@@ -464,10 +520,13 @@ régénèrent jamais un secret existant.
 |---|---|---|
 | « Let's Encrypt n'a pas pu vérifier… » | DNS pas encore propagé, ou port 80 fermé | `getent hosts panel.mondomaine.fr` doit donner l'adresse de la machine ; ouvrir le port 80 chez l'hébergeur ; relancer. Après cinq échecs, Let's Encrypt bloque une heure. |
 | La construction s'arrête sur `Killed` | Mémoire épuisée | Relancer et accepter le fichier d'échange, ou en créer un à la main (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`). |
-| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `installer.sh`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
+| `pnpm setup` a affiché « export PNPM_HOME=… » et rien installé | C'est la commande de pnpm, pas celle du panel | Lancer `pnpm configurer`. La ligne ajoutée à `~/.bashrc` par pnpm est sans danger et peut être retirée. |
+| `pnpm : commande introuvable` | corepack pas activé | `sudo corepack enable`, voir l'étape 4.2. |
+| « Le panel n'est pas encore installé » sur `pnpm start` | `pnpm configurer` n'a pas abouti | Relancer `pnpm configurer`. |
+| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `pnpm configurer`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
 | `nginx -t` échoue sur un autre fichier | Un autre site de la machine est mal configuré | Le message nomme le fichier fautif. Le panel n'y touche pas ; corriger ce site, puis relancer. |
-| Page « 502 Bad Gateway » | Un service est arrêté | `systemctl status gamedashboard-api gamedashboard-web`, puis leurs journaux. |
-| L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre la sauvegarde de l'étape 4.4. **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
+| Page « 502 Bad Gateway » | Un service est arrêté | `pnpm status`, puis `pnpm logs`. `pnpm start` le relance. |
+| L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre la sauvegarde de l'étape 4.5. **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
 | Mot de passe administrateur perdu | — | `cd /opt/gamedashboard/app/apps/api && sudo env DATABASE_URL="$(sudo grep '^DATABASE_URL=' /opt/gamedashboard/env/api.env \| cut -d= -f2-)" ./node_modules/.bin/tsx scripts/reset-password.mts moi@mondomaine.fr` |
 | Le node reste « Injoignable » | Wings arrêté, port 8080 fermé, ou nom de domaine différent entre le node et le certificat | Sur le node : `journalctl -u wings -n 50`. Voir aussi le [runbook machine injoignable](./runbooks/machine-injoignable.md). |
 | `wings configure` répond 401 ou 403 | Clé expirée (trente minutes) ou déjà utilisée | *Configurer le daemon › Émettre une nouvelle clé*. |
@@ -484,7 +543,7 @@ avant : elle ne doit contenir aucun mot de passe).
 ## Annexe A — Installation manuelle, sans le script
 
 Pour qui veut tout maîtriser, ou pour une machine qui a déjà nginx,
-PostgreSQL et Node.js. `installer.sh` ne fait rien d'autre que ceci :
+PostgreSQL et Node.js. `pnpm configurer` (`infra/prod/installer.sh`) ne fait rien d'autre que ceci :
 
 1. **Prérequis** : Node.js 24 ou plus avec `corepack`, PostgreSQL 17 ou
    plus en service, nginx, certbot, `rsync`, `openssl`, `sudo`.
@@ -515,7 +574,7 @@ dans l'étape « configure ».
 
 ## Annexe B — Ce que les scripts modifient sur la machine
 
-Rien n'est caché. `installer.sh` :
+Rien n'est caché. `pnpm configurer` (`infra/prod/installer.sh`) :
 
 | Quoi | Où |
 |---|---|

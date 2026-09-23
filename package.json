@@ -6,6 +6,13 @@
     "node": ">=22"
   },
   "scripts": {
+    "configurer": "bash infra/prod/installer.sh",
+    "setup": "bash infra/prod/installer.sh",
+    "start": "bash infra/prod/panel.sh start",
+    "stop": "bash infra/prod/panel.sh stop",
+    "status": "bash infra/prod/panel.sh status",
+    "logs": "bash infra/prod/panel.sh logs",
+    "release:assembler": "bash infra/release/assembler.sh",
     "dev": "turbo run dev",
     "dev:web": "pnpm --filter @gamedashboard/web dev",
     "build": "turbo run build",

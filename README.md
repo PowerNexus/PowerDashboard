@@ -26,14 +26,19 @@ docs/               ADR, runbooks, guide du contributeur, reprise Pterodactyl
 
 **Première installation ?** Suivez [docs/installation.md](./docs/installation.md) :
 un guide pas à pas, du serveur vide au premier serveur de jeu, pensé pour qui
-découvre le projet. Deux scripts font le travail :
+découvre le projet. Chaque version est publiée **déjà compilée** dans les
+Releases du dépôt ; dans le dossier extrait :
 
 ```bash
-sudo bash infra/prod/installer.sh         # le panel : questions, paquets, certificat, premier administrateur
-sudo bash infra/prod/installer-wings.sh   # une machine de jeu : Docker, Wings, certificat
+pnpm install        # dépendances
+pnpm configurer     # questions, paquets, base, certificat, services, premier administrateur
+pnpm start          # démarre le panel sous systemd (pnpm stop, restart, status, logs)
 ```
 
-Relancé, `installer.sh` met le panel à jour.
+`pnpm configurer` et non `pnpm setup`, qui est une commande de pnpm lui-même
+(`pnpm run setup` fonctionne). Une machine de jeu se prépare avec
+`installer-wings.sh`, publié à côté de l'archive. Relancé sur une nouvelle
+version, `pnpm configurer` met à jour.
 
 ## Démarrer (développement)
 

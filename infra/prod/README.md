@@ -7,7 +7,8 @@ installation en service aujourd'hui est la production locale
 dossier en est la version pour une vraie machine, et ce qui la distingue du
 local y est écrit.
 
-**Première installation** : `sudo bash infra/prod/installer.sh`, qui installe
+**Première installation** : `pnpm install && pnpm configurer` (ou
+`sudo bash infra/prod/installer.sh`), qui installe
 les paquets, obtient le certificat, appelle `deploy.sh` et crée le premier
 administrateur. Le pas à pas est dans [docs/installation.md](../../docs/installation.md) ;
 `installer-wings.sh` prépare de même une machine de jeu.
@@ -35,7 +36,28 @@ fichier de réglages TLS. Il apporte désormais les deux lui-même (`$gd_connect
 `listen 443 ssl http2;` pour un nginx antérieur à 1.25.1 (Debian 12,
 Ubuntu 22.04 et 24.04). `apps/api/src/common/infra-prod.test.ts` y veille.
 
-## Livrer une nouvelle version
+## Publier une version
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+`.github/workflows/release.yml` rejoue toute la CI (`ci.yml`, appelée telle
+quelle), compile, assemble l'archive par `infra/release/assembler.sh`,
+atteste sa provenance et la publie dans GitHub Releases avec son empreinte
+et `installer-wings.sh`. Un suffixe (`v1.2.0-rc.1`) publie une préversion.
+
+L'archive contient le code de `git archive` et `apps/web/.next` sans son
+cache, mais **pas** `node_modules` : argon2 a une partie native, compilée par
+`pnpm install` pour la machine qui l'exécute. Son fichier `RELEASE` porte
+l'identifiant de la construction ; `deploy.sh` saute la compilation quand il
+correspond à `.next/BUILD_ID`. L'API, elle, tourne sous `tsx` depuis ses
+sources : elle n'a pas d'étape de compilation (voir « Points ouverts »).
+
+`bash infra/release/assembler.sh v0.0.0-essai` reproduit une archive en
+local, après `pnpm build`.
+
+## Livrer une nouvelle version à la main
 
 Depuis le poste de développement :
 

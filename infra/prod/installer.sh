@@ -2,9 +2,12 @@
 #
 # GameDashboard — installation guidée du panel sur un serveur neuf.
 #
-#   git clone https://github.com/PowerNexus/PowerDashboard.git
-#   cd PowerDashboard
-#   sudo bash infra/prod/installer.sh
+#   pnpm install && pnpm configurer          (depuis une archive publiée ou un clone)
+#   sudo bash infra/prod/installer.sh        (équivalent, sans passer par pnpm)
+#
+# `pnpm configurer`, ou `pnpm run setup` — mais **pas** `pnpm setup` tout
+# court : c'est une commande de pnpm lui-même, qui configure son dossier
+# global et modifie le .bashrc, sans jamais lancer ce script.
 #
 # Pensé pour quelqu'un qui n'a jamais vu le projet : il pose ses questions
 # (domaine, adresse de l'administrateur), vérifie ce qui peut l'être avant de
@@ -40,6 +43,8 @@ EMAIL=${GD_EMAIL:-}
 PRENOM=${GD_PRENOM:-}
 NOM=${GD_NOM:-}
 OUI=0
+# Gardés pour la relance par sudo : l'analyse des options les consomme.
+ARGS=("$@")
 
 # ---------------------------------------------------------------------------
 # Affichage
@@ -137,12 +142,18 @@ etape "Vérifications avant de commencer"
 # ---------------------------------------------------------------------------
 # Rien n'est modifié avant la fin de cette étape : un refus ici ne laisse
 # aucune installation à moitié faite.
-[ "$(id -u)" = 0 ] || echec "Ce script doit être lancé en root." "Relancer avec : sudo bash infra/prod/installer.sh"
+# `pnpm configurer` se tape sans sudo : le script demande lui-même les droits.
+if [ "$(id -u)" != 0 ]; then
+  command -v sudo >/dev/null 2>&1 \
+    || echec "Il faut les droits de root, et sudo est absent." "Se connecter en root, puis relancer."
+  info "Droits d'administrateur nécessaires : sudo va demander votre mot de passe."
+  exec sudo --preserve-env=GD_DOMAIN,GD_EMAIL,GD_PRENOM,GD_NOM bash "${BASH_SOURCE[0]}" "${ARGS[@]}"
+fi
 
 [ -f "$SRC/package.json" ] && grep -q '"name": "gamedashboard"' "$SRC/package.json" \
-  || echec "Ce script doit être lancé depuis une copie du dépôt." \
-    "git clone https://github.com/PowerNexus/PowerDashboard.git" \
-    "cd PowerDashboard && sudo bash infra/prod/installer.sh"
+  || echec "Ce script doit être lancé depuis le dossier du panel." \
+    "Télécharger l'archive depuis la page Releases du dépôt, l'extraire, puis dans son dossier :" \
+    "pnpm install && pnpm configurer"
 ok "Dépôt trouvé : $SRC"
 
 # shellcheck disable=SC1091
@@ -325,9 +336,19 @@ etape "Copie du panel dans $APP"
 # Le dépôt cloné reste un espace de travail ; ce qui tourne vit sous /opt. Les
 # fichiers d'environnement et les dépendances ne sont jamais recopiés.
 install -d "$APP"
+# Une archive publiée apporte l'interface déjà construite (apps/web/.next) :
+# elle est copiée avec le reste, et deploy.sh saute la construction. Depuis
+# un clone git, .next est au contraire exclu : ce serait un reste de
+# développement, et deploy.sh reconstruit.
+if [ -f "$SRC/RELEASE" ]; then
+  EXCLURE_NEXT=(--exclude .next/cache)
+  info "Archive publiée : $(sed -n 's/^version=//p' "$SRC/RELEASE"), interface déjà construite"
+else
+  EXCLURE_NEXT=(--exclude .next)
+fi
 if [ "$SRC" != "$APP" ]; then
   rsync -a --delete \
-    --exclude node_modules --exclude .next --exclude .turbo --exclude .git \
+    --exclude node_modules "${EXCLURE_NEXT[@]}" --exclude .turbo --exclude .git \
     --exclude .env --exclude .env.local \
     "$SRC/" "$APP/"
 fi
@@ -442,6 +463,7 @@ cat <<EOF
   sa clé APP_SECRET_KEY déchiffre les secrets de la base. Sans elle, une
   sauvegarde de la base ne sert à rien.
 
-  Mettre à jour plus tard :  git pull && sudo bash infra/prod/installer.sh
-  Journaux :                 journalctl -u gamedashboard-api -f
+  Au quotidien, depuis ce dossier :
+    pnpm status | pnpm start | pnpm stop | pnpm restart | pnpm logs [api|web]
+  Mettre à jour : nouvelle archive (ou git pull), puis pnpm install && pnpm configurer
 EOF
