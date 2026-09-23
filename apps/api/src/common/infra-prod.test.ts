@@ -282,7 +282,7 @@ describe("actions GitHub des workflows", () => {
         .map(([etape]) => etape)
         .filter((etape) => etape.includes("actions/upload-artifact@")),
     );
-    expect(envois.length).toBe(2);
+    expect(envois.length).toBe(3);
     for (const etape of envois) {
       expect(etape).toContain("continue-on-error: true");
     }

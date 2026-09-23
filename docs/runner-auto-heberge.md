@@ -21,7 +21,7 @@ variables → Actions → Variables). Sa valeur est du JSON :
 |---|---|
 | Debian 12/13 ou Ubuntu 22.04/24.04, x64, 4 Go de RAM, 20 Go libres | le build Next.js et Storybook |
 | `git`, `curl`, `tar` | checkout et installation des outils |
-| **Docker**, avec l'utilisateur du runner dans le groupe `docker` | le service PostgreSQL des tests e2e et l'action Semgrep, qui est un conteneur |
+| **Docker**, avec l'utilisateur du runner dans le groupe `docker` | le service PostgreSQL des tests e2e, l'action Semgrep et le scan ZAP, qui sont des conteneurs (l'image de ZAP pèse 1,5 Go) |
 | Les bibliothèques système de Chromium | les parcours Playwright (voir plus bas) |
 
 Node.js, pnpm, Trivy et Chromium lui-même n'ont pas à être installés : les
