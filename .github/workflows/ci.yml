@@ -13,6 +13,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Les jobs tournent sur un runner auto-hébergé (docs/runner-auto-heberge.md).
+# La variable de dépôt CI_RUNNER, en JSON, choisit une autre cible sans
+# toucher aux workflows : '"ubuntu-latest"' pour revenir aux runners de GitHub.
+
 env:
   # Turbo télémétrie désactivée : rien ne sort de la CI sans raison.
   TURBO_TELEMETRY_DISABLED: 1
@@ -21,18 +25,24 @@ env:
 jobs:
   verify:
     name: Lint, types, tests et build
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       # --frozen-lockfile : la CI échoue si le lockfile ne correspond pas au
       # package.json, plutôt que de résoudre silencieusement d'autres versions.
@@ -82,16 +92,22 @@ jobs:
 
   audit:
     name: Audit de sécurité des dépendances
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
@@ -111,8 +127,11 @@ jobs:
       # configuration. `pnpm audit` ne connaît que le registre npm — il ne voit
       # ni un Dockerfile qui tourne en root, ni un secret laissé dans un
       # fichier d'exemple, ni une image de base périmée.
+      # Épinglée par empreinte : en mars 2026, les tags de trivy-action ont été
+      # réécrits vers un voleur de secrets (corrigé en 0.35.0). Vaut pour toutes
+      # les actions tierces, vérifié par infra-prod.test.ts.
       - name: Trivy — dépendances et configuration
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -126,13 +145,16 @@ jobs:
       # regardent ce qu'on importe. C'est le seul des trois qui puisse voir une
       # requête concaténée ou une comparaison de secret non constante.
       - name: Semgrep
-        uses: semgrep/semgrep-action@v1
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
         with:
           config: p/typescript p/nodejs p/secrets p/owasp-top-ten
 
   e2e:
     name: Parcours critiques et accessibilité
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 25
 
     # Une vraie base : l'interface est éprouvée contre l'API réelle, qui parle
@@ -145,13 +167,14 @@ jobs:
           POSTGRES_PASSWORD: gamedashboard
           POSTGRES_DB: gamedashboard
           TZ: UTC
-        ports: ["5432:5432"]
+        # Port choisi par Docker : un PostgreSQL déjà présent sur la machine
+        # du runner garde le 5432, et deux runners voisins ne se gênent pas.
+        ports: ["5432"]
         options: >-
           --health-cmd "pg_isready -U gamedashboard"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
     env:
-      DATABASE_URL: postgres://gamedashboard:gamedashboard@127.0.0.1:5432/gamedashboard
       # Clé d'essai, valable pour cette exécution seule. Elle ne déchiffre rien
       # d'autre que ce que la même exécution vient d'écrire.
       APP_SECRET_KEY: cle-de-test-ci-0123456789abcdef0123456789abcdef
@@ -159,18 +182,35 @@ jobs:
       E2E_PASSWORD: Essai-E2E-2026!motdepasse
 
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
-          cache: pnpm
+          # Cache distant réservé aux runners de GitHub : sur une machine à
+          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
+          # chaque job coûtait plus de deux minutes.
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
 
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
 
+      # Le contexte `job` n'existe pas au niveau du job : l'adresse de la base,
+      # qui dépend du port attribué, est donc posée ici pour la suite.
+      - name: Adresse de la base
+        run: echo "DATABASE_URL=postgres://gamedashboard:gamedashboard@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gamedashboard" >> "$GITHUB_ENV"
+
+      # Les bibliothèques système de Chromium demandent apt, donc root. Un
+      # runner auto-hébergé sans sudo sans mot de passe les a reçues à son
+      # installation (docs/runner-auto-heberge.md) : on ne pose que le
+      # navigateur.
       - name: Installer le navigateur
-        run: pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+        run: |
+          if sudo -n true 2>/dev/null; then
+            pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+          else
+            pnpm --filter @gamedashboard/web exec playwright install chromium
+          fi
 
       - name: Migrations
         run: pnpm --filter @gamedashboard/db db:migrate
@@ -195,7 +235,7 @@ jobs:
       # qu'on a besoin des traces et des captures.
       - name: Rapport
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
           path: apps/web/playwright-report

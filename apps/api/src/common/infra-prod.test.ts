@@ -232,3 +232,69 @@ describe("CLI autonome (gamedashboard.sh)", () => {
     expect(code).toContain('sha256sum -c --quiet "$nom.sha256"');
   });
 });
+
+/**
+ * Le 19 mars 2026, 76 des 77 tags de `aquasecurity/trivy-action` ont été
+ * réécrits vers un voleur de secrets (GHSA, correctif 0.35.0). Un tag se
+ * réécrit, une empreinte de commit non : toute action tierce est épinglée
+ * par empreinte, la version lisible reste en commentaire pour Renovate.
+ */
+describe("actions GitHub des workflows", () => {
+  const dossier = join(RACINE, ".github", "workflows");
+  const workflows = ["ci.yml", "release.yml"].map((nom) =>
+    readFileSync(join(dossier, nom), "utf8"),
+  );
+  const actions = workflows.flatMap((texte) =>
+    [...texte.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+)/gm)].map((m) => m[1] as string),
+  );
+
+  it("sont toutes épinglées par empreinte de commit", () => {
+    const tierces = actions.filter((action) => !action.startsWith("./"));
+    expect(tierces.length).toBeGreaterThan(0);
+    for (const action of tierces) {
+      expect(action).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
+    }
+  });
+
+  it("tournent sur le runner auto-hébergé, sauf choix contraire dans CI_RUNNER", () => {
+    const cibles = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
+    );
+    expect(cibles.length).toBe(4);
+    for (const cible of cibles) {
+      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}`);
+    }
+  });
+
+  it("ne téléversent le cache pnpm que depuis un runner de GitHub", () => {
+    const caches = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^\s*cache:\s*(.+)$/gm)].map((m) => m[1]),
+    );
+    expect(caches.length).toBe(4);
+    for (const cache of caches) {
+      expect(cache).toBe(`\${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}`);
+    }
+  });
+
+  it("ne lancent jamais le code d'une PR venue d'un fork", () => {
+    const [ci] = workflows as [string];
+    const jobs = [...ci.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)].filter(([bloc]) =>
+      bloc.includes("runs-on:"),
+    );
+    expect(jobs.length).toBe(3);
+    for (const [bloc] of jobs) {
+      expect(bloc).toContain(
+        "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
+      );
+    }
+  });
+
+  it("ne reprennent pas une trivy-action antérieure au correctif 0.35.0", () => {
+    const texte = workflows.join("\n");
+    const versions = [...texte.matchAll(/aquasecurity\/trivy-action@\S+ # v?(\d+)\.(\d+)/g)];
+    expect(versions.length).toBeGreaterThan(0);
+    for (const [, majeure, mineure] of versions) {
+      expect(Number(majeure) > 0 || Number(mineure) >= 35).toBe(true);
+    }
+  });
+});
