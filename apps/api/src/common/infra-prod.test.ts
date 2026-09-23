@@ -256,6 +256,29 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  it("tournent sur le runner auto-hébergé, sauf choix contraire dans CI_RUNNER", () => {
+    const cibles = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
+    );
+    expect(cibles.length).toBe(4);
+    for (const cible of cibles) {
+      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}`);
+    }
+  });
+
+  it("ne lancent jamais le code d'une PR venue d'un fork", () => {
+    const [ci] = workflows as [string];
+    const jobs = [...ci.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)].filter(([bloc]) =>
+      bloc.includes("runs-on:"),
+    );
+    expect(jobs.length).toBe(3);
+    for (const [bloc] of jobs) {
+      expect(bloc).toContain(
+        "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
+      );
+    }
+  });
+
   it("ne reprennent pas une trivy-action antérieure au correctif 0.35.0", () => {
     const texte = workflows.join("\n");
     const versions = [...texte.matchAll(/aquasecurity\/trivy-action@\S+ # v?(\d+)\.(\d+)/g)];

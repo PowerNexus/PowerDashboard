@@ -13,6 +13,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Les jobs tournent sur un runner auto-hébergé (docs/runner-auto-heberge.md).
+# La variable de dépôt CI_RUNNER, en JSON, choisit une autre cible sans
+# toucher aux workflows : '"ubuntu-latest"' pour revenir aux runners de GitHub.
+
 env:
   # Turbo télémétrie désactivée : rien ne sort de la CI sans raison.
   TURBO_TELEMETRY_DISABLED: 1
@@ -21,7 +25,10 @@ env:
 jobs:
   verify:
     name: Lint, types, tests et build
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 15
 
     steps:
@@ -82,7 +89,10 @@ jobs:
 
   audit:
     name: Audit de sécurité des dépendances
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 10
 
     steps:
@@ -135,7 +145,10 @@ jobs:
 
   e2e:
     name: Parcours critiques et accessibilité
-    runs-on: ubuntu-latest
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 25
 
     # Une vraie base : l'interface est éprouvée contre l'API réelle, qui parle
@@ -148,13 +161,14 @@ jobs:
           POSTGRES_PASSWORD: gamedashboard
           POSTGRES_DB: gamedashboard
           TZ: UTC
-        ports: ["5432:5432"]
+        # Port choisi par Docker : un PostgreSQL déjà présent sur la machine
+        # du runner garde le 5432, et deux runners voisins ne se gênent pas.
+        ports: ["5432"]
         options: >-
           --health-cmd "pg_isready -U gamedashboard"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
     env:
-      DATABASE_URL: postgres://gamedashboard:gamedashboard@127.0.0.1:5432/gamedashboard
       # Clé d'essai, valable pour cette exécution seule. Elle ne déchiffre rien
       # d'autre que ce que la même exécution vient d'écrire.
       APP_SECRET_KEY: cle-de-test-ci-0123456789abcdef0123456789abcdef
@@ -172,8 +186,22 @@ jobs:
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
 
+      # Le contexte `job` n'existe pas au niveau du job : l'adresse de la base,
+      # qui dépend du port attribué, est donc posée ici pour la suite.
+      - name: Adresse de la base
+        run: echo "DATABASE_URL=postgres://gamedashboard:gamedashboard@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gamedashboard" >> "$GITHUB_ENV"
+
+      # Les bibliothèques système de Chromium demandent apt, donc root. Un
+      # runner auto-hébergé sans sudo sans mot de passe les a reçues à son
+      # installation (docs/runner-auto-heberge.md) : on ne pose que le
+      # navigateur.
       - name: Installer le navigateur
-        run: pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+        run: |
+          if sudo -n true 2>/dev/null; then
+            pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+          else
+            pnpm --filter @gamedashboard/web exec playwright install chromium
+          fi
 
       - name: Migrations
         run: pnpm --filter @gamedashboard/db db:migrate

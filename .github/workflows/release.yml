@@ -45,7 +45,8 @@ jobs:
   publier:
     name: Compiler, assembler, publier
     needs: verifier
-    runs-on: ubuntu-latest
+    # Même runner que la CI (docs/runner-auto-heberge.md).
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 20
     permissions:
       # Créer la release et y téléverser l'archive.
