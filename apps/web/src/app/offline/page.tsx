@@ -1,5 +1,6 @@
 import { EmptyState } from "@gamedashboard/ui";
 import { CloudOff } from "lucide-react";
+import { connection } from "next/server";
 
 /**
  * Ce que l'agent de service sert quand une navigation échoue.
@@ -13,9 +14,14 @@ import { CloudOff } from "lucide-react";
  * Pas de bouton « réessayer » non plus : il rechargerait la même page depuis
  * le cache. Le geste utile est celui du navigateur, qui refera la requête.
  */
-export const dynamic = "force-static";
-
-export default function OfflinePage() {
+export default async function OfflinePage() {
+  /*
+   * Rendue à la demande et non figée au build : une page figée n'a pas de
+   * nonce, et ses scripts seraient refusés par la CSP. L'agent de service met
+   * en cache la page **et** ses en-têtes : le nonce servi hors ligne est donc
+   * toujours celui de la page.
+   */
+  await connection();
   return (
     <div className="flex min-h-dvh items-center justify-center bg-bg px-4">
       <EmptyState

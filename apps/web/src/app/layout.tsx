@@ -1,6 +1,7 @@
 import { DEFAULT_BRANDING } from "@gamedashboard/contracts";
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { BetaNotice } from "@/components/beta-notice";
@@ -51,6 +52,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const locale = await getLocale();
   const branding = await getBranding();
   const accent = accentStyle(branding.accent);
+  // Le nonce de la requête (`proxy.ts`) : Next le pose de lui-même sur ses
+  // scripts, pas sur une balise écrite à la main comme celle du thème.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     <html lang={locale} className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
@@ -92,8 +96,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
          * Dans `<head>` et non entre `<head>` et `<body>` : le HTML n'autorise
          * que ces deux enfants sous `<html>`, et une balise posée entre les
          * deux produit une erreur d'hydratation.
+         *
+         * Avec son nonce : sous la CSP stricte, un script sans nonce ne
+         * s'exécute pas, même servi par le panel lui-même.
          */}
-        <script src="/gd-theme.js" />
+        <script src="/gd-theme.js" nonce={nonce} />
       </head>
       <body>
         {/*
