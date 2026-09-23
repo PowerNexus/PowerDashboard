@@ -359,6 +359,13 @@ describe("scan ZAP de la CI", () => {
     expect(script).toMatch(/zap-baseline\.py[^\n]* -z -silent/);
   });
 
+  it("ne confond pas un Docker absent avec une alerte", () => {
+    const controle = script.indexOf("docker info >/dev/null 2>&1 ||");
+    expect(controle).toBeGreaterThan(0);
+    expect(controle).toBeLessThan(script.indexOf("docker run"));
+    expect(script.slice(controle, script.indexOf("\n", controle))).toContain("exit 3");
+  });
+
   it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
     expect(script).toContain("TRAVAIL=$(mktemp -d)");
     expect(script).toContain('-v "$TRAVAIL:/zap/wrk:rw"');
