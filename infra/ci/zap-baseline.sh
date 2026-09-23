@@ -70,9 +70,15 @@ fi
 
 # `--network host` : ZAP joint le panel sur 127.0.0.1, comme un navigateur de
 # la machine. Sans -I, un avertissement non accepté rend un code non nul.
+#
+# `-z -silent` : sans lui, ZAP télécharge au démarrage les dernières règles
+# « bêta » (-addonupdate), et le verdict changeait d'un jour à l'autre sans que
+# le dépôt bouge — deux alertes apparues en CI, absentes du même scan en local.
+# Les règles sont donc celles de l'image épinglée, ni plus ni moins ; on en
+# gagne en changeant l'empreinte, pas au hasard d'une exécution.
 code=0
 docker run --rm --network host -v "$TRAVAIL:/zap/wrk:rw" "$IMAGE" \
-  zap-baseline.py -t "$CIBLE" -c regles.tsv -r rapport.html -J rapport.json || code=$?
+  zap-baseline.py -t "$CIBLE" -c regles.tsv -r rapport.html -J rapport.json -z -silent || code=$?
 
 mkdir -p "$RAPPORT"
 cp "$TRAVAIL"/rapport.html "$TRAVAIL"/rapport.json "$RAPPORT"/ 2>/dev/null || true

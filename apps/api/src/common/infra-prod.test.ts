@@ -354,6 +354,9 @@ describe("scan ZAP de la CI", () => {
     // échouer le job sur une alerte nouvelle.
     expect(script).toMatch(/zap-baseline\.py -t "\$CIBLE" -c regles\.tsv/);
     expect(script).not.toMatch(/zap-baseline\.py[^\n]* -I\b/);
+    // Sans -silent, ZAP télécharge ses règles du jour : le verdict ne
+    // dépendrait plus seulement de l'image épinglée.
+    expect(script).toMatch(/zap-baseline\.py[^\n]* -z -silent/);
   });
 
   it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
