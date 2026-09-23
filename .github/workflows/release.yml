@@ -94,6 +94,20 @@ jobs:
       - name: Assembler l'archive
         run: bash infra/release/assembler.sh "$VERSION" dist
 
+      # Inventaire des dépendances livrées (PLAN §5.4), au format CycloneDX,
+      # publié à côté de l'archive. Trivy lit le lockfile, sans les
+      # dépendances de développement, qui ne sont pas livrées, et prend les
+      # licences dans node_modules : c'est pour cela qu'il n'est pas exclu.
+      # Même action épinglée que l'audit de la CI : aucun outil de plus.
+      - name: Inventaire des dépendances (SBOM)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: dist/gamedashboard-${{ env.VERSION }}.cdx.json
+          skip-dirs: dist,apps/web/.next
+
       - name: Attester la provenance
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
@@ -101,6 +115,14 @@ jobs:
             dist/gamedashboard-*.tar.gz
             dist/gamedashboard.sh
             dist/installer-wings.sh
+
+      # L'inventaire est signé et rattaché à l'archive : `gh attestation
+      # verify` prouve qu'il décrit bien celle-ci, et qu'il sort de ce workflow.
+      - name: Attester l'inventaire
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/gamedashboard-*.tar.gz
+          sbom-path: dist/gamedashboard-${{ env.VERSION }}.cdx.json
 
       - name: Publier
         env:
@@ -133,6 +155,16 @@ jobs:
 
           Mettre à jour une installation : \`gamedashboard update\` (sauvegarde d'abord, puis applique cette version).
           Comptes, secrets et base sont conservés.
+
+          ## Vérifier
+
+          \`$ARCHIVE.cdx.json\` est l'inventaire des dépendances livrées (CycloneDX).
+          L'archive et son inventaire sont attestés par ce workflow :
+
+          \`\`\`bash
+          gh attestation verify $ARCHIVE.tar.gz --repo ${{ github.repository }}
+          gh attestation verify $ARCHIVE.tar.gz --repo ${{ github.repository }} --predicate-type https://cyclonedx.org/bom
+          \`\`\`
           EOF
 
           PRE=()
