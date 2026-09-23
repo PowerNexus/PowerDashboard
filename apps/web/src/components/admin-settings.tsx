@@ -17,7 +17,7 @@ import {
 import { Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useState, useTransition } from "react";
+import { type ReactNode, useCallback, useState, useTransition } from "react";
 import type { PlatformSettings } from "@/server/api/admin";
 import { savePlatformSettings, setFeatureFlag, testSmtp } from "@/server/api/admin-actions";
 
@@ -29,7 +29,14 @@ import { savePlatformSettings, setFeatureFlag, testSmtp } from "@/server/api/adm
  * le laisser vide signifie « ne change rien ». Sans cette convention,
  * enregistrer la couleur d'accent effacerait la configuration SMTP.
  */
-export function AdminSettings({ initial }: { initial: PlatformSettings }) {
+export function AdminSettings({
+  initial,
+  children,
+}: {
+  initial: PlatformSettings;
+  /** Sections qui ont leur propre organisme — les presets de sous-utilisateurs. */
+  children?: ReactNode;
+}) {
   const t = useTranslations("adminSettings");
   const tc = useTranslations("common");
   const router = useRouter();
@@ -294,6 +301,8 @@ export function AdminSettings({ initial }: { initial: PlatformSettings }) {
           ))}
         </div>
       </SettingsSection>
+
+      {children}
     </PageTemplate>
   );
 }

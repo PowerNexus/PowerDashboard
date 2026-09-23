@@ -1,4 +1,5 @@
-import { ServerLimitsPatch } from "@gamedashboard/contracts";
+import { Readable } from "node:stream";
+import { AuditExportQuery, AuditFilters, ServerLimitsPatch } from "@gamedashboard/contracts";
 import {
   BadRequestException,
   Body,
@@ -58,6 +59,26 @@ type AdminRequest = AuthenticatedRequest & {
 interface ImpersonationReply {
   setCookie(name: string, value: string, options: Record<string, unknown>): ImpersonationReply;
   send(body: unknown): void;
+}
+
+/** Ce dont un téléchargement a besoin de la réponse, pour la même raison. */
+interface DownloadReply {
+  header(name: string, value: string): DownloadReply;
+  send(body: unknown): void;
+}
+
+/**
+ * Les filtres du journal, validés.
+ *
+ * Partagé par la liste et l'export : un seul schéma, donc une seule lecture
+ * de `?query=&event=&actorId=…`.
+ */
+function auditFiltersOf(query: Record<string, unknown>): AuditFilters {
+  const parsed = AuditFilters.safeParse(query);
+  if (!parsed.success) {
+    throw new BadRequestException(parsed.error.issues[0]?.message ?? "Filtres invalides.");
+  }
+  return parsed.data;
 }
 
 /** Premier en-tête, quand Fastify en rend plusieurs. */
@@ -229,6 +250,57 @@ export class AdminController {
     return { data: { key, enabled } };
   }
 
+  /* --- Presets de sous-utilisateurs (§5.2) --------------------------------- */
+
+  /**
+   * Les presets proposés à l'invitation, et ceux du code.
+   *
+   * Lisible par le support : savoir ce que « Modérateur » coche aide à
+   * répondre à un client qui demande pourquoi son invité ne peut pas
+   * redémarrer. Les modifier reste l'affaire de l'administration.
+   */
+  @Get("subuser-presets")
+  async subuserPresets() {
+    return { data: await this.platform.rolePresets() };
+  }
+
+  /**
+   * Redéfinit les presets. Les sous-utilisateurs existants n'en sont pas
+   * touchés : leurs permissions ont été recopiées à l'invitation.
+   */
+  @Post("subuser-presets")
+  @UseGuards(AdminWriteGuard)
+  async saveSubuserPresets(@Req() request: AdminRequest, @Body() body: unknown) {
+    const view = await this.platform.saveRolePresets((body as { presets?: unknown })?.presets);
+    await this.activityLog.record({
+      event: "admin.subuser_presets_saved",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      userAgent: headerValue(request.headers?.["user-agent"]),
+      properties: { presets: view.presets },
+    });
+    return { data: view };
+  }
+
+  @Post("subuser-presets/reset")
+  @UseGuards(AdminWriteGuard)
+  async resetSubuserPresets(@Req() request: AdminRequest) {
+    const view = await this.platform.resetRolePresets();
+    await this.activityLog.record({
+      event: "admin.subuser_presets_reset",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      userAgent: headerValue(request.headers?.["user-agent"]),
+    });
+    return { data: view };
+  }
+
   /* --- Annonces ------------------------------------------------------------ */
 
   @Get("announcements")
@@ -370,24 +442,62 @@ export class AdminController {
    * le travail du support.
    */
   @Get("activity")
-  async activity(
-    @Query("query") query?: string,
-    @Query("event") event?: string,
-    @Query("actorId") actorId?: string,
-    @Query("serverId") serverId?: string,
-    @Query("since") since?: string,
-    @Query("page") page?: string,
-  ) {
+  async activity(@Query() query: Record<string, unknown>) {
     const result = await this.activityLog.forPlatform({
-      query,
-      event,
-      actorId,
-      serverId,
-      since,
-      page: Number(page) || 1,
+      ...auditFiltersOf(query),
+      page: Number(query.page) || 1,
     });
 
     return { data: result.items, meta: { page: result.page, hasMore: result.hasMore } };
+  }
+
+  /**
+   * Exporte le journal, en CSV ou en JSON par lignes (PLAN §5.4).
+   *
+   * **Mêmes filtres que la liste**, lus par le même schéma et traduits en SQL
+   * par la même fonction : le fichier contient ce que l'écran montrait, sans
+   * la limite de la page.
+   *
+   * **Administrateurs seulement**, alors que la lecture est ouverte au
+   * support. Consulter une ligne pour répondre à un client est son travail ;
+   * emporter le journal entier — adresses IP, noms, activité de chaque compte
+   * — hors du panel est un autre geste, qui se décide plus haut.
+   *
+   * La réponse part **en flux** : le journal est lu par blocs et chaque bloc
+   * est écrit dès qu'il est prêt. Un journal de plusieurs millions de lignes
+   * ne passe jamais entier par la mémoire de l'API.
+   */
+  @Get("activity/export")
+  @UseGuards(AdminWriteGuard)
+  async exportActivity(
+    @Req() request: AdminRequest,
+    @Query() query: Record<string, unknown>,
+    @Res() reply: DownloadReply,
+  ): Promise<void> {
+    const parsed = AuditExportQuery.safeParse(query);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues[0]?.message ?? "Filtres invalides.");
+    }
+    const { format, ...filters } = parsed.data;
+
+    const file = await this.activityLog.exportPlatform({
+      filters,
+      format,
+      actor: {
+        id: request.user.id,
+        label: request.user.email,
+        ip: request.ip ?? null,
+        userAgent: headerValue(request.headers?.["user-agent"]),
+      },
+    });
+
+    reply
+      .header("content-type", file.contentType)
+      .header("content-disposition", `attachment; filename="${file.filename}"`)
+      // Un export dit l'état du journal à un instant : aucun intermédiaire
+      // n'a à le resservir, encore moins à quelqu'un d'autre.
+      .header("cache-control", "no-store")
+      .send(Readable.from(file.chunks));
   }
 
   /* --- Hôtes de bases de données ------------------------------------------ */

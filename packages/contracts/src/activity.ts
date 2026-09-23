@@ -249,6 +249,15 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Propriétaire d'un serveur changé",
   },
   "admin.smtp_tested": { category: "settings", label: "Envoi de courrier éprouvé" },
+  "admin.audit_exported": { category: "access", label: "Journal de la plateforme exporté" },
+  "admin.subuser_presets_saved": {
+    category: "access",
+    label: "Presets de sous-utilisateurs redéfinis",
+  },
+  "admin.subuser_presets_reset": {
+    category: "access",
+    label: "Presets de sous-utilisateurs rétablis",
+  },
   "node.configuration_read": { category: "settings", label: "Configuration de node consultée" },
   "application.domain_certificate_reported": {
     category: "network",

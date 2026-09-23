@@ -1,5 +1,6 @@
 "use server";
 
+import type { RolePresets } from "@gamedashboard/contracts";
 import { revalidatePath } from "next/cache";
 import type { AdminNodeShare } from "./admin";
 import { apiFetch, apiSend, apiSendFor } from "./client";
@@ -17,6 +18,21 @@ export async function savePlatformSettings(
   values: Record<string, string | number | boolean>,
 ): Promise<{ error: string | null }> {
   return act("/admin/settings", () => apiSend("/api/v1/admin/settings", { values }));
+}
+
+/**
+ * Redéfinit les presets de sous-utilisateurs.
+ *
+ * Les sous-utilisateurs existants n'en sont pas touchés : leurs permissions
+ * ont été recopiées à l'invitation. L'API valide chaque permission.
+ */
+export async function saveSubuserPresets(presets: RolePresets): Promise<{ error: string | null }> {
+  return act("/admin/settings", () => apiSend("/api/v1/admin/subuser-presets", { presets }));
+}
+
+/** Rétablit les presets du code. */
+export async function resetSubuserPresets(): Promise<{ error: string | null }> {
+  return act("/admin/settings", () => apiSend("/api/v1/admin/subuser-presets/reset", {}));
 }
 
 /**

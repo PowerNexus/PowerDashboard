@@ -1,4 +1,4 @@
-import type { PlatformAccess } from "@gamedashboard/contracts";
+import type { PlatformAccess, RolePresetsView } from "@gamedashboard/contracts";
 import { notFound } from "next/navigation";
 import { ApiError, apiFetch } from "./client";
 
@@ -294,3 +294,9 @@ export interface RetentionReport {
 }
 
 export const fetchRetention = () => unwrap<RetentionReport>("/api/v1/admin/maintenance/retention");
+
+/**
+ * Presets de sous-utilisateurs : ceux en vigueur, ceux du code, et lesquels
+ * s'en écartent.
+ */
+export const fetchSubuserPresets = () => unwrap<RolePresetsView>("/api/v1/admin/subuser-presets");

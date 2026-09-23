@@ -4,6 +4,7 @@ import "./zod-runtime";
 export * from "./activity";
 export * from "./api-catalogue";
 export * from "./application-api";
+export * from "./audit";
 export * from "./branding";
 export * from "./client-webhooks";
 export * from "./cron";

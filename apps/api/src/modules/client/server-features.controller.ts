@@ -379,6 +379,20 @@ export class ServerFeaturesController {
   }
 
   /**
+   * Presets proposés à l'invitation, tels que l'administration les a définis.
+   *
+   * Servis par l'API plutôt que lus dans `contracts` par l'écran : sans quoi
+   * une redéfinition par l'administration ne changerait rien à ce que le
+   * formulaire pré-coche. Seuls les presets en vigueur sortent — les valeurs du
+   * code et l'état « modifié » n'intéressent que l'administration.
+   */
+  @Get("subusers/presets")
+  async subuserPresets(@Req() request: ClientRequest, @Param("id") id: string) {
+    await this.access.require(principalOf(request), id, "subusers.read");
+    return { data: (await this.platform.rolePresets()).presets };
+  }
+
+  /**
    * Invite.
    *
    * L'auteur est pris de la session, jamais du corps : c'est lui qui borne les
