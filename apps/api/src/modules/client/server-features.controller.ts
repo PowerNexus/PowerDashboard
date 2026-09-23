@@ -1066,12 +1066,21 @@ export class ServerFeaturesController {
     });
   }
 
-  /** Voir `ServerRuntimeController.relay` : un node muet n'est pas un bogue du panel. */
+  /**
+   * Voir `ServerRuntimeController.relay` : un node muet n'est pas un bogue du
+   * panel, et un refus du daemon n'est pas une panne.
+   *
+   * Le refus passait ici en 503 « le node n'a pas répondu ». Une restauration
+   * depuis le compartiment se refuse pourtant pour des raisons précises, que
+   * le daemon écrit — lien expiré, archive servie sous un autre type, adresse
+   * privée non autorisée dans sa configuration — et que personne ne lisait.
+   */
   private async relay<T>(call: () => Promise<T>): Promise<T> {
     try {
       return await call();
     } catch (error) {
       if (error instanceof WingsUnavailableError) {
+        if (error.isRefusal && error.detail) throw new BadRequestException(error.detail);
         throw new ServiceUnavailableException(error.message);
       }
       throw error;

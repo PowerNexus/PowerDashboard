@@ -40,9 +40,9 @@ export class RemoteBackupService {
    * Ouvre un dépôt distant et rend les adresses signées au daemon.
    *
    * Appelée par Wings juste avant d'envoyer l'archive, avec la taille qu'il
-   * vient de mesurer. Rend `null` quand le stockage distant n'est pas
-   * configuré : le daemon garde alors l'archive sur son disque, ce qui reste
-   * mieux que pas de sauvegarde du tout.
+   * vient de mesurer. Rend `null` quand le stockage distant n'est plus
+   * configuré : la sauvegarde échoue alors (voir la route, dans
+   * `RemoteController`).
    *
    * L'identifiant du dépôt est retenu en base, car lui seul permettra de
    * recoller les morceaux — ou de les jeter. Le daemon ne le connaît pas.

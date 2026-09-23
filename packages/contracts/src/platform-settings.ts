@@ -270,8 +270,14 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         key: "s3.endpoint",
         kind: "text",
         label: "Point d'accès",
+        /*
+         * Wings télécharge l'archive lui-même pour la restaurer, et refuse
+         * toute adresse privée qu'on ne lui a pas autorisée : sans cette
+         * phrase, un MinIO du réseau local sauvegarde sans erreur et ne
+         * restaure jamais.
+         */
         description:
-          "Adresse du service, sans le nom du compartiment. À laisser vide pour Amazon S3 lui-même.",
+          "Adresse du service, sans le nom du compartiment. À laisser vide pour Amazon S3 lui-même. Une adresse privée (MinIO sur le réseau local) doit être autorisée sur chaque machine de jeu : restore_host_allowlist, section system.backups du config.yml de Wings.",
         placeholder: "https://s3.fr-par.scw.cloud",
       },
       { key: "s3.bucket", kind: "text", label: "Compartiment" },

@@ -1,6 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { hashPassword } from "@gamedashboard/auth";
-import { allocations, type Database, eggs, nodes, servers, users } from "@gamedashboard/db";
+import {
+  allocations,
+  backups,
+  type Database,
+  eggs,
+  nodes,
+  servers,
+  users,
+} from "@gamedashboard/db";
 import {
   BadRequestException,
   ConflictException,
@@ -9,9 +17,10 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { count, eq, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { SessionRepository } from "../auth/session.repository";
+import { S3Service } from "../storage/s3.service";
 import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
@@ -28,6 +37,7 @@ export class AdminActionsService {
     @Inject(SessionRepository) private readonly sessions: SessionRepository,
     @Inject(WebhookEmitterService) private readonly webhooks: WebhookEmitterService,
     @Inject(WingsTokenService) private readonly tokens: WingsTokenService,
+    @Inject(S3Service) private readonly s3: S3Service,
   ) {}
 
   /* --- Utilisateurs -------------------------------------------------------- */
@@ -350,6 +360,23 @@ export class AdminActionsService {
       await this.wings.deleteServer(serverId);
     } catch (error) {
       if (!(error instanceof WingsUnavailableError && error.isNotFound)) throw error;
+    }
+
+    /*
+     * Les archives déposées sur le compartiment partent avec le serveur.
+     *
+     * La base oublie ses sauvegardes en cascade, et le daemon ne connaît que
+     * son disque : sans ce passage, elles resteraient facturées sans plus
+     * apparaître nulle part. Un échec du compartiment est journalisé par
+     * `S3Service` sans arrêter la suppression — le serveur n'existe déjà plus
+     * sur le node.
+     */
+    const distantes = await this.db
+      .select({ id: backups.id, uploadId: backups.uploadId })
+      .from(backups)
+      .where(and(eq(backups.serverId, serverId), eq(backups.disk, "s3")));
+    for (const sauvegarde of distantes) {
+      await this.s3.discard(await this.s3.keyFor(serverId, sauvegarde.id), sauvegarde.uploadId);
     }
 
     await this.db.delete(servers).where(eq(servers.id, serverId));

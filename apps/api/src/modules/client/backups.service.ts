@@ -9,7 +9,7 @@ import {
 import { and, count, desc, eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { S3Service } from "../storage/s3.service";
-import { WingsClientService } from "../wings/wings-client.service";
+import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
 
 export interface ClientBackup {
@@ -64,14 +64,7 @@ export class BackupsService {
       throw new ConflictException("Cette sauvegarde n'est pas terminée, ou a échoué.");
     }
 
-    if (backup.disk === "s3") {
-      const url = await this.s3.presignDownload(await this.s3.keyFor(serverId, backupId));
-      // Le stockage distant a été retiré des réglages depuis le dépôt : dire
-      // que l'archive est inaccessible vaut mieux qu'une adresse qui mènera à
-      // une erreur du compartiment.
-      if (!url) throw new ConflictException("Le stockage distant n'est plus configuré.");
-      return url;
-    }
+    if (backup.disk === "s3") return this.remoteUrl(serverId, backupId);
 
     return this.tokens.backupDownloadGrant(serverId, backupId, userId);
   }
@@ -115,21 +108,27 @@ export class BackupsService {
     }
 
     /*
-     * Toujours l'adaptateur local, **même quand un compartiment S3 est réglé** :
-     * `createBackup` part sans adaptateur, donc avec `wings`, et la
-     * restauration ne sait pas encore remettre une archive distante. Défaut
-     * connu (PLAN §12.4, décision 3) : l'écran des paramètres promet le
-     * contraire.
+     * Le lieu de l'archive se décide ici, une fois pour toutes : le
+     * compartiment dès qu'il est réglé, le disque du node sinon. `disk` le
+     * retient, parce que le téléchargement, la restauration et la suppression
+     * en dépendent — un réglage changé plus tard ne doit pas faire chercher
+     * l'archive là où elle n'est pas.
+     *
+     * Longtemps, l'adaptateur local partait même avec un compartiment réglé :
+     * les sauvegardes mouraient avec la machine qu'elles protégeaient, alors
+     * que l'écran des paramètres promettait le contraire.
      */
+    const disk = (await this.s3.isConfigured()) ? "s3" : "local";
     const [row] = await this.db
       .insert(backups)
-      .values({ serverId, name: name.trim(), ignoredFiles: ignore, disk: "local" })
+      .values({ serverId, name: name.trim(), ignoredFiles: ignore, disk })
       .returning();
 
     if (!row) throw new BadRequestException("Sauvegarde non enregistrée.");
 
     try {
-      await this.wings.createBackup(serverId, row.id, ignore);
+      // `wings` : le nom que le daemon donne à son adaptateur local.
+      await this.wings.createBackup(serverId, row.id, ignore, disk === "s3" ? "s3" : "wings");
     } catch (error) {
       await this.db.delete(backups).where(eq(backups.id, row.id));
       throw error;
@@ -141,9 +140,9 @@ export class BackupsService {
   /**
    * Supprime une sauvegarde, archive comprise.
    *
-   * Le daemon est appelé en premier : effacer la ligne d'abord ferait perdre la
-   * seule référence à l'archive, qui occuperait le disque du node sans plus
-   * apparaître nulle part.
+   * L'archive part en premier : effacer la ligne d'abord ferait perdre la
+   * seule référence à l'archive, qui occuperait le disque du node — ou le
+   * compartiment, facturée — sans plus apparaître nulle part.
    *
    * Une sauvegarde verrouillée est refusée ici et non seulement dans
    * l'interface : le verrou n'a de valeur que s'il tient face à un appel direct.
@@ -154,18 +153,22 @@ export class BackupsService {
       throw new ConflictException("Cette sauvegarde est verrouillée. Déverrouillez-la d'abord.");
     }
 
-    await this.wings.deleteBackup(serverId, backupId);
-
-    /*
-     * L'archive distante part aussi.
-     *
-     * Le daemon ne supprime que ce qu'il détient : une sauvegarde déposée sur
-     * le compartiment lui est étrangère, et resterait facturée après avoir
-     * disparu de l'écran. Personne ne s'en apercevrait — elle n'apparaît plus
-     * nulle part dans le panel.
-     */
     if (backup.disk === "s3") {
-      await this.s3.remove(await this.s3.keyFor(serverId, backupId));
+      // Une archive distante ne regarde pas le daemon : il ne supprime que ce
+      // qu'il a sur son disque, et répondrait 404. Le panel l'efface lui-même.
+      await this.s3.discard(await this.s3.keyFor(serverId, backupId), backup.uploadId);
+    } else {
+      try {
+        await this.wings.deleteBackup(serverId, backupId);
+      } catch (error) {
+        /*
+         * 404 : le node n'a pas cette archive. Sauvegarde ratée avant d'écrire,
+         * machine réinstallée, ou serveur déplacé depuis — une archive locale
+         * reste sur le node de départ. Refuser laissait une ligne impossible à
+         * supprimer, qui occupait le quota pour toujours.
+         */
+        if (!(error instanceof WingsUnavailableError && error.isNotFound)) throw error;
+      }
     }
 
     await this.db.delete(backups).where(eq(backups.id, backupId));
@@ -199,7 +202,24 @@ export class BackupsService {
           : "Cette sauvegarde a échoué et ne peut pas être restaurée.",
       );
     }
-    await this.wings.restoreBackup(serverId, backupId, truncate);
+
+    // Une archive distante, Wings la télécharge lui-même par un lien signé :
+    // il n'a pas les identifiants du compartiment.
+    const downloadUrl = backup.disk === "s3" ? await this.remoteUrl(serverId, backupId) : undefined;
+    await this.wings.restoreBackup(serverId, backupId, truncate, downloadUrl);
+  }
+
+  /**
+   * Lien signé vers une archive distante.
+   *
+   * Le stockage distant a pu être retiré des réglages depuis le dépôt : dire
+   * que l'archive est inaccessible vaut mieux qu'une adresse qui mènera à une
+   * erreur du compartiment.
+   */
+  private async remoteUrl(serverId: string, backupId: string): Promise<string> {
+    const url = await this.s3.presignDownload(await this.s3.keyFor(serverId, backupId));
+    if (!url) throw new ConflictException("Le stockage distant n'est plus configuré.");
+    return url;
   }
 
   /**

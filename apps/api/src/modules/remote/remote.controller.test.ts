@@ -256,10 +256,11 @@ describe("sftpAuth", () => {
 describe("dépôt distant des sauvegardes", () => {
   it("refuse définitivement quand aucun stockage distant n'est configuré", async () => {
     /*
-     * 404 et non 501, et la nuance décide du comportement du daemon : il
-     * traite un 4xx comme définitif et garde l'archive sur son disque — ce
-     * qu'on veut — là où un 5xx le ferait réessayer en boucle pour une
-     * condition qui ne changera pas sans intervention humaine.
+     * 404 et non 5xx, et la nuance décide du comportement du daemon : il
+     * traite un 4xx comme définitif, là où un 5xx le ferait réessayer en
+     * boucle pour une condition qui ne changera pas sans intervention
+     * humaine. La sauvegarde échoue alors franchement, et son propriétaire en
+     * est prévenu : l'adaptateur `s3` ne garde aucune copie locale.
      */
     const c = controller({}, {}, { openUpload: vi.fn(async () => null) });
 

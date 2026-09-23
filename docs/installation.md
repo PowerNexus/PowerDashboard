@@ -526,7 +526,9 @@ objet).
 
 Les **fichiers des serveurs de jeu** ne sont pas dans la base : ils vivent
 sur les nodes, et se sauvegardent depuis l'onglet *Sauvegardes* de chaque
-serveur.
+serveur. Ces sauvegardes restent sur le disque du node tant qu'aucun
+compartiment compatible S3 n'est réglé (Administration › Paramètres ›
+Stockage des sauvegardes) : sans lui, elles meurent avec la machine.
 
 ### Restaurer sur une machine neuve
 

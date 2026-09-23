@@ -697,15 +697,27 @@ export class WingsClientService {
   /**
    * Restaure une sauvegarde.
    *
-   * Le daemon **bloque** jusqu'à la fin de l'extraction, d'où un délai très
-   * large : une archive de plusieurs gigaoctets se déploie en minutes, et
-   * abandonner au bout de huit secondes laisserait le serveur avec un volume à
-   * moitié écrit sans que personne ne le sache.
+   * `downloadUrl` désigne une archive distante : Wings la télécharge lui-même
+   * par ce lien signé, faute d'avoir les identifiants du compartiment. Sans
+   * lui, il la cherche sur son propre disque.
+   *
+   * Wings répond dès qu'il tient l'archive, puis extrait en arrière-plan. Le
+   * délai reste très large : vider le dossier du serveur (`truncate`) se fait
+   * **avant** de répondre, et prend des minutes sur un gros volume.
+   * Abandonner au bout de huit secondes ferait croire à un échec pendant que
+   * le daemon continue.
    */
-  restoreBackup(serverId: string, backupId: string, truncate: boolean): Promise<void> {
+  restoreBackup(
+    serverId: string,
+    backupId: string,
+    truncate: boolean,
+    downloadUrl?: string,
+  ): Promise<void> {
     return this.call<void>(serverId, `/api/servers/${serverId}/backup/${backupId}/restore`, {
       method: "POST",
-      body: { adapter: "wings", truncate_directory: truncate },
+      body: downloadUrl
+        ? { adapter: "s3", truncate_directory: truncate, download_url: downloadUrl }
+        : { adapter: "wings", truncate_directory: truncate },
       timeoutMs: 600_000,
     });
   }

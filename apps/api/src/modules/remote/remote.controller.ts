@@ -238,15 +238,17 @@ export class RemoteController {
    * Adresses signées pour déposer une sauvegarde sur le stockage distant.
    *
    * Wings appelle cette route **juste avant** d'envoyer l'archive qu'il vient
-   * de peser — et seulement pour une sauvegarde demandée avec l'adaptateur
-   * `s3`, ce que le panel ne fait pas encore (`BackupsService.create`, PLAN
-   * §12.4, décision 3). Le panel ouvre le dépôt fractionné — lui seul a les identifiants
-   * du compartiment — et rend une adresse par partie.
+   * de peser, pour une sauvegarde demandée avec l'adaptateur `s3` — ce que
+   * fait `BackupsService.create` dès qu'un compartiment est réglé. Le panel
+   * ouvre le dépôt fractionné — lui seul a les identifiants du compartiment —
+   * et rend une adresse par partie.
    *
-   * **404 quand le stockage distant n'est pas configuré**, et non 501 : Wings
-   * traite un 4xx comme définitif et garde l'archive sur son disque, ce qui est
-   * exactement ce qu'on veut. Un 5xx le ferait réessayer en boucle pour une
-   * condition qui ne changera pas sans intervention humaine.
+   * **404 quand le stockage distant n'est plus configuré** (retiré des
+   * réglages entre la demande et l'envoi), et non 5xx : Wings traite un 4xx
+   * comme définitif, quand un 5xx le ferait réessayer en boucle pour une
+   * condition qui ne changera pas sans intervention humaine. La sauvegarde
+   * échoue alors, et son propriétaire en est prévenu. Le daemon n'en garde pas
+   * de copie : l'adaptateur `s3` efface toujours son archive locale.
    */
   @Get("backups/:uuid")
   async backupUploadUrls(

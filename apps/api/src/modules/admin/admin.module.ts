@@ -6,6 +6,7 @@ import { MailerService } from "../mail/mailer.service";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { ResellerModule } from "../reseller/reseller.module";
 import { SchedulerModule } from "../scheduler/scheduler.module";
+import { StorageModule } from "../storage/storage.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { WingsModule } from "../wings/wings.module";
 import { AdminController } from "./admin.controller";
@@ -51,6 +52,8 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     NotificationsModule,
     ActivityModule,
     SchedulerModule,
+    // Supprimer un serveur efface ses archives du compartiment.
+    StorageModule,
   ],
   // La fiche d'un node et la modification d'un compte ont leurs contrôleurs,
   // sous le même préfixe et les mêmes gardes : `AdminController` dépasse déjà

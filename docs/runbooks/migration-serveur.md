@@ -46,6 +46,14 @@ Le client est prévenu dans les deux cas (`server.transferred`,
   entre les deux machines fait échouer le transfert, pas le panel.
 - **Prévenir le client.** Son serveur est arrêté pendant toute la copie, et
   **son adresse change** : un port appartient à une machine.
+- **Les sauvegardes locales ne suivent pas.** Wings ne transfère que les
+  fichiers du serveur : une sauvegarde gardée sur le disque du node de départ
+  ne se télécharge ni ne se restaure plus une fois le serveur déplacé. La
+  supprimer retire sa ligne du panel ; l'archive reste sur le départ
+  (`/var/lib/pterodactyl/backups/<id de la sauvegarde>.tar.gz`), à effacer à
+  la main. Faire une sauvegarde neuve après le déplacement. Celles déposées
+  sur un compartiment, elles, suivent le serveur : elles ne dépendent d'aucun
+  node.
 
 ## Procédure
 
@@ -103,15 +111,25 @@ Après une clôture :
 **Évacuer une machine morte.** C'est le node de départ qui fabrique l'archive :
 un node injoignable ne transfère rien. Il reste alors à remettre la machine
 sur pied ([machine injoignable](./machine-injoignable.md)). À défaut, il faut
-recréer le serveur ailleurs, et ses sauvegardes ne sauvent pas la mise : elles
-sont toutes écrites sur le disque du node, et meurent avec lui.
+recréer le serveur ailleurs, depuis une sauvegarde — **si elle a quitté la
+machine** :
 
-C'est vrai **même quand un compartiment S3 est réglé** dans Administration ›
-Paramètres › Stockage des sauvegardes, malgré ce que l'écran annonce : le
-panel demande toujours l'adaptateur local à Wings. Le branchement du stockage
-distant est incomplet (PLAN §12.4, décision 3). Une fois corrigé, une
-sauvegarde distante restera téléchargeable pendant la panne : le lien est
-signé par le panel, sans passer par la machine.
+- avec un compartiment réglé (Administration › Paramètres › Stockage des
+  sauvegardes), chaque sauvegarde y est déposée. Elle reste téléchargeable
+  pendant la panne : le lien est signé par le panel, sans passer par la
+  machine ;
+- sans compartiment, les sauvegardes sont sur le disque du node, et meurent
+  avec lui. Celles faites avant le réglage d'un compartiment aussi : le lieu
+  d'une sauvegarde se fixe à sa création.
+
+Pour repartir d'une archive distante :
+
+1. créer sur un node sain un serveur équivalent (même egg, mêmes limites) ;
+2. télécharger l'archive depuis l'onglet *Sauvegardes* de l'**ancien**
+   serveur, ou directement dans le compartiment, sous
+   `[<préfixe>/]<id du serveur>/<id de la sauvegarde>.tar.gz` ;
+3. la déposer à la racine du nouveau serveur (SFTP pour une grosse archive),
+   puis « Extraire » dans le gestionnaire de fichiers, et effacer l'archive.
 
 **Déplacer un parc entier d'un coup.** Chaque serveur se déplace à part, et
 chacun change d'adresse. Pour vider un node, déplacer ses serveurs un à un, en
