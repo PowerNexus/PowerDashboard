@@ -24,7 +24,7 @@ Tout le projet — code, commentaires, documentation — est rédigé **en fran�
 
 ### En session distante (cloud)
 
-L'environnement se prépare avec `.claude/cloud-setup.sh` (Node 24, pnpm épinglé, PostgreSQL local, `pnpm install`, migrations). Il n'y a **ni Wings, ni Docker, ni production locale** : les bancs `infra/local/verifier-*.sh` ne tournent pas ici. Sans `DATABASE_URL`, les tests d'intégration se sautent proprement.
+L'environnement se prépare avec `.claude/cloud-setup.sh` (Node 24, pnpm épinglé, PostgreSQL local, `cloudflared`, `pnpm install`, migrations). Il n'y a **ni Wings, ni Docker, ni production locale** : les bancs `infra/local/verifier-*.sh` ne tournent pas ici. Sans `DATABASE_URL`, les tests d'intégration se sautent proprement.
 
 ## Commandes
 

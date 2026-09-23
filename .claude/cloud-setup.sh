@@ -35,6 +35,21 @@ if command -v psql >/dev/null 2>&1; then
     || $SUDO -u postgres psql -c "create database gamedashboard owner gamedashboard" || true
 fi
 
+# --- cloudflared, pour exposer un port de la session sur une adresse publique -
+# Tunnel éphémère sans compte : `cloudflared tunnel --url http://localhost:3000`
+# affiche une adresse https://<aléatoire>.trycloudflare.com. Dernière version
+# stable, paquet officiel publié sur GitHub. Facultatif : un échec (réseau
+# filtré, architecture inconnue) n'empêche pas la session de démarrer.
+if ! command -v cloudflared >/dev/null 2>&1; then
+  arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+  deb=$(mktemp --suffix=.deb)
+  if curl -fsSL -o "$deb" \
+    "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$arch.deb"; then
+    $SUDO dpkg -i "$deb" || true
+  fi
+  rm -f "$deb"
+fi
+
 # --- Dépendances du dépôt ----------------------------------------------------
 root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -f "$root/package.json" ]; then
