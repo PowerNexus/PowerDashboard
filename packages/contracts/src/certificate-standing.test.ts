@@ -74,6 +74,39 @@ describe("certificateStanding", () => {
     ).toBe("failed");
   });
 
+  /*
+   * Non-régression : `now` était accepté et jamais lu. Un certificat expiré,
+   * sans échec consigné, ressortait « actif » — alors que chaque visiteur du
+   * domaine voyait l'avertissement de sécurité du navigateur.
+   */
+  it("ne dit pas « actif » d'un certificat expiré", () => {
+    const expire = {
+      ...VIERGE,
+      certificateIssuedAt: dans(-100),
+      certificateExpiresAt: dans(-10),
+      certificateAttemptedAt: dans(-100),
+    };
+
+    expect(certificateStanding(expire, MAINTENANT)).toBe("unknown");
+    expect(
+      certificateStanding({ ...expire, certificateFailure: "Limite atteinte." }, MAINTENANT),
+    ).toBe("failed");
+  });
+
+  it("dit encore « actif » jusqu'à l'instant de l'échéance", () => {
+    expect(
+      certificateStanding(
+        {
+          ...VIERGE,
+          certificateIssuedAt: dans(-89),
+          certificateExpiresAt: dans(1),
+          certificateAttemptedAt: dans(-89),
+        },
+        MAINTENANT,
+      ),
+    ).toBe("active");
+  });
+
   it("avoue son ignorance plutôt que de trancher", () => {
     // Tenté, sans certificat et sans motif : le compte rendu est incomplet.
     // Choisir entre « ça va » et « c'est cassé » serait inventer.

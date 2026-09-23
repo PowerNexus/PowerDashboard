@@ -108,13 +108,21 @@ export function certificateStanding(
     certificateAttemptedAt: string | null;
     certificateFailure: string | null;
   },
-  _now: number = Date.now(),
+  now: number = Date.now(),
 ): CertificateStanding {
   // Un domaine non vérifié n'est pas en attente de certificat : rien ne prouve
   // encore qu'il appartienne à ce revendeur, et rien ne sera demandé pour lui.
   if (domain.verifiedAt === null) return "not_sought";
 
-  const valide = domain.certificateIssuedAt !== null;
+  /*
+   * Un certificat expiré n'en est plus un : le navigateur du client affiche
+   * l'avertissement, exactement comme s'il n'y en avait jamais eu. Le compter
+   * valide sur la seule foi de sa date d'émission rendait « actif » un domaine
+   * que tous ses visiteurs voyaient en rouge.
+   */
+  const expire =
+    domain.certificateExpiresAt !== null && new Date(domain.certificateExpiresAt).getTime() <= now;
+  const valide = domain.certificateIssuedAt !== null && !expire;
   const echec = domain.certificateFailure !== null;
 
   if (valide) {
