@@ -1,0 +1,151 @@
+name: Release
+
+# Publie une version dans GitHub Releases : une archive du panel **déjà
+# compilé**, que l'on installe avec trois commandes.
+#
+#   pnpm app:install  les dépendances, aux versions exactes du lockfile
+#   pnpm app:setup    domaine, base, certificat, services, premier compte
+#   pnpm app:start    démarre le panel sous systemd
+#
+# Se déclenche en poussant une étiquette :
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# Une étiquette avec un suffixe (v1.2.0-rc.1) publie une préversion, que
+# la page Releases ne présente pas comme « la dernière ».
+
+on:
+  push:
+    tags: ["v*"]
+  # Republier une étiquette existante, après une panne de la CI par exemple.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Étiquette existante à publier (ex. v1.2.0)"
+        required: true
+
+# Une seule publication à la fois par version ; jamais annulée en cours de
+# route, pour ne pas laisser une release à moitié téléversée.
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  verifier:
+    name: Vérifications
+    uses: ./.github/workflows/ci.yml
+
+  publier:
+    name: Compiler, assembler, publier
+    needs: verifier
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Créer la release et y téléverser l'archive.
+      contents: write
+      # Attestation de provenance : prouve que l'archive sort de ce workflow,
+      # sur ce commit, et non d'un poste quelconque.
+      id-token: write
+      attestations: write
+
+    env:
+      VERSION: ${{ inputs.version || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.version || github.ref }}
+
+      - name: Contrôler l'étiquette
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] \
+            || { echo "::error::Étiquette invalide : $VERSION (attendu : v1.2.3 ou v1.2.3-rc.1)"; exit 1; }
+          git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null \
+            || { echo "::error::L'étiquette $VERSION n'existe pas."; exit 1; }
+
+      - uses: pnpm/action-setup@v4
+
+      # La version de Node des serveurs (.nvmrc) : l'interface est compilée
+      # par celle qui l'exécutera.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      # Compilation complète, en production. Aucun secret : les clés ne sont
+      # lues qu'à l'exécution, sur le serveur.
+      - name: Compiler
+        run: pnpm build
+
+      - name: Assembler l'archive
+        run: bash infra/release/assembler.sh "$VERSION" dist
+
+      - name: Attester la provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            dist/gamedashboard-*.tar.gz
+            dist/gamedashboard.sh
+            dist/installer-wings.sh
+
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCHIVE="gamedashboard-$VERSION"
+          cat > notes.md <<EOF
+          ## Installer
+
+          Sur une Debian 12/13 ou Ubuntu 22.04/24.04 neuve, une seule commande :
+
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/gamedashboard.sh | sudo bash -s -- install
+          \`\`\`
+
+          Ensuite : \`gamedashboard help\` (\`status\`, \`backup\`, \`update\`…).
+
+          À la main, avec Node.js 24 et \`corepack enable\` :
+
+          \`\`\`bash
+          sha256sum -c $ARCHIVE.tar.gz.sha256      # l'archive est intacte
+          tar -xzf $ARCHIVE.tar.gz && cd $ARCHIVE
+          pnpm app:install
+          pnpm app:setup
+          pnpm app:start
+          \`\`\`
+
+          Le guide pas à pas : [docs/installation.md](https://github.com/${{ github.repository }}/blob/$VERSION/docs/installation.md).
+          Machine de jeu : \`curl -fsSL …/gamedashboard.sh | sudo bash -s -- wings\`.
+
+          Mettre à jour une installation : \`gamedashboard update\` (sauvegarde d'abord, puis applique cette version).
+          Comptes, secrets et base sont conservés.
+          EOF
+
+          PRE=()
+          [[ "$VERSION" == *-* ]] && PRE=(--prerelease)
+
+          # Rejouable : une release déjà créée voit ses fichiers remplacés.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+          else
+            gh release create "$VERSION" dist/* \
+              --title "GameDashboard $VERSION" \
+              --notes-file notes.md --generate-notes --verify-tag "${PRE[@]}"
+          fi
+
+      - name: Conserver l'archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamedashboard-${{ env.VERSION }}
+          path: dist/
+          retention-days: 14

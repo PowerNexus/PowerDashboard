@@ -22,7 +22,27 @@ infra/eggs          Eggs maison (Minecraft Java unifié)
 docs/               ADR, runbooks, guide du contributeur, reprise Pterodactyl
 ```
 
-## Démarrer
+## Installer sur un serveur
+
+Sur une Debian ou une Ubuntu neuve, une seule commande — rien d'autre à
+télécharger, pas de dépôt à cloner :
+
+```bash
+curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh | sudo bash -s -- install
+```
+
+Elle télécharge la dernière version publiée (déjà compilée), vérifie son
+empreinte, lance l'installation guidée et installe la commande
+`gamedashboard` : `status`, `start`, `stop`, `restart`, `logs`, `backup`,
+`update`, `admin`, `password`, `wings`, `help`. Le pas à pas complet, pensé
+pour qui découvre le projet : [docs/installation.md](./docs/installation.md).
+
+Depuis un clone ou une archive extraite, les mêmes commandes s'appellent
+`pnpm app:install`, `pnpm app:setup`, `pnpm app:start`… (`pnpm app:help`).
+Le préfixe les met à l'abri des commandes de pnpm lui-même (`pnpm setup` en
+est une).
+
+## Démarrer (développement)
 
 ```bash
 pnpm install

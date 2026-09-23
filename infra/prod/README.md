@@ -7,9 +7,17 @@ installation en service aujourd'hui est la production locale
 dossier en est la version pour une vraie machine, et ce qui la distingue du
 local y est écrit.
 
-`panel.example.fr` est un nom d'exemple. Avant le premier passage, le
-remplacer dans `deploy.sh` (`DOMAIN`) et dans `panel.conf` (`server_name`,
-journaux, chemin du certificat).
+**Première installation** : `curl -fsSL …/releases/latest/download/gamedashboard.sh | sudo bash -s -- install`,
+ou depuis un dossier `pnpm app:install && pnpm app:setup` (ou
+`sudo bash infra/prod/installer.sh`). L'installation guidée installe
+les paquets, obtient le certificat, appelle `deploy.sh` et crée le premier
+administrateur. Le pas à pas est dans [docs/installation.md](../../docs/installation.md) ;
+`installer-wings.sh` prépare de même une machine de jeu.
+
+`panel.example.fr` est un nom d'exemple, que `deploy.sh` remplace dans
+`panel.conf` au moment de l'installer. Le domaine réel se donne une fois par
+`GD_DOMAIN=panel.mondomaine.fr` ; les passages suivants le relisent dans
+`PANEL_ORIGIN` de `api.env`.
 
 | | |
 |---|---|
@@ -20,8 +28,60 @@ journaux, chemin du certificat).
 | Base | rôle et base `gamedashboard` sur le PostgreSQL de la machine |
 | Certificat | émis et renouvelé par certbot, hors de ce dépôt |
 | Certificats des revendeurs | `certificates.sh`, sous `gamedashboard-certificates.timer` |
+| TLS nginx | `tls-intermediate.conf`, posé dans `/etc/nginx/snippets/tls/` s'il manque |
 
-## Livrer une nouvelle version
+**Machine neuve.** Le vhost a d'abord été écrit sur une machine partagée qui
+lui fournissait, sans que ce soit écrit, un `map` (`$req_connection`) et le
+fichier de réglages TLS. Il apporte désormais les deux lui-même (`$gd_connection`,
+`tls-intermediate.conf`), et `deploy.sh` réécrit `http2 on;` en
+`listen 443 ssl http2;` pour un nginx antérieur à 1.25.1 (Debian 12,
+Ubuntu 22.04 et 24.04). `apps/api/src/common/infra-prod.test.ts` y veille.
+
+## Publier une version
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+`.github/workflows/release.yml` rejoue toute la CI (`ci.yml`, appelée telle
+quelle), compile, assemble l'archive par `infra/release/assembler.sh`,
+atteste sa provenance et la publie dans GitHub Releases avec son empreinte
+et `installer-wings.sh`. Un suffixe (`v1.2.0-rc.1`) publie une préversion.
+
+L'archive contient le code de `git archive` et `apps/web/.next` sans son
+cache, mais **pas** `node_modules` : argon2 a une partie native, compilée par
+`pnpm install` pour la machine qui l'exécute. Son fichier `RELEASE` porte
+l'identifiant de la construction ; `deploy.sh` saute la compilation quand il
+correspond à `.next/BUILD_ID`. L'API, elle, tourne sous `tsx` depuis ses
+sources : elle n'a pas d'étape de compilation (voir « Points ouverts »).
+
+`pnpm app:release v0.0.0-essai` reproduit une archive en local, après
+`pnpm build`.
+
+## Commandes d'exploitation
+
+Toutes servies par `app.sh`, qui se suffit à lui-même. Il est publié à chaque
+version sous le nom `gamedashboard.sh`, installé en `/usr/local/bin/gamedashboard`,
+et appelé par les scripts `app:` du package.json. Hors de tout dossier (lu
+par `curl | bash`, ou depuis `/usr/local/bin`), il télécharge ce qui lui
+manque dans GitHub Releases, **empreinte vérifiée** : `install` pose la
+dernière version dans `/opt/gamedashboard/releases/` puis lance
+`installer.sh` ; `update` sauvegarde, pose la nouvelle version et relance
+`installer.sh --oui` ; `wings` télécharge `installer-wings.sh`. Lu par un
+tuyau, son entrée standard est le script lui-même : les étapes
+interactives lisent donc `/dev/tty`.
+
+`backup` écrit un seul fichier, base (`pg_dump -Fc`) **et** `env/` : l'un sans
+l'autre ne restaure rien. Sept sont gardés (`GD_GARDER`).
+
+Côté pnpm, les commandes sont sous `app:`.
+Le préfixe n'est pas décoratif. pnpm fait passer ses propres commandes avant
+les scripts du projet : `pnpm setup` règle le dossier global de pnpm et
+modifie le `.bashrc` sans lancer l'installation, et `pnpm restart` enchaîne
+d'autres scripts au lieu d'en lancer un. Un script sans préfixe portant l'un
+de ces noms ne s'exécuterait jamais ; `infra-prod.test.ts` le refuse.
+
+## Livrer une nouvelle version à la main
 
 Depuis le poste de développement :
 
@@ -70,11 +130,12 @@ vhost qui le déclarerait déjà.
 ## Premier administrateur
 
 ```bash
-cd /opt/gamedashboard/app
-set -a; . /opt/gamedashboard/env/api.env; set +a
-/opt/gamedashboard/bin/pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
-  <email> <prénom> <nom>
+pnpm app:admin <email> <prénom> <nom>
 ```
+
+Depuis n'importe quel dossier du panel. Seule `DATABASE_URL` est transmise au
+script, pas la clé de chiffrement. `pnpm app:password <email>` tire de même un
+nouveau mot de passe pour un compte existant.
 
 Le mot de passe est tiré au sort et affiché une seule fois. Le script ne touche
 à rien si l'adresse existe déjà.

@@ -302,7 +302,9 @@ page() {
   code=$(curl -s --cacert "$CA" -o "$corps" -w '%{http_code}' --max-time 30 "$ORIGIN$chemin") || code=000
   if [ "$code" != "$attendu" ]; then
     printf '  %-28s %s  ATTENDU %s\n' "$chemin" "$code" "$attendu"; ECHECS=$((ECHECS + 1))
-  elif grep -q "Une erreur est survenue" "$corps"; then
+  # Texte rendu, pas le catalogue de traductions embarqué en JSON dans
+  # chaque page : voir le même contrôle dans infra/prod/deploy.sh.
+  elif grep -q ">Une erreur est survenue<" "$corps"; then
     printf '  %-28s %s  FRONTIERE D ERREUR\n' "$chemin" "$code"; ECHECS=$((ECHECS + 1))
   elif [ -n "$marqueur" ] && ! grep -q "$marqueur" "$corps"; then
     printf '  %-28s %s  CONTENU ABSENT (%s)\n' "$chemin" "$code" "$marqueur"; ECHECS=$((ECHECS + 1))

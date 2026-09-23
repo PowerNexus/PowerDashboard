@@ -2,6 +2,7 @@
 
 | | |
 |---|---|
+| [Installer](./installation.md) | Du serveur vide au premier serveur de jeu, pas à pas, pour qui découvre le projet |
 | [Contribuer](./contribuer.md) | Installer, les règles du dépôt, les gestes courants, ce que la CI refuse |
 | [Décisions d'architecture](./adr/README.md) | Pourquoi le projet est construit ainsi, une décision par fichier |
 | [Runbooks](./runbooks/README.md) | Procédures d'exploitation : jetons de node, clé maître des secrets |

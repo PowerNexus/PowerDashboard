@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Appelé par release.yml : aucune version ne se publie sans avoir passé
+  # exactement les mêmes vérifications qu'une PR.
+  workflow_call:
 
 # Une seule exécution par branche : un nouveau push annule la précédente.
 concurrency:
