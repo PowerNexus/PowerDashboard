@@ -13,6 +13,9 @@
   ],
   "tags": [
     {
+      "name": "Accès"
+    },
+    {
       "name": "Audit"
     },
     {
@@ -1006,6 +1009,65 @@
         }
       }
     },
+    "/api/v1/client/servers/{server}/metrics": {
+      "get": {
+        "summary": "Historique agrégé CPU, mémoire, disque, réseau et joueurs sur 1h, 24h, 7d ou 30d. Un pas sans mesure vaut null, jamais zéro.",
+        "description": "Clé personnelle. Portée requise : `console.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers-by-server-metrics",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "description": "Valeur de « range ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "console.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "console.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « console.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
     "/api/v1/client/servers/{server}/power": {
       "post": {
         "summary": "Envoyer un signal start, stop, restart ou kill.",
@@ -1532,6 +1594,56 @@
           "Fichiers"
         ],
         "operationId": "client-post-servers-by-server-files-rename",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/files/chmod": {
+      "post": {
+        "summary": "Changer les permissions d'entrées : `{ root, files: [{ file, mode }] }`, mode octal de 000 à 777 en chaîne.",
+        "description": "Clé personnelle. Portée requise : `files.write`.",
+        "tags": [
+          "Fichiers"
+        ],
+        "operationId": "client-post-servers-by-server-files-chmod",
         "parameters": [
           {
             "name": "server",
@@ -2102,6 +2214,56 @@
           },
           "2XX": {
             "description": "Effectué."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/subusers/presets": {
+      "get": {
+        "summary": "Presets de permissions proposés à l'invitation, tels que l'administration les a définis.",
+        "description": "Clé personnelle. Portée requise : `subusers.read`.",
+        "tags": [
+          "Accès"
+        ],
+        "operationId": "client-get-servers-by-server-subusers-presets",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "subusers.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "subusers.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « subusers.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
           }
         }
       }
