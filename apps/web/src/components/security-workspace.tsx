@@ -247,13 +247,18 @@ export function SecurityWorkspace({
           ) : undefined
         }
       >
-        <DataTable
-          columns={columns}
-          data={initial}
-          getRowId={(row) => row.id}
-          className="border-0 shadow-none"
-          emptyState={<EmptyState icon={<KeyRound />} title={t("noOtherSession")} />}
-        />
+        {/* `data-instable-liste` : la liste s'allonge à chaque connexion, y
+            compris celles des autres tests ; la suite visuelle la retire de
+            ses captures (`e2e/visuel.spec.ts`). */}
+        <div data-instable-liste="">
+          <DataTable
+            columns={columns}
+            data={initial}
+            getRowId={(row) => row.id}
+            className="border-0 shadow-none"
+            emptyState={<EmptyState icon={<KeyRound />} title={t("noOtherSession")} />}
+          />
+        </div>
       </SettingsSection>
 
       <ConfirmDialog

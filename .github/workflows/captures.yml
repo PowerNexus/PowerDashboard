@@ -1,0 +1,111 @@
+name: Captures de référence
+
+# Prend les captures de référence de la suite visuelle (apps/web/e2e/visuel.spec.ts)
+# sur le runner, et les commite sur la branche choisie.
+#
+# Sur le runner et nulle part ailleurs : le rendu des polices change d'une
+# machine à l'autre, et une référence prise ailleurs ferait échouer la CI sur
+# des différences d'anticrénelage que personne n'a introduites.
+#
+# À lancer à la main (onglet Actions › Captures de référence › Run workflow) :
+# - une fois, pour créer les références ;
+# - ensuite, après un changement d'interface **voulu** que la CI signale.
+#
+# Le commit est poussé avec le jeton du workflow, qui ne relance pas la CI :
+# pousser ensuite n'importe quel commit, ou relancer la CI, pour la voir
+# comparer contre les nouvelles références.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: captures-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  captures:
+    name: Prendre et commiter les captures
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
+    timeout-minutes: 30
+    permissions:
+      # Pousser le commit des captures sur la branche choisie.
+      contents: write
+
+    # Même base que le job e2e de la CI : les écrans capturés sont ceux que la
+    # CI comparera ensuite.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: gamedashboard
+          POSTGRES_PASSWORD: gamedashboard
+          POSTGRES_DB: gamedashboard
+          TZ: UTC
+        ports: ["5432"]
+        options: >-
+          --health-cmd "pg_isready -U gamedashboard"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      APP_SECRET_KEY: cle-de-test-ci-0123456789abcdef0123456789abcdef
+      E2E_EMAIL: e2e@gamedashboard.test
+      E2E_PASSWORD: Essai-E2E-2026!motdepasse
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      - name: Adresse de la base
+        run: echo "DATABASE_URL=postgres://gamedashboard:gamedashboard@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gamedashboard" >> "$GITHUB_ENV"
+
+      - name: Installer le navigateur
+        run: |
+          if sudo -n true 2>/dev/null; then
+            pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
+          else
+            pnpm --filter @gamedashboard/web exec playwright install chromium
+          fi
+
+      - name: Migrations
+        run: pnpm --filter @gamedashboard/db db:migrate
+
+      - name: Compte d'essai
+        run: |
+          pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
+            "$E2E_EMAIL" Essai CI
+          GD_PASSWORD="$E2E_PASSWORD" \
+            pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
+
+      - name: Construire
+        run: pnpm build
+
+      # Toutes les références sont reprises, pas seulement celles qui manquent :
+      # c'est le geste qui entérine un changement d'interface voulu.
+      - name: Prendre les captures
+        run: pnpm --filter @gamedashboard/web exec playwright test e2e/visuel.spec.ts --update-snapshots=all
+
+      - name: Commiter les captures
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/e2e/visuel.spec.ts-snapshots
+          if git diff --cached --quiet; then
+            echo "Captures identiques aux références : rien à commiter."
+            exit 0
+          fi
+          git commit -m "Captures de référence, prises sur le runner" -m "Workflow « Captures de référence », exécution ${{ github.run_id }}."
+          git push origin "HEAD:${{ github.ref_name }}"

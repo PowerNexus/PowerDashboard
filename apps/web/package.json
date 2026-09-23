@@ -11,11 +11,11 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "@simplewebauthn/browser": "^14.0.0",
     "@gamedashboard/contracts": "workspace:*",
     "@gamedashboard/i18n": "workspace:*",
     "@gamedashboard/ui": "workspace:*",
+    "@monaco-editor/react": "^4.7.0",
+    "@simplewebauthn/browser": "^14.0.0",
     "lucide-react": "^1.46.0",
     "next": "^16.3.5",
     "next-intl": "^4.14.5",
@@ -27,13 +27,14 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
+    "@gamedashboard/config": "workspace:*",
     "@playwright/test": "^1.56.1",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/node": "^26.5.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@gamedashboard/config": "workspace:*",
+    "lighthouse": "^13.5.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^7.0.2"
   }
