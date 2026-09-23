@@ -59,7 +59,7 @@ jobs:
       VERSION: ${{ inputs.version || github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ inputs.version || github.ref }}
 
@@ -70,11 +70,11 @@ jobs:
           git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null \
             || { echo "::error::L'étiquette $VERSION n'existe pas."; exit 1; }
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       # La version de Node des serveurs (.nvmrc) : l'interface est compilée
       # par celle qui l'exécutera.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -91,7 +91,7 @@ jobs:
         run: bash infra/release/assembler.sh "$VERSION" dist
 
       - name: Attester la provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: |
             dist/gamedashboard-*.tar.gz
@@ -144,7 +144,7 @@ jobs:
           fi
 
       - name: Conserver l'archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gamedashboard-${{ env.VERSION }}
           path: dist/
