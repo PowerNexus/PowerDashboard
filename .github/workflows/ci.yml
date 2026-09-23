@@ -231,10 +231,13 @@ jobs:
       - name: Parcours et accessibilité
         run: pnpm e2e
 
-      # Gardé même en cas d'échec : c'est précisément quand la suite est rouge
-      # qu'on a besoin des traces et des captures.
+      # Seulement en cas d'échec : c'est précisément quand la suite est rouge
+      # qu'on a besoin des traces et des captures ; une suite verte n'a rien à
+      # montrer. Non bloquant : un quota de stockage d'artefacts atteint ne
+      # doit pas rendre rouge une suite qui a passé.
       - name: Rapport
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report

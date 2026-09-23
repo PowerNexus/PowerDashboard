@@ -276,6 +276,18 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  it("ne tombent pas pour un quota d'artefacts atteint", () => {
+    const envois = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^( +)- name: .+\n(?:\1 {2}.*\n)*/gm)]
+        .map(([etape]) => etape)
+        .filter((etape) => etape.includes("actions/upload-artifact@")),
+    );
+    expect(envois.length).toBe(2);
+    for (const etape of envois) {
+      expect(etape).toContain("continue-on-error: true");
+    }
+  });
+
   it("ne lancent jamais le code d'une PR venue d'un fork", () => {
     const [ci] = workflows as [string];
     const jobs = [...ci.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)].filter(([bloc]) =>
