@@ -96,6 +96,18 @@ tail -f /home/runner/runner.log   # « Listening for Jobs »
 Arrêter le runner pendant un job fait échouer ce job : attendre qu'il soit
 « Idle » dans la page des runners.
 
+### Fichiers appartenant à root dans `_work`
+
+Une action conteneur (Semgrep) écrit en root dans l'espace de travail ; le job
+d'audit les rend à l'utilisateur du runner en fin de job. Si un checkout
+échoue malgré tout sur `insufficient permission for adding an object to
+repository database .git/objects` (runner lancé un jour en root, job
+interrompu), une fois, runner à l'arrêt :
+
+```bash
+sudo chown -R runner:runner /home/runner/actions-runner/_work
+```
+
 ## Vérifier
 
 Relancer la CI d'une PR (onglet *Checks* → *Re-run all jobs*). Les trois jobs

@@ -288,6 +288,17 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  it("rendent l'espace de travail au runner après une action conteneur", () => {
+    const [ci] = workflows as [string];
+    const semgrep = ci.indexOf("semgrep/semgrep-action@");
+    const rendu = ci.indexOf("name: Rendre l'espace de travail au runner");
+    expect(semgrep).toBeGreaterThan(0);
+    expect(rendu).toBeGreaterThan(semgrep);
+    const etape = ci.slice(rendu, ci.indexOf("\n\n", rendu));
+    expect(etape).toContain("if: always()");
+    expect(etape).toMatch(/chown -R "\$\(id -u\):\$\(id -g\)" \/w \/t/);
+  });
+
   it("ne lancent jamais le code d'une PR venue d'un fork", () => {
     const [ci] = workflows as [string];
     const jobs = [...ci.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)].filter(([bloc]) =>
