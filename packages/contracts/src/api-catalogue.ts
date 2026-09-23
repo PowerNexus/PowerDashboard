@@ -127,6 +127,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
   },
   {
     method: "POST",
+    path: "/servers/{server}/files/chmod",
+    summary:
+      "Changer les permissions d'entrées : `{ root, files: [{ file, mode }] }`, mode octal de 000 à 777 en chaîne.",
+    scope: "files.write",
+    group: "Fichiers",
+  },
+  {
+    method: "POST",
     path: "/servers/{server}/files/delete",
     summary: "Supprimer définitivement des fichiers ou dossiers.",
     scope: "files.delete",

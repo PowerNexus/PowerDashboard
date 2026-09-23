@@ -230,3 +230,53 @@ verdict "oui" "$([ -f "$depose" ] && echo oui || echo non)" "le fichier est arri
 grep -q 'depart.txt' "$TMP/sftp.log" \
   && printf '  OK    %-46s oui\n' "le contenu du serveur est listé" \
   || printf '  ÉCHEC %-45s depart.txt absent du listing\n' "le contenu du serveur est listé"
+
+# ---------------------------------------------------------------------------
+titre "5. Permissions et renommage depuis le panel, jusqu'au disque"
+# ---------------------------------------------------------------------------
+# Le contrat de `files/chmod` a été relevé dans la source de Wings (mode en
+# chaîne octale, passé à `ParseUint(…, 8, 32)`) mais jamais éprouvé contre un
+# daemon : c'est ce point qui le fait. Même chose pour la collision de
+# renommage, dont le panel reconnaît la phrase exacte pour la rendre en 409.
+cli() { curl -s -b "__Host-gd_session=$JC" -H 'content-type: application/json' "$@"; }
+mode_disque() { stat -c '%a' "$1" 2>/dev/null; }
+
+code=$(cli -o "$TMP/chmod.json" -w '%{http_code}' -X POST \
+  -d '{"root":"/","files":[{"file":"depose.txt","mode":"600"}]}' \
+  "$API/api/v1/client/servers/$SRV/files/chmod")
+# 201 et non 200 : Nest répond « created » à un POST (voir le point 3).
+case "$code" in
+  200|201) printf '  OK    %-46s %s\n' "le client change le mode d'un fichier" "$code" ;;
+  *)       printf '  ÉCHEC %-45s attendu 200 ou 201, obtenu %s\n' "le client change le mode d'un fichier" "$code"
+           sed 's/^/    /' "$TMP/chmod.json" | head -3 ;;
+esac
+verdict "600" "$(mode_disque "$depose")" "le mode est appliqué sur le disque"
+
+# Le listage relu par le panel doit dire la même chose que le disque : c'est
+# de là que la fenêtre « Permissions » tire le mode actuel.
+liste=$(cli "$API/api/v1/client/servers/$SRV/files?directory=/" \
+  | jq_ "[e['mode'] for e in d['data'] if e['name'] == 'depose.txt'][0]")
+verdict "-rw-------" "$liste" "le listage rend le nouveau mode"
+
+code=$(cli -o /dev/null -w '%{http_code}' -X POST \
+  -d '{"root":"/","files":[{"file":"depose.txt","mode":"4755"}]}' \
+  "$API/api/v1/client/servers/$SRV/files/chmod")
+verdict "400" "$code" "setuid est refusé par le panel"
+verdict "600" "$(mode_disque "$depose")" "le refus n'a rien touché"
+
+code=$(cli -o /dev/null -w '%{http_code}' -X POST \
+  -d '{"root":"/","from":"depose.txt","to":"depart.txt"}' \
+  "$API/api/v1/client/servers/$SRV/files/rename")
+verdict "409" "$code" "une collision de renommage est un 409"
+
+cli -o /dev/null -X POST -d '{"root":"/","name":"rangement"}' \
+  "$API/api/v1/client/servers/$SRV/files/create-directory"
+code=$(cli -o /dev/null -w '%{http_code}' -X POST \
+  -d '{"root":"/","from":"depose.txt","to":"rangement/depose.txt"}' \
+  "$API/api/v1/client/servers/$SRV/files/rename")
+case "$code" in
+  200|201) printf '  OK    %-46s %s\n' "le déplacement vers un sous-dossier aboutit" "$code" ;;
+  *)       printf '  ÉCHEC %-45s attendu 200 ou 201, obtenu %s\n' "le déplacement vers un sous-dossier aboutit" "$code" ;;
+esac
+verdict "oui" "$([ -f "/var/lib/pterodactyl/volumes/$UUID/rangement/depose.txt" ] && echo oui || echo non)" \
+  "le fichier est arrivé dans le sous-dossier"

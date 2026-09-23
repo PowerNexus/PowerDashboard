@@ -14,7 +14,6 @@ import {
   Input,
   PageHeader,
   PageTemplate,
-  Progress,
   RowActions,
   Skeleton,
 } from "@gamedashboard/ui";
@@ -24,7 +23,9 @@ import {
   FilePlus2,
   Files,
   FolderArchive,
+  FolderInput,
   FolderPlus,
+  KeyRound,
   Pencil,
   Search,
   Trash2,
@@ -33,20 +34,19 @@ import {
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useFileUpload } from "@/lib/use-file-upload";
 import {
-  completeUpload,
   compressFiles,
   createDirectory,
   decompressFile,
   deleteFiles,
   listFiles,
-  openUpload,
   requestDownloadUrl,
-  requestUploadGrant,
-  type UploadSession,
-  uploadStatus,
   writeFile,
 } from "@/server/api/files";
+import { FilesPermissionsDialog } from "./files-permissions-dialog";
+import { FilesRenameDialog } from "./files-rename-dialog";
+import { FilesUploadProgress } from "./files-upload-progress";
 import { ServerBlockBanner, useServerBlock } from "./server-block-context";
 
 /**
@@ -60,12 +60,15 @@ import { ServerBlockBanner, useServerBlock } from "./server-block-context";
 export function FilesWorkspace({ serverId }: { serverId: string }) {
   const t = useTranslations("files");
   const tc = useTranslations("common");
+  const tf = useTranslations("fileTools");
   const router = useRouter();
   const [path, setPath] = useState("/");
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<FileEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<FileEntry | null>(null);
+  const [toRename, setToRename] = useState<FileEntry | null>(null);
+  const [toChmod, setToChmod] = useState<FileEntry | null>(null);
   const [newFolder, setNewFolder] = useState(false);
   const [newName, setNewName] = useState("");
   const [pending, startTransition] = useTransition();
@@ -83,9 +86,6 @@ export function FilesWorkspace({ serverId }: { serverId: string }) {
    */
   const bloc = useServerBlock();
   const fige = bloc !== null;
-  const [uploading, setUploading] = useState(false);
-  /** Où en est l'envoi en cours, quand il est assez gros pour être découpé. */
-  const [progres, setProgres] = useState<{ nom: string; fait: number; total: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
@@ -120,52 +120,14 @@ export function FilesWorkspace({ serverId }: { serverId: string }) {
     return entries.filter((e) => e.name.toLowerCase().includes(q));
   }, [entries, query]);
 
-  /**
-   * Envoie les fichiers choisis, par l'un de deux chemins.
-   *
-   * **Petit fichier : droit au daemon.** Le panel ne voit passer que
-   * l'autorisation — une adresse et un jeton à usage unique — et le navigateur
-   * dépose chez Wings. C'est le trajet le plus court, et il n'a aucune raison
-   * de changer pour un fichier de configuration.
-   *
-   * **Gros fichier : découpé, et repris s'il le faut.** Là, le chemin court
-   * n'est plus acceptable : une coupure au bout de deux gigaoctets renverrait
-   * au premier octet. Les morceaux vont au panel, qui les garde et les recolle
-   * — le daemon ne sachant pas compléter un fichier déjà commencé.
-   *
-   * Le dossier courant part en paramètre dans les deux cas : c'est là qu'on se
-   * trouve, et c'est là que le fichier doit atterrir.
-   */
-  const upload = useCallback(
-    async (chosen: FileList) => {
-      setUploading(true);
-      setError(null);
-      try {
-        for (const file of chosen) {
-          if (file.size <= PETIT_FICHIER) {
-            const refus = await envoiDirect(serverId, path, file, t("uploadFailed"));
-            if (refus) {
-              setError(refus);
-              return;
-            }
-          } else {
-            const refus = await envoiReprenable(serverId, path, file, setProgres);
-            if (refus) {
-              setError(refus);
-              return;
-            }
-          }
-        }
-        await load(path);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : t("uploadFailed"));
-      } finally {
-        setProgres(null);
-        setUploading(false);
-      }
-    },
-    [serverId, path, load, t],
-  );
+  const reload = useCallback(() => load(path), [load, path]);
+  const { upload, annuler, uploading, progres } = useFileUpload({
+    serverId,
+    path,
+    echec: t("uploadFailed"),
+    onError: setError,
+    onDone: reload,
+  });
 
   /**
    * Fait tirer un fichier par le navigateur, directement au daemon.
@@ -280,25 +242,7 @@ export function FilesWorkspace({ serverId }: { serverId: string }) {
         </AlertBanner>
       ) : null}
 
-      {/*
-       * La progression n'apparaît que pour les envois découpés.
-       *
-       * Un petit fichier part en une requête : y accrocher une barre la ferait
-       * clignoter sans rien apprendre. Ici elle dit quelque chose de vrai —
-       * chaque pas est un morceau que le panel a confirmé avoir reçu, et un
-       * envoi repris repart de ce compte-là.
-       */}
-      {progres ? (
-        <div className="flex flex-col gap-2 rounded-card border border-border bg-surface p-4">
-          <div className="flex items-baseline justify-between gap-4">
-            <span className="truncate font-medium text-fg text-sm">{progres.nom}</span>
-            <span className="shrink-0 text-muted text-xs tabular-nums">
-              {t("uploadProgress", { done: progres.fait, total: progres.total })}
-            </span>
-          </div>
-          <Progress value={progres.fait} max={progres.total} label={t("uploading")} />
-        </div>
-      ) : null}
+      {progres ? <FilesUploadProgress progres={progres} onCancel={annuler} /> : null}
 
       {entries === null ? (
         <div className="flex flex-col gap-2">
@@ -324,6 +268,16 @@ export function FilesWorkspace({ serverId }: { serverId: string }) {
                   {tc("edit")}
                 </DropdownItem>
               ) : null}
+              <DropdownItem
+                icon={<FolderInput />}
+                disabled={fige}
+                onSelect={() => setToRename(entry)}
+              >
+                {tf("rename")}
+              </DropdownItem>
+              <DropdownItem icon={<KeyRound />} disabled={fige} onSelect={() => setToChmod(entry)}>
+                {tf("permissions")}
+              </DropdownItem>
               <DropdownSeparator />
               {/* Un dossier ne se tire pas tel quel : on le compresse d'abord. */}
               {!entry.isDirectory ? (
@@ -395,6 +349,21 @@ export function FilesWorkspace({ serverId }: { serverId: string }) {
         </DialogContent>
       </Dialog>
 
+      <FilesRenameDialog
+        serverId={serverId}
+        path={path}
+        entry={toRename}
+        onClose={() => setToRename(null)}
+        onRenamed={reload}
+      />
+      <FilesPermissionsDialog
+        serverId={serverId}
+        path={path}
+        entry={toChmod}
+        onClose={() => setToChmod(null)}
+        onChanged={reload}
+      />
+
       <ConfirmDialog
         open={toDelete !== null}
         onOpenChange={(o) => !o && setToDelete(null)}
@@ -442,134 +411,4 @@ const ARCHIVE_SUFFIXES = [
 function isArchive(name: string): boolean {
   const lower = name.toLowerCase();
   return ARCHIVE_SUFFIXES.some((suffix) => lower.endsWith(suffix));
-}
-
-/**
- * En dessous, l'envoi direct au daemon reste le meilleur chemin.
- *
- * Huit mégaoctets : au-delà, la perte d'un envoi coupé en cours commence à
- * coûter, en dessous elle ne coûte rien et le découpage n'ajouterait que des
- * allers-retours. C'est aussi la taille d'un morceau côté panel, ce qui fait
- * qu'un fichier juste au-dessus du seuil part en deux morceaux et non en un.
- */
-const PETIT_FICHIER = 8 * 1024 * 1024;
-
-/**
- * Le chemin court : le navigateur dépose chez Wings, le panel ne lit rien.
- *
- * Conservé tel quel pour les petits fichiers — un jeton à usage unique, une
- * requête, aucun octet qui transite par le panel.
- */
-async function envoiDirect(
-  serverId: string,
-  path: string,
-  file: File,
-  echec: string,
-): Promise<string | null> {
-  const { grant, error } = await requestUploadGrant(serverId);
-  if (!grant) return error ?? echec;
-
-  const body = new FormData();
-  // `files` au pluriel : c'est le nom du champ que le daemon lit.
-  body.append("files", file);
-
-  const query = `token=${encodeURIComponent(grant.token)}&directory=${encodeURIComponent(path)}`;
-  const response = await fetch(`${grant.url}?${query}`, { method: "POST", body });
-  if (response.ok) return null;
-
-  // Le daemon écrit ses refus en clair — « fichier plus volumineux que la
-  // limite de 100 MB », avec le nom du fichier. Les remplacer par un échec
-  // générique ferait chercher une panne là où il n'y a qu'un fichier trop gros.
-  const corps = (await response.json().catch(() => ({}))) as { error?: string };
-  return corps.error ?? echec;
-}
-
-/**
- * Le chemin long : découpé, repris, et assemblé par le panel.
- *
- * **Ce qui rend la reprise possible** est que le panel garde les morceaux : le
- * daemon, lui, ne sait pas compléter un fichier déjà commencé — son écriture
- * prend un corps entier et sa longueur. C'est donc le panel qui recolle, et
- * c'est lui qu'on interroge pour savoir où l'on en était.
- *
- * La session est notée dans le stockage local pour survivre à un
- * rechargement : sans cela, une reprise ne serait possible qu'au sein de la
- * même page, c'est-à-dire pas dans le cas qui compte.
- */
-async function envoiReprenable(
-  serverId: string,
-  path: string,
-  file: File,
-  onProgres: (etat: { nom: string; fait: number; total: number } | null) => void,
-): Promise<string | null> {
-  const cle = `gd-upload:${serverId}:${path}:${file.name}:${file.size}`;
-  let session = await reprendre(serverId, cle);
-
-  if (!session) {
-    const { session: ouverte, error } = await openUpload(serverId, {
-      directory: path,
-      fileName: file.name,
-      size: file.size,
-    });
-    if (!ouverte) return error;
-    session = ouverte;
-    try {
-      localStorage.setItem(cle, ouverte.id);
-    } catch {
-      // Navigation privée, stockage plein : l'envoi marche quand même, il ne
-      // survivra simplement pas à un rechargement.
-    }
-  }
-
-  const reste = new Set(session.received);
-  onProgres({ nom: file.name, fait: reste.size, total: session.chunks });
-
-  for (let index = 0; index < session.chunks; index++) {
-    if (reste.has(index)) continue;
-
-    const debut = index * session.chunkSize;
-    const morceau = file.slice(debut, Math.min(debut + session.chunkSize, file.size));
-    const reponse = await fetch(`/api/upload-chunk/${serverId}/${session.id}/${index}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: morceau,
-    });
-
-    if (!reponse.ok) {
-      const corps = (await reponse.json().catch(() => ({}))) as { message?: string };
-      // La session reste notée : l'envoi se reprendra là où il s'est arrêté.
-      return corps.message ?? `Morceau ${index + 1} refusé.`;
-    }
-    reste.add(index);
-    onProgres({ nom: file.name, fait: reste.size, total: session.chunks });
-  }
-
-  const { error } = await completeUpload(serverId, session.id);
-  oublier(cle);
-  return error;
-}
-
-/** La session laissée par un envoi interrompu, si le panel la connaît encore. */
-async function reprendre(serverId: string, cle: string): Promise<UploadSession | null> {
-  let connu: string | null = null;
-  try {
-    connu = localStorage.getItem(cle);
-  } catch {
-    return null;
-  }
-  if (!connu) return null;
-
-  const { session } = await uploadStatus(serverId, connu);
-  // Une session effacée par le balayage des six heures n'est pas une erreur :
-  // on repart simplement du début.
-  if (!session) oublier(cle);
-  return session;
-}
-
-function oublier(cle: string): void {
-  try {
-    localStorage.removeItem(cle);
-  } catch {
-    // Rien à faire : la clé disparaîtra avec le stockage.
-  }
 }

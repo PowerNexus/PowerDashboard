@@ -62,6 +62,7 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
 
   "files.write": { category: "files", label: "Fichier enregistré" },
   "files.rename": { category: "files", label: "Fichier renommé" },
+  "files.chmod": { category: "files", label: "Permissions de fichier modifiées" },
   "files.delete": { category: "files", label: "Fichier supprimé" },
   "files.create-directory": { category: "files", label: "Dossier créé" },
   "files.compress": { category: "files", label: "Archive créée" },

@@ -9,6 +9,7 @@ export * from "./client-webhooks";
 export * from "./cron";
 export * from "./egg-rules";
 export * from "./engine";
+export * from "./files";
 export * from "./hostbill";
 export * from "./instatus";
 export * from "./marketplace";

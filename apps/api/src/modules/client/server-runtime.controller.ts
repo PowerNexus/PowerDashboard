@@ -1,7 +1,13 @@
-import { PowerSignal } from "@gamedashboard/contracts";
+import {
+  ChmodRequest,
+  PowerSignal,
+  RenameRequest,
+  WINGS_RENAME_COLLISION,
+} from "@gamedashboard/contracts";
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -256,17 +262,65 @@ export class ServerRuntimeController {
     return { data: { created: name } };
   }
 
+  /**
+   * Renommer ou déplacer.
+   *
+   * `to` est relatif à `root`, comme `from` : un chemin avec des « / » déplace
+   * l'entrée, et c'est le daemon qui confine le résultat au volume. La cible
+   * est vérifiée par la règle partagée avec l'écran (`RenameRequest`) : un nom
+   * vide ou terminé par « / » partait tel quel, et le daemon le lisait
+   * autrement que la personne qui l'avait tapé.
+   */
   @Post("files/rename")
   async renameFile(@Req() request: ClientRequest, @Param("id") id: string, @Body() body: unknown) {
-    const { root, from, to } = (body ?? {}) as { root?: unknown; from?: unknown; to?: unknown };
-    if (typeof root !== "string" || typeof from !== "string" || typeof to !== "string") {
-      throw new BadRequestException("Renommage incomplet.");
+    const parsed = RenameRequest.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues[0]?.message ?? "Renommage incomplet.");
     }
+    const { root, from, to } = parsed.data;
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
-    await this.relay(() => this.wings.renameFile(id, root, from, to));
+    try {
+      await this.relay(() => this.wings.renameFile(id, root, from, to));
+    } catch (error) {
+      /*
+       * La collision est le refus le plus courant, et le daemon l'écrit en
+       * anglais dans un 400 générique. Elle devient un 409 en français, qui
+       * nomme la cible : l'écran peut la reconnaître sans lire la phrase.
+       */
+      if (error instanceof BadRequestException && error.message === WINGS_RENAME_COLLISION) {
+        throw new ConflictException(`« ${to} » existe déjà dans ce dossier.`);
+      }
+      throw error;
+    }
     await this.log(request, id, "files.rename", { root, from, to });
     return { data: { renamed: to } };
+  }
+
+  /**
+   * Permissions d'entrées (chmod).
+   *
+   * `files.write`, comme le renommage et l'écriture : changer un mode modifie
+   * le volume au même titre, et un `chmod 000` sur `server.properties` empêche
+   * le serveur de démarrer aussi sûrement qu'une réécriture ratée. En faire une
+   * permission à part ajouterait un interrupteur que personne ne sait régler
+   * différemment de `files.write`.
+   *
+   * Le mode est validé ici (`ChmodRequest`) et non chez le daemon, qui ne
+   * filtre rien : c'est ce qui refuse setuid, setgid et le bit collant.
+   */
+  @Post("files/chmod")
+  async chmodFiles(@Req() request: ClientRequest, @Param("id") id: string, @Body() body: unknown) {
+    const parsed = ChmodRequest.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues[0]?.message ?? "Permissions invalides.");
+    }
+    const { root, files } = parsed.data;
+    await this.access.require(principalOf(request), id, "files.write");
+    await this.access.requireOperable(id);
+    await this.relay(() => this.wings.chmodFiles(id, root, files));
+    await this.log(request, id, "files.chmod", { root, files });
+    return { data: { changed: files.length } };
   }
 
   /**
