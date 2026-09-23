@@ -1,6 +1,6 @@
 "use server";
 
-import type { RolePresets } from "@gamedashboard/contracts";
+import type { EggDraft, RolePresets } from "@gamedashboard/contracts";
 import { revalidatePath } from "next/cache";
 import type { AdminNodeShare } from "./admin";
 import { apiFetch, apiSend, apiSendFor } from "./client";
@@ -377,6 +377,46 @@ export async function setEggEnabled(
   enabled: boolean,
 ): Promise<{ error: string | null }> {
   return act("/admin/eggs", () => apiSend(`/api/v1/admin/eggs/${eggId}/enabled`, { enabled }));
+}
+
+/**
+ * Enregistre un egg modifié dans l'éditeur.
+ *
+ * Le brouillon a déjà été vérifié champ par champ à l'écran, avec le même
+ * schéma (`EggDraft`). Ce qui peut encore être refusé ici dépend des serveurs
+ * en service — une variable employée qu'on retire, par exemple — et le motif
+ * de l'API est rendu tel quel : il nomme la variable et le nombre de serveurs.
+ */
+export async function saveEgg(eggId: string, draft: EggDraft): Promise<{ error: string | null }> {
+  return act(`/admin/eggs/${eggId}`, async () => {
+    await apiSend(`/api/v1/admin/eggs/${encodeURIComponent(eggId)}`, draft);
+    revalidatePath("/admin/eggs");
+  });
+}
+
+/**
+ * L'export Pterodactyl d'un egg, prêt à être enregistré par le navigateur.
+ *
+ * Passé par une action plutôt que par un lien direct vers l'API : l'API n'est
+ * pas exposée au navigateur sous le même nom, et la session voyage ici dans
+ * le cookie que seul le serveur Next relaie.
+ */
+export async function exportEgg(
+  eggId: string,
+): Promise<{ error: string | null; filename: string; content: string }> {
+  try {
+    const { data } = await apiFetch<{ data: { filename: string; egg: unknown } }>(
+      `/api/v1/admin/eggs/${encodeURIComponent(eggId)}/export`,
+    );
+    // Indenté sur quatre espaces, comme les exports de Pterodactyl.
+    return { error: null, filename: data.filename, content: JSON.stringify(data.egg, null, 4) };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Export refusé.",
+      filename: "",
+      content: "",
+    };
+  }
 }
 
 /**

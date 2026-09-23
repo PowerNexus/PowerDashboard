@@ -16,6 +16,7 @@ import { AdminServerService } from "./admin-server.service";
 import { AdminWriteGuard } from "./admin-write.guard";
 import { AnnouncementsService } from "./announcements.service";
 import { DatabaseHostsService } from "./database-hosts.service";
+import { EggEditorService } from "./egg-editor.service";
 import { EggImportService } from "./egg-import.service";
 import { InfrastructureService } from "./infrastructure.service";
 import { MountsService } from "./mounts.service";
@@ -74,6 +75,7 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     NodeLoadService,
     PlatformSettingsService,
     EggImportService,
+    EggEditorService,
     InfrastructureService,
   ],
   // Sortent pour l'API applicative : la suspension, la suppression et les

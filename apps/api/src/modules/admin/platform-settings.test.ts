@@ -59,6 +59,26 @@ describe("écriture des réglages", () => {
     expect(written).toEqual([]);
   });
 
+  it("contrôle les adresses de la marque comme celles d'un revendeur", async () => {
+    // Ces valeurs finissent dans un `src` ou un `href` de chaque page.
+    const { svc, written } = service();
+    for (const adresse of ["javascript:alert(1)", "http://cdn.exemple.fr/logo.png", "//x.fr/a"]) {
+      await expect(svc.save({ "brand.logoUrl": adresse })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    }
+    await expect(svc.save({ "brand.accent": "red;}*{display:none" })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(written).toEqual([]);
+
+    await svc.save({ "brand.logoUrl": " https://cdn.exemple.fr/logo.png ", "brand.accent": "" });
+    expect(written.map((w) => [w.key, w.value])).toEqual([
+      ["brand.logoUrl", "https://cdn.exemple.fr/logo.png"],
+      ["brand.accent", ""],
+    ]);
+  });
+
   it("convertit une valeur numérique reçue en texte", async () => {
     // `jsonb` accepte une chaîne là où on attend un nombre : la mauvaise
     // valeur ne se découvrirait qu'à l'envoi d'un e-mail.

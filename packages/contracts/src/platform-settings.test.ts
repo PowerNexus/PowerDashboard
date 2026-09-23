@@ -1,5 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { PLATFORM_SETTINGS, SETTING_BY_KEY } from "./platform-settings";
+import { PLATFORM_BRAND_SETTINGS, PLATFORM_SETTINGS, SETTING_BY_KEY } from "./platform-settings";
+
+describe("marque de la plateforme", () => {
+  it("déclare chaque champ de marque d'un revendeur dans le catalogue", () => {
+    // La plateforme doit pouvoir régler tout ce qu'un revendeur règle : un
+    // champ sans réglage retombait toujours sur le produit, quoi qu'on fasse.
+    for (const [champ, clef] of Object.entries(PLATFORM_BRAND_SETTINGS)) {
+      const descripteur = SETTING_BY_KEY.get(clef);
+      expect(descripteur, `« ${champ} » n'a pas de réglage « ${clef} ».`).toBeDefined();
+      expect(descripteur?.kind).toBe("text");
+    }
+  });
+
+  it("contrôle la forme des adresses et de la couleur", () => {
+    const formats = Object.fromEntries(
+      Object.values(PLATFORM_BRAND_SETTINGS).map((clef) => [
+        clef,
+        SETTING_BY_KEY.get(clef)?.format,
+      ]),
+    );
+    expect(formats).toMatchObject({
+      "brand.logoUrl": "url",
+      "brand.faviconUrl": "url",
+      "brand.supportUrl": "url",
+      "brand.termsUrl": "url",
+      "brand.accent": "hex",
+    });
+  });
+});
 
 /**
  * Les valeurs par défaut des réglages de sécurité, épinglées.

@@ -2,6 +2,8 @@ import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
 import {
   FEATURE_FLAGS,
   featureFlagDefault,
+  isSafeBrandUrl,
+  normalizeHex,
   PLATFORM_SETTINGS,
   ROLE_PRESETS_SETTING_KEY,
   RolePresetsInput,
@@ -398,7 +400,32 @@ export class PlatformSettingsService {
         }
       }
 
-      await this.upsert(key, coerce(raw, descriptor.kind, descriptor.fallback), false);
+      /*
+       * La forme des réglages de marque, contrôlée comme pour un revendeur.
+       *
+       * Ces valeurs finissent dans un `src`, un `href` ou une variable CSS de
+       * chaque page, domaines des revendeurs compris quand ils n'ont rien
+       * surchargé. Le contrôle est celui de `BrandingService.save`, par la
+       * même fonction : la plateforme n'a pas à être moins protégée qu'un
+       * revendeur.
+       */
+      const text = typeof raw === "string" ? raw.trim() : String(raw ?? "");
+      if (descriptor.format === "url" && !isSafeBrandUrl(text)) {
+        throw new BadRequestException(
+          `« ${descriptor.label} » doit commencer par « https:// » ou par « / » (chemin interne).`,
+        );
+      }
+      if (descriptor.format === "hex" && text !== "" && normalizeHex(text) === null) {
+        throw new BadRequestException(
+          `« ${descriptor.label} » doit être une couleur hexadécimale, comme #0ea5e9.`,
+        );
+      }
+
+      await this.upsert(
+        key,
+        coerce(descriptor.format ? text : raw, descriptor.kind, descriptor.fallback),
+        false,
+      );
       saved.push(key);
     }
 

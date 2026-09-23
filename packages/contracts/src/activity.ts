@@ -263,6 +263,7 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     category: "access",
     label: "Presets de sous-utilisateurs rétablis",
   },
+  "admin.egg_updated": { category: "settings", label: "Egg modifié" },
   "node.configuration_read": { category: "settings", label: "Configuration de node consultée" },
   "application.domain_certificate_reported": {
     category: "network",

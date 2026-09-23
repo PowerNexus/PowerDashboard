@@ -7,7 +7,9 @@ import {
   Delete,
   Get,
   Inject,
+  NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -34,6 +36,7 @@ import { AdminServerService } from "./admin-server.service";
 import { AdminWriteGuard } from "./admin-write.guard";
 import { AnnouncementsService } from "./announcements.service";
 import { DatabaseHostsService } from "./database-hosts.service";
+import { EggEditorService } from "./egg-editor.service";
 import { EggImportService } from "./egg-import.service";
 import { InfrastructureService } from "./infrastructure.service";
 import { MountsService } from "./mounts.service";
@@ -80,6 +83,16 @@ function auditFiltersOf(query: Record<string, unknown>): AuditFilters {
   }
   return parsed.data;
 }
+/**
+ * Identifiant d'egg contrôlé avant d'atteindre la base.
+ *
+ * Sans lui, `/admin/eggs/nimporte-quoi` arrivait jusqu'à PostgreSQL, qui
+ * refusait la conversion en UUID : une erreur 500 pour une adresse mal tapée.
+ * Un identifiant illisible désigne un egg qui n'existe pas, et se dit en 404.
+ */
+const EGG_ID = new ParseUUIDPipe({
+  exceptionFactory: () => new NotFoundException("Egg introuvable."),
+});
 
 /** Premier en-tête, quand Fastify en rend plusieurs. */
 function headerValue(value: string | string[] | undefined): string | null {
@@ -110,6 +123,7 @@ export class AdminController {
     @Inject(MountsService) private readonly mountsService: MountsService,
     @Inject(ResellerQuotaService) private readonly quotas: ResellerQuotaService,
     @Inject(EggImportService) private readonly eggImport: EggImportService,
+    @Inject(EggEditorService) private readonly eggEditor: EggEditorService,
     @Inject(InfrastructureService) private readonly infrastructure: InfrastructureService,
     @Inject(ResellerShareService) private readonly shares: ResellerShareService,
     @Inject(BrandingService) private readonly branding: BrandingService,
@@ -238,7 +252,12 @@ export class AdminController {
     if (!values || typeof values !== "object" || Array.isArray(values)) {
       throw new BadRequestException("Réglages manquants.");
     }
-    return { data: await this.platform.save(values as Record<string, unknown>) };
+    const result = await this.platform.save(values as Record<string, unknown>);
+    // La marque de la plateforme sert de repli à tous les domaines : sans
+    // cette purge, le nouveau logo n'apparaîtrait qu'une minute plus tard, et
+    // l'on rechargerait la page en croyant l'enregistrement perdu.
+    if (result.saved.some((key) => key.startsWith("brand."))) this.branding.forgetAll();
+    return { data: result };
   }
 
   @Post("settings/flags/:key")
@@ -1263,6 +1282,62 @@ export class AdminController {
     }
     const nest = typeof payload.nest === "string" ? payload.nest : undefined;
     return { data: await this.eggImport.importOne({ json: egg, nestName: nest }) };
+  }
+
+  /** L'egg complet, variables et emploi par les serveurs compris, pour l'éditeur. */
+  @Get("eggs/:eggId")
+  async eggDetail(@Param("eggId", EGG_ID) eggId: string) {
+    return { data: await this.eggEditor.detail(eggId) };
+  }
+
+  /**
+   * L'egg au format d'import Pterodactyl (PTDL_v2).
+   *
+   * Rendu dans l'enveloppe habituelle plutôt qu'en pièce jointe : c'est
+   * l'écran qui fabrique le fichier à télécharger, et le nom proposé voyage
+   * avec le contenu. Réimporté tel quel — ici ou dans un Pterodactyl —, il
+   * redonne le même egg.
+   */
+  @Get("eggs/:eggId/export")
+  async exportEgg(@Param("eggId", EGG_ID) eggId: string) {
+    return { data: await this.eggEditor.export(eggId) };
+  }
+
+  /**
+   * Enregistre un egg modifié dans l'éditeur.
+   *
+   * Le corps est validé par `EggDraft` (contracts), le même schéma que l'écran
+   * applique champ par champ. Les changements qui casseraient des serveurs en
+   * service — retirer une variable employée, la rendre obligatoire sans
+   * valeur par défaut — sont refusés en 409, avec la raison et le nombre de
+   * serveurs concernés.
+   */
+  @Post("eggs/:eggId")
+  @UseGuards(AdminWriteGuard)
+  async updateEgg(
+    @Req() request: AdminRequest,
+    @Param("eggId", EGG_ID) eggId: string,
+    @Body() body: unknown,
+  ) {
+    const report = await this.eggEditor.update(eggId, body);
+
+    await this.activityLog.record({
+      event: "admin.egg_updated",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      properties: {
+        eggId,
+        name: report.detail.name,
+        variablesAdded: report.variablesAdded,
+        variablesRemoved: report.variablesRemoved,
+        servers: report.detail.servers,
+      },
+    });
+
+    return { data: report };
   }
 
   /**

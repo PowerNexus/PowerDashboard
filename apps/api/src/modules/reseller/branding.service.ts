@@ -4,9 +4,11 @@ import {
   type Branding,
   type BrandingOverrides,
   composeBranding,
+  isSafeBrandUrl,
   isValidDomain,
   normalizeHex,
   ownershipRecordName,
+  PLATFORM_BRAND_SETTINGS,
 } from "@gamedashboard/contracts";
 import { type Database, resellerBrandings, users } from "@gamedashboard/db";
 import {
@@ -493,29 +495,41 @@ export class BrandingService {
     };
   }
 
-  /** Marque de la plateforme, telle que ses réglages la décrivent. */
-  private async platformOverrides(): Promise<Partial<BrandingOverrides>> {
-    const [name, accent] = await Promise.all([
-      this.settings.text("brand.name"),
-      this.settings.text("brand.accent"),
-    ]);
+  /**
+   * Oublie toutes les marques servies.
+   *
+   * Appelé quand la marque de la **plateforme** change : elle sert de repli à
+   * chaque domaine, revendeurs compris, et purger un seul hôte laisserait les
+   * autres afficher l'ancien logo pendant une minute.
+   */
+  forgetAll(): void {
+    this.cache.clear();
+  }
 
-    return { name, accent };
+  /**
+   * Marque de la plateforme, telle que ses réglages la décrivent.
+   *
+   * Tous les champs qu'un revendeur peut régler, et pas seulement le nom et
+   * l'accent : longtemps, seuls ces deux-là étaient lus, si bien que la
+   * plateforme ne pouvait ni poser son logo ni un lien d'assistance, alors
+   * que n'importe lequel de ses revendeurs le pouvait. Le repli champ par
+   * champ de `composeBranding` fait le reste — un revendeur qui n'a pas de
+   * lien d'assistance hérite de celui de la plateforme.
+   */
+  private async platformOverrides(): Promise<Partial<BrandingOverrides>> {
+    const entries = Object.entries(PLATFORM_BRAND_SETTINGS) as [keyof BrandingOverrides, string][];
+    const values = await Promise.all(entries.map(([, key]) => this.settings.text(key)));
+    return Object.fromEntries(entries.map(([field], index) => [field, values[index] ?? ""]));
   }
 }
 
 /**
- * Adresse acceptable pour une image ou un lien de marque.
- *
- * `https://` ou chemin interne, rien d'autre. Un `javascript:` recopié dans un
- * attribut `src` ou `href` s'exécute dans la page ; un `http://` sur une page
- * servie en TLS est bloqué par le navigateur, et le logo disparaît sans
- * message. Les deux se refusent à la saisie plutôt qu'à l'affichage.
+ * Adresse acceptable pour une image ou un lien de marque — la règle vit dans
+ * `isSafeBrandUrl`, partagée avec les réglages de la plateforme.
  */
 function assertUrl(value: string | undefined, label: string): string {
   const trimmed = (value ?? "").trim();
-  if (trimmed === "") return "";
-  if (trimmed.startsWith("/") || trimmed.startsWith("https://")) return trimmed.slice(0, 500);
+  if (isSafeBrandUrl(trimmed)) return trimmed.slice(0, 500);
 
   throw new BadRequestException(
     `L'adresse du ${label} doit commencer par « https:// » ou par « / ».`,
