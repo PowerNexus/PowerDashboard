@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 #
-# Déploiement de la bêta sur panel.example.fr.
+# Déploiement du panel sur un serveur Linux (systemd, nginx, PostgreSQL).
+#
+# `panel.example.fr` est un nom d'exemple : le remplacer ici (DOMAIN) et dans
+# panel.conf (server_name, journaux, certificat) avant le premier passage.
 #
 # Ce script s'exécute **sur le serveur**, en root. Il est idempotent : on peut
 # le relancer à chaque livraison. Il ne crée un secret que s'il n'existe pas
 # déjà — relancer un déploiement ne doit jamais rendre illisibles les secrets
 # déjà chiffrés en base.
 #
-# La machine héberge d'autres services publics (messagerie, sites, dépôts).
-# Tout ce qui est fait ici est donc strictement additif : un utilisateur, une
-# base, deux unités, un vhost. Rien d'existant n'est modifié.
+# La machine peut héberger d'autres services publics. Tout ce qui est fait ici
+# est donc strictement additif : un utilisateur, une base, deux unités, un
+# vhost. Rien d'existant n'est modifié.
 set -euo pipefail
 
 ROOT=/opt/gamedashboard
@@ -35,8 +38,8 @@ install -d -o root -g gamedashboard -m 750 "$ENVDIR"
 # ---------------------------------------------------------------------------
 say "Base de données"
 # ---------------------------------------------------------------------------
-# PostgreSQL 18 est partagé avec d'autres applications de la machine. On crée
-# un rôle et une base dédiés, et on ne touche à rien d'autre.
+# PostgreSQL peut être partagé avec d'autres applications de la machine. On
+# crée un rôle et une base dédiés, et on ne touche à rien d'autre.
 DBPASS_FILE=$ENVDIR/.dbpass
 if [ ! -f "$DBPASS_FILE" ]; then
   openssl rand -base64 33 | tr -d '\n/+=' > "$DBPASS_FILE"
@@ -153,10 +156,12 @@ systemctl restart gamedashboard-web.service
 # ---------------------------------------------------------------------------
 say "nginx"
 # ---------------------------------------------------------------------------
-install -m 644 "$APP/infra/prod/$DOMAIN.conf" /etc/nginx/sites-available/
+# Le fichier du dépôt s'appelle panel.conf ; il est installé sous le nom du
+# domaine. Le chercher sous ce nom dans le dépôt faisait échouer l'étape.
+install -m 644 "$APP/infra/prod/panel.conf" "/etc/nginx/sites-available/$DOMAIN.conf"
 ln -sfn "/etc/nginx/sites-available/$DOMAIN.conf" "/etc/nginx/sites-enabled/$DOMAIN.conf"
-# `nginx -t` avant tout rechargement : la machine sert aussi la messagerie et
-# plusieurs sites. Une configuration fautive les emporterait tous.
+# `nginx -t` avant tout rechargement : si la machine sert d'autres sites, une
+# configuration fautive les emporterait tous.
 nginx -t
 systemctl reload nginx
 
@@ -203,7 +208,7 @@ echo
 # Chaque page a droit à **une seconde chance**.
 #
 # Le premier rendu d'une page Next compile ses composants serveur à la demande,
-# et cette machine est partagée : un déploiement fait pendant que le build
+# et la machine peut être partagée : un déploiement fait pendant que le build
 # occupe encore les cœurs peut dépasser les vingt-cinq secondes sans que rien
 # ne soit cassé. Le script déclarait alors la livraison mauvaise — ce qui est
 # pire qu'un faux négatif, parce qu'on cherche ensuite une panne inexistante,

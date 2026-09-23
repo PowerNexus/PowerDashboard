@@ -55,4 +55,4 @@ Fait, avec tests de non-régression :
 - **Rechiffrement des secrets** : `rekey-secrets.mts` reprend le format `v3:` (il le sautait, une rotation de la clé maître perdait tout) ; cœur testé dans `apps/api/src/common/rekey.ts`.
 - **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`).
 
-À vérifier avec Matheo : `infra/prod/README.md` décrit encore une « bêta publique », probablement périmée.
+- **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).

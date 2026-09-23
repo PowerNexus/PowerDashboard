@@ -10,7 +10,7 @@
 #
 # ─── Ce que cet agent protège ────────────────────────────────────────────────
 #
-# Cette machine sert quatorze autres sites publics. Un nginx qui refuse de
+# Le serveur web peut servir d'autres sites publics. Un nginx qui refuse de
 # recharger les emporte tous. C'est le risque dominant, loin devant l'échec
 # d'un certificat, et toute la structure du script en découle :
 #
