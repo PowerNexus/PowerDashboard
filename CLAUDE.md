@@ -26,6 +26,14 @@ Tout le projet — code, commentaires, documentation — est rédigé **en fran�
 
 L'environnement se prépare avec `.claude/cloud-setup.sh` (Node 24, pnpm épinglé, PostgreSQL local, `cloudflared`, `pnpm install`, migrations). Il n'y a **ni Wings, ni Docker, ni production locale** : les bancs `infra/local/verifier-*.sh` ne tournent pas ici. Sans `DATABASE_URL`, les tests d'intégration se sautent proprement.
 
+**Tunnel Cloudflare autorisé par Matheo.** Pour montrer le panel d'une session distante, enchaîner sans redemander :
+
+1. `bash .claude/cloud-setup.sh` (Node 24 s'installe dans `/usr/bin` ; si `/opt/node22` passe devant, préfixer `PATH=/usr/bin:$PATH`).
+2. `.env` de dev tirés des `.env.example` : `APP_SECRET_KEY` d'essai (`openssl rand -base64 48`), jamais commitée ; puis `pnpm dev` (API :3201, interface :3000).
+3. `cloudflared tunnel --no-autoupdate --url http://localhost:3000`, donner l'adresse `trycloudflare.com` et la reporter dans `PANEL_ORIGIN` (API et interface), sinon le contrôle d'origine refuse les requêtes.
+
+L'adresse est publique : données de démonstration seulement, tunnel arrêté en fin de session. Il faut une sortie TCP ou UDP sur le port 7844 (`*.v2.argotunnel.com`) : si la politique réseau de l'environnement la ferme, le tunnel échoue — le dire, ne pas contourner.
+
 ## Commandes
 
 ```bash
