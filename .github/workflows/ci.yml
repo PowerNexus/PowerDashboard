@@ -149,6 +149,20 @@ jobs:
         with:
           config: p/typescript p/nodejs p/secrets p/owasp-top-ten
 
+      # L'action Semgrep tourne dans un conteneur, en root, et écrit dans
+      # l'espace de travail (objets git de sa comparaison avec la base). Sur
+      # un runner auto-hébergé, ces fichiers survivent au job : le checkout
+      # suivant, lancé par l'utilisateur du runner, échouait sur
+      # « insufficient permission for adding an object to repository
+      # database .git/objects ». On les lui rend, même si le job a échoué,
+      # avec le dossier temporaire que le conteneur a aussi reçu.
+      - name: Rendre l'espace de travail au runner
+        if: always()
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/w" -v "$RUNNER_TEMP:/t" \
+            alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 \
+            chown -R "$(id -u):$(id -g)" /w /t
+
   e2e:
     name: Parcours critiques et accessibilité
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
@@ -231,10 +245,13 @@ jobs:
       - name: Parcours et accessibilité
         run: pnpm e2e
 
-      # Gardé même en cas d'échec : c'est précisément quand la suite est rouge
-      # qu'on a besoin des traces et des captures.
+      # Seulement en cas d'échec : c'est précisément quand la suite est rouge
+      # qu'on a besoin des traces et des captures ; une suite verte n'a rien à
+      # montrer. Non bloquant : un quota de stockage d'artefacts atteint ne
+      # doit pas rendre rouge une suite qui a passé.
       - name: Rapport
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
