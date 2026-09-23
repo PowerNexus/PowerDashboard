@@ -1,6 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { connect } from "node:net";
 import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
-import { buildWingsNodeConfiguration, type WingsNodeConfiguration } from "@gamedashboard/contracts";
+import {
+  bindingChanges,
+  bindingProblem,
+  buildWingsNodeConfiguration,
+  type NodeBindingField,
+  type NodeBindingInput,
+  type WingsNodeConfiguration,
+} from "@gamedashboard/contracts";
 import { type Database, mounts, nodes } from "@gamedashboard/db";
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { eq } from "drizzle-orm";
@@ -41,6 +49,29 @@ export interface RotationOutcome {
   /** Motif, quand le daemon n'a pas pu être joint ou a refusé. */
   failure: string | null;
 }
+
+/**
+ * Issue d'un changement de liaison (adresse, protocole, ports).
+ *
+ * - `applied` : le daemon répond à la nouvelle liaison ; elle est enregistrée.
+ * - `unchanged` : rien ne diffère de ce qui est enregistré ; rien n'est fait.
+ * - `restart_required` : le daemon a écrit la nouvelle configuration mais
+ *   écoute encore à l'ancienne adresse — Wings ne rouvre ses ports qu'au
+ *   redémarrage. Rien n'est enregistré ; redémarrer Wings puis redemander.
+ * - `refused` : le daemon n'a pas pu être mis à jour. Rien n'est enregistré ;
+ *   `file` porte le `config.yml` à déposer à la main.
+ */
+export interface RebindOutcome {
+  status: "applied" | "unchanged" | "restart_required" | "refused";
+  changed: NodeBindingField[];
+  failure: string | null;
+  /** Le fichier à redéposer, seulement quand la poussée a échoué. Porte le jeton. */
+  file: string | null;
+}
+
+/** Ce que l'écran affiche quand Wings doit redémarrer pour rouvrir ses ports. */
+export const RESTART_REQUIRED_MESSAGE =
+  "Le daemon a enregistré la nouvelle configuration, mais il écoute encore à l'ancienne adresse : Wings ne rouvre ses ports qu'au redémarrage. Redémarrez Wings sur la machine, puis validez à nouveau cette modification. Rien n'a été changé dans le panel en attendant.";
 
 @Injectable()
 export class NodeConfigurationService {
@@ -89,7 +120,7 @@ export class NodeConfigurationService {
     const token = randomBytes(32).toString("base64url");
 
     const configuration = await this.build(node, tokenId, token);
-    const baseUrl = `${node.scheme}://${node.fqdn}:${node.daemonPort}`;
+    const baseUrl = baseUrlOf(node);
 
     // La poussée est authentifiée par l'**ancien** jeton : c'est celui que le
     // daemon reconnaît encore au moment où on lui parle.
@@ -126,6 +157,103 @@ export class NodeConfigurationService {
 
     this.logger.log(`Jeton du node « ${node.name} » remplacé et confirmé par le daemon.`);
     return { applied: true, tokenId, failure: null };
+  }
+
+  /**
+   * Change l'adresse, le protocole ou les ports d'un node, **sans le perdre**.
+   *
+   * Ces quatre valeurs vivent des deux côtés : en base, où le panel les lit
+   * pour joindre le daemon, et dans le `config.yml` de la machine, où Wings
+   * lit les ports sur lesquels écouter. Les changer d'un seul côté coupe le
+   * panel de son daemon. Et Wings ne rouvre ses ports **qu'à son
+   * redémarrage** : `POST /api/update` écrit le fichier et remplace la
+   * configuration en mémoire, mais les serveurs HTTP et SFTP déjà lancés
+   * restent sur les anciens ports. Le panel ne peut pas redémarrer Wings —
+   * aucune route ne le permet, et Wings ne se modifie pas.
+   *
+   * D'où la règle, la même que pour la rotation du jeton : **on n'enregistre
+   * que ce que le daemon a prouvé**. La preuve est une réponse authentifiée
+   * par le jeton du node à la *nouvelle* adresse (le jeton est propre à cette
+   * machine : une autre ne saurait pas y répondre), plus une bannière SSH au
+   * nouveau port SFTP quand il change.
+   *
+   * 1. Le daemon répond-il déjà à la nouvelle liaison ? (Wings redémarré après
+   *    une première demande, ou simple changement de nom DNS.) → enregistré.
+   * 2. Sinon, la nouvelle configuration lui est poussée **à l'ancienne
+   *    adresse**, là où il écoute encore. Échec → `refused`, rien n'est écrit,
+   *    et le fichier à déposer à la main est rendu.
+   * 3. Puis on revérifie. Réussite → enregistré. Échec → `restart_required` :
+   *    le fichier est écrit sur la machine, Wings attend son redémarrage.
+   *
+   * Entre le redémarrage de Wings et la nouvelle demande, le panel ne joint
+   * plus le daemon — mais le daemon, lui, joint toujours le panel (jeton et
+   * adresse du panel inchangés), et ses serveurs tournent. Redemander la même
+   * modification referme la fenêtre : l'étape 1 la constate et l'enregistre.
+   * Voir `docs/runbooks/modifier-liaison-node.md`.
+   */
+  async rebind(nodeId: string, target: NodeBindingInput): Promise<RebindOutcome> {
+    const node = await this.node(nodeId);
+    const problem = bindingProblem(target);
+    if (problem) throw new BadRequestException(problem);
+
+    const changed = bindingChanges(node, target);
+    if (changed.length === 0) return { status: "unchanged", changed, failure: null, file: null };
+
+    const token = decryptSecret(node.tokenEnc);
+    const proven = () => this.answersAt(target, token, changed.includes("daemonSftpPort"));
+
+    if (await proven()) {
+      await this.saveBinding(node, target, changed);
+      return { status: "applied", changed, failure: null, file: null };
+    }
+
+    const configuration = await this.build({ ...node, ...target }, node.tokenId, token);
+    const pushed = await this.push(baseUrlOf(node), token, configuration);
+    if (pushed !== null) {
+      return {
+        status: "refused",
+        changed,
+        failure: pushed,
+        file: await this.toFile(configuration),
+      };
+    }
+
+    if (await proven()) {
+      await this.saveBinding(node, target, changed);
+      return { status: "applied", changed, failure: null, file: null };
+    }
+
+    return { status: "restart_required", changed, failure: RESTART_REQUIRED_MESSAGE, file: null };
+  }
+
+  /** La nouvelle liaison répond-elle, preuve à l'appui ? */
+  private async answersAt(
+    target: NodeBindingInput,
+    token: string,
+    checkSftp: boolean,
+  ): Promise<boolean> {
+    if (!(await this.reachable(baseUrlOf(target), token))) return false;
+    return checkSftp ? sshBannerAt(target.fqdn, target.daemonSftpPort) : true;
+  }
+
+  private async saveBinding(
+    node: NodeRow,
+    target: NodeBindingInput,
+    changed: NodeBindingField[],
+  ): Promise<void> {
+    await this.db
+      .update(nodes)
+      .set({
+        fqdn: target.fqdn,
+        scheme: target.scheme,
+        daemonPort: target.daemonPort,
+        daemonSftpPort: target.daemonSftpPort,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(nodes.id, node.id));
+    this.logger.log(
+      `Liaison du node « ${node.name} » changée et confirmée par le daemon (${changed.join(", ")}).`,
+    );
   }
 
   /**
@@ -241,6 +369,41 @@ export class NodeConfigurationService {
     if (!row.fqdn) throw new BadRequestException("Ce node n'a pas d'adresse.");
     return row;
   }
+}
+
+/** Adresse de l'API du daemon pour une liaison donnée. */
+function baseUrlOf(binding: { scheme: string; fqdn: string; daemonPort: number }): string {
+  return `${binding.scheme}://${binding.fqdn}:${binding.daemonPort}`;
+}
+
+/**
+ * Un serveur SSH répond-il à cette adresse ?
+ *
+ * Le SFTP de Wings est un serveur SSH : il annonce `SSH-2.0-…` dès la
+ * connexion, avant toute authentification. C'est la seule preuve qu'on puisse
+ * obtenir sans compte, et elle suffit à dire que le port écoute bien — pas
+ * qu'il s'agit du bon daemon, ce que l'API authentifiée a déjà établi.
+ */
+export function sshBannerAt(
+  host: string,
+  port: number,
+  timeoutMs = DAEMON_TIMEOUT_MS,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    let received = "";
+    const finish = (result: boolean) => {
+      socket.destroy();
+      resolve(result);
+    };
+    socket.setTimeout(timeoutMs, () => finish(false));
+    socket.on("error", () => finish(false));
+    socket.on("data", (chunk) => {
+      received += chunk.toString("latin1");
+      if (received.length >= 4) finish(received.startsWith("SSH-"));
+    });
+    socket.on("end", () => finish(received.startsWith("SSH-")));
+  });
 }
 
 interface NodeRow {

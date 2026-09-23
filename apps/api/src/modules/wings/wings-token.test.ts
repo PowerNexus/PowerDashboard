@@ -72,6 +72,23 @@ describe("révocation des jetons de console", () => {
   });
 });
 
+describe("révocation des consoles d'un compte suspendu", () => {
+  it("rend tous les jetons du compte, rangés par serveur", () => {
+    // La suspension ferme les consoles déjà ouvertes : un jeton vit dix
+    // minutes et Wings ne revérifie pas le compte en cours de route.
+    const svc = service();
+    register(svc, { jti: "a", serverId: SERVER, userId: USER, expiresAt: future() });
+    register(svc, { jti: "b", serverId: "autre", userId: USER, expiresAt: future() });
+    register(svc, { jti: "c", serverId: SERVER, userId: "autre", expiresAt: future() });
+
+    const byServer = svc.revocableForUser(USER);
+    expect(Object.fromEntries(byServer)).toEqual({ [SERVER]: ["a"], autre: ["b"] });
+    // Le jeton d'un autre compte reste : suspendre l'un ne coupe pas l'autre.
+    expect(svc.revocableFor(SERVER, "autre")).toEqual(["c"]);
+    expect(svc.revocableForUser(USER).size).toBe(0);
+  });
+});
+
 /**
  * Le jeton de transfert porte son préfixe `Bearer `.
  *

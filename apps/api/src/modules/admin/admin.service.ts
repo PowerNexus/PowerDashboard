@@ -167,8 +167,19 @@ export class AdminService {
       .select({
         id: users.id,
         name: sql<string>`${users.nameFirst} || ' ' || ${users.nameLast}`,
+        // Les deux moitiés en plus du nom affiché : la fiche de modification
+        // les édite séparément, et recouper le nom affiché se tromperait sur
+        // « Jean Paul Martin ».
+        nameFirst: users.nameFirst,
+        nameLast: users.nameLast,
         email: users.email,
+        emailVerifiedAt: users.emailVerifiedAt,
+        locale: users.locale,
         role: users.role,
+        // Suspension du compte : `null` pour un compte actif. Le motif ne sort
+        // que vers l'administration, jamais vers le titulaire.
+        suspendedAt: users.suspendedAt,
+        suspensionReason: users.suspensionReason,
         is2faEnabled: users.isTwoFactorEnabled,
         // Ne concerne que les revendeurs ; ailleurs la valeur est ignorée.
         platformAccess: users.platformAccess,

@@ -75,6 +75,19 @@ export const users = pgTable(
     avatarUrl: text("avatar_url"),
     emailVerifiedAt: moment("email_verified_at"),
     lastLoginAt: moment("last_login_at"),
+    /**
+     * Compte suspendu par l'administration depuis cet instant, ou nul.
+     *
+     * Un horodatage plutôt qu'un booléen : « depuis quand » est la première
+     * question du support, et un booléen obligerait à fouiller le journal pour
+     * y répondre. La suspension ferme **toutes** les portes du compte —
+     * sessions, clés d'API, SFTP, liens de la facturation — mais laisse ses
+     * serveurs tourner : suspendre un serveur est un autre geste, qui existe
+     * déjà. Voir `AdminUsersService.setSuspended`.
+     */
+    suspendedAt: moment("suspended_at"),
+    /** Motif donné par l'administrateur, montré au support. Nul hors suspension. */
+    suspensionReason: text("suspension_reason"),
     ...timestamps,
   },
   (table) => [

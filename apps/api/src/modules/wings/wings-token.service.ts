@@ -136,6 +136,27 @@ export class WingsTokenService {
     return matching;
   }
 
+  /**
+   * Tous les jetons vivants d'un porteur, rangés par serveur.
+   *
+   * Sert à la suspension d'un compte : ses sessions tombent, mais une console
+   * déjà ouverte vit sur un jeton de dix minutes que Wings ne revérifie pas. Le
+   * rangement par serveur suit la route de Wings, qui révoque serveur par
+   * serveur.
+   */
+  revocableForUser(userId: string): Map<string, string[]> {
+    this.purge();
+    const byServer = new Map<string, string[]>();
+    for (let i = this.issued.length - 1; i >= 0; i--) {
+      const token = this.issued[i];
+      if (token && token.userId === userId) {
+        byServer.set(token.serverId, [...(byServer.get(token.serverId) ?? []), token.jti]);
+        this.issued.splice(i, 1);
+      }
+    }
+    return byServer;
+  }
+
   private purge(): void {
     const now = Math.floor(Date.now() / 1000);
     for (let i = this.issued.length - 1; i >= 0; i--) {

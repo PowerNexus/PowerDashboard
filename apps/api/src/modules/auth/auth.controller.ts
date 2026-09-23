@@ -30,7 +30,7 @@ import { ActivityService } from "../activity/activity.service";
 import { isAdminRole } from "../admin/admin.guard";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
-import { BrandingService } from "../reseller/branding.service";
+import { AccountMailService } from "./account-mail.service";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
@@ -211,9 +211,9 @@ export class AuthController {
     @Inject(AuthTokenRepository) private readonly tokens: AuthTokenRepository,
     @Inject(MailerService) private readonly mail: MailerService,
     @Inject(PlatformSettingsService) private readonly platform: PlatformSettingsService,
-    @Inject(BrandingService) private readonly branding: BrandingService,
     @Inject(SshKeyRepository) private readonly sshKeys: SshKeyRepository,
     @Inject(TurnstileService) private readonly turnstile: TurnstileService,
+    @Inject(AccountMailService) private readonly accountMail: AccountMailService,
   ) {}
 
   /**
@@ -679,36 +679,34 @@ export class AuthController {
     const email = (body as { email?: unknown })?.email;
     if (typeof email !== "string" || email.trim() === "") return;
 
-    /*
-     * Sans courrier, on n'émet **rien**.
-     *
-     * Émettre un jeton que personne ne recevra laisse une ligne vivante une
-     * heure durant, invalide les jetons précédents du même compte, et fait
-     * croire au journal d'audit qu'une réinitialisation est en cours. Le
-     * silence rendu à l'appelant reste le même — il ne doit rien apprendre sur
-     * l'adresse saisie — mais l'exploitant, lui, trouve la raison dans son
-     * journal au lieu de chercher pourquoi « le courriel n'arrive pas ».
-     *
-     * L'écran ne propose plus ce parcours dans ce cas ; cette garde est là
-     * pour la requête qui arrive quand même, depuis un signet ou hors écran.
-     */
-    if (!(await this.mail.isConfigured())) {
-      this.logger.warn(
-        "Réinitialisation de mot de passe demandée alors que le SMTP n'est pas configuré : aucun jeton émis.",
-      );
-      return;
-    }
-
     const user = await this.users.findByEmail(email.trim());
     // Compte inconnu, ou compte sans mot de passe local — créé par SSO : dans
     // les deux cas il n'y a rien à réinitialiser, et dans les deux cas on se
     // tait. Dire « ce compte passe par le SSO » renseignerait sur son existence.
     if (!user?.passwordHash) return;
 
-    // Plafond d'envoi atteint : même silence que pour un compte inconnu.
-    const issued = await this.tokens.issue(user.id, "password_reset", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
+    /*
+     * Sans courrier, on n'émet **rien**, et plafond atteint vaut le même
+     * silence qu'un compte inconnu (voir `AccountMailService`).
+     *
+     * Le silence rendu à l'appelant reste le même dans tous les cas — il ne
+     * doit rien apprendre sur l'adresse saisie — mais l'exploitant, lui,
+     * trouve la raison dans son journal au lieu de chercher pourquoi « le
+     * courriel n'arrive pas ». L'écran ne propose plus ce parcours sans SMTP ;
+     * cette garde est là pour la requête qui arrive quand même.
+     */
+    const outcome = await this.accountMail.sendPasswordReset(
+      user,
+      arrivalHost(request),
+      request.ip ?? null,
+    );
+    if (outcome === "mail_disabled") {
+      this.logger.warn(
+        "Réinitialisation de mot de passe demandée alors que le SMTP n'est pas configuré : aucun jeton émis.",
+      );
+      return;
+    }
+    if (outcome !== "sent") return;
 
     await this.activity.record({
       event: "account.password_reset_requested",
@@ -721,12 +719,6 @@ export class AuthController {
       // Ni le jeton ni son condensat : un journal d'audit se lit par des gens
       // qui n'ont pas à pouvoir s'en servir.
       properties: {},
-    });
-
-    void this.mail.send({
-      to: user.email,
-      subject: "Réinitialisation de votre mot de passe",
-      text: await this.resetMessage(token, arrivalHost(request)),
     });
   }
 
@@ -798,42 +790,6 @@ export class AuthController {
     });
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
-  }
-
-  /**
-   * Le courrier, en texte brut.
-   *
-   * Il dit trois choses, et pas une de plus : ce qui a été demandé, le lien, et
-   * quoi faire si l'on n'a rien demandé. Cette dernière phrase n'est pas une
-   * politesse — c'est ainsi que quelqu'un apprend qu'un autre s'intéresse à son
-   * compte.
-   */
-  private async resetMessage(token: string, host: string | null): Promise<string> {
-    /*
-     * Le lien repart vers le domaine **par lequel on est venu**.
-     *
-     * Un client d'un revendeur a demandé sa réinitialisation depuis le domaine
-     * de son revendeur : le renvoyer vers celui de la plateforme lui ferait
-     * découvrir une marque qu'il ne connaît pas, sur un lien qu'il est censé
-     * suivre en confiance. La marque du courrier suit la même règle.
-     */
-    const branding = await this.branding.forHost(host);
-    const domain = await this.linkDomain(host, branding.resellerId);
-    const brand = branding.name;
-    const link = `https://${domain}/reset?token=${encodeURIComponent(token)}`;
-
-    return [
-      `Une réinitialisation de mot de passe a été demandée pour votre compte ${brand}.`,
-      "",
-      "Ouvrez ce lien pour en choisir un nouveau :",
-      link,
-      "",
-      "Le lien est valable une heure et ne peut servir qu'une fois.",
-      "",
-      "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message :",
-      "votre mot de passe actuel reste valable, et personne n'a eu accès à votre compte.",
-      "",
-    ].join("\n");
   }
 
   /* --- Inscription --------------------------------------------------------- */
@@ -985,14 +941,7 @@ export class AuthController {
      * lue. Faire patienter devant un écran blanc le temps qu'un courriel
      * arrive ferait perdre la moitié des inscrits pour rien.
      */
-    const issued = await this.tokens.issue(user.id, "email_verify", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
-    void this.mail.send({
-      to: user.email,
-      subject: "Confirmez votre adresse e-mail",
-      text: await this.verifyMessage(token, arrivalHost(request)),
-    });
+    await this.accountMail.sendEmailVerification(user, arrivalHost(request), request.ip ?? null);
 
     await this.issueSession(user.id, request, reply, "password");
   }
@@ -1069,51 +1018,7 @@ export class AuthController {
     if (!user || user.emailVerifiedAt !== null) return;
 
     // Plafond d'envoi atteint : la route répond comme si le courriel partait.
-    const issued = await this.tokens.issue(user.id, "email_verify", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
-
-    void this.mail.send({
-      to: user.email,
-      subject: "Confirmez votre adresse e-mail",
-      text: await this.verifyMessage(token, arrivalHost(request)),
-    });
-  }
-
-  /**
-   * Domaine sur lequel un lien porteur de jeton peut être émis.
-   *
-   * L'hôte d'arrivée vient d'un en-tête que le navigateur peut forger : il ne
-   * sert de domaine de lien que s'il désigne un revendeur au domaine
-   * **vérifié** (`forHost` ne renvoie un `resellerId` que dans ce cas). Tout
-   * autre hôte retombe sur le domaine de la plateforme, sans quoi un jeton de
-   * réinitialisation partirait vers l'adresse choisie par l'attaquant.
-   */
-  private async linkDomain(host: string | null, resellerId: string | null): Promise<string> {
-    if (host !== null && resellerId !== null) return host;
-    return await this.platform.text("brand.domain");
-  }
-
-  private async verifyMessage(token: string, host: string | null): Promise<string> {
-    // Même règle que la réinitialisation : le lien et la marque suivent le
-    // domaine d'arrivée, pas celui de la plateforme.
-    const branding = await this.branding.forHost(host);
-    const domain = await this.linkDomain(host, branding.resellerId);
-    const brand = branding.name;
-    const link = `https://${domain}/verify?token=${encodeURIComponent(token)}`;
-
-    return [
-      `Confirmez que cette adresse est bien la vôtre pour votre compte ${brand}.`,
-      "",
-      "Ouvrez ce lien :",
-      link,
-      "",
-      "Le lien est valable vingt-quatre heures et ne peut servir qu'une fois.",
-      "",
-      "Si vous n'avez pas de compte chez nous, ignorez ce message : sans ce clic,",
-      "l'adresse ne sera rattachée à aucun compte.",
-      "",
-    ].join("\n");
+    await this.accountMail.sendEmailVerification(user, arrivalHost(request), request.ip ?? null);
   }
 
   /* --- Double authentification ------------------------------------------- */
@@ -1934,7 +1839,7 @@ function headerCookie(request: ClientRequest, name: string): string | null {
  *
  * **L'en-tête est forgeable** : il ne choisit la marque du courrier et le
  * domaine du lien que s'il correspond à un domaine revendeur vérifié (voir
- * `linkDomain`). Les routes qui accordent quelque chose lisent la session,
+ * `AccountMailService.linkDomain`). Les routes qui accordent quelque chose lisent la session,
  * jamais cet en-tête.
  */
 function arrivalHost(request: ClientRequest): string | null {

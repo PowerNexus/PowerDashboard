@@ -13,6 +13,7 @@ export * from "./hostbill";
 export * from "./instatus";
 export * from "./marketplace";
 export * from "./node";
+export * from "./node-admin";
 export * from "./node-taxonomy";
 export * from "./notification-links";
 export * from "./notifications-catalogue";

@@ -7,6 +7,7 @@ dans l'ordre, et comment vérifier que c'est terminé.
 | Runbook | Quand |
 |---|---|
 | [Rotation du jeton de node](./rotation-jeton-node.md) | Rotation planifiée, fuite suspectée, node perdu après une rotation |
+| [Changer l'adresse ou les ports d'un node](./modifier-liaison-node.md) | Nouveau nom de domaine, passage en https, port du daemon ou du SFTP changé |
 | [Machine injoignable](./machine-injoignable.md) | Un node passe « Injoignable », webhook `node.unreachable`, intervention prévue |
 | [Clé maître des secrets](./cle-maitre-secrets.md) | Rotation de `APP_SECRET_KEY`, sel de dérivation changé, clé perdue |
 

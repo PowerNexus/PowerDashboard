@@ -250,6 +250,27 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   },
   "admin.smtp_tested": { category: "settings", label: "Envoi de courrier éprouvé" },
   "node.configuration_read": { category: "settings", label: "Configuration de node consultée" },
+  "node.settings_updated": { category: "settings", label: "Réglages d'un node modifiés" },
+  "node.binding_changed": {
+    category: "settings",
+    label: "Adresse ou ports d'un node changés (confirmés par le daemon)",
+  },
+  "node.binding_pending_restart": {
+    category: "settings",
+    label: "Adresse ou ports d'un node : configuration écrite, Wings à redémarrer",
+  },
+  "node.binding_refused": {
+    category: "settings",
+    label: "Adresse ou ports d'un node : daemon injoignable, rien changé",
+  },
+  "node.allocations_removed": { category: "network", label: "Ports retirés du stock d'un node" },
+  "admin.user_updated": { category: "account", label: "Compte modifié par l'administration" },
+  "admin.user_password_reset_sent": {
+    category: "access",
+    label: "Lien de réinitialisation envoyé par l'administration",
+  },
+  "admin.user_suspended": { category: "access", label: "Compte suspendu" },
+  "admin.user_unsuspended": { category: "access", label: "Compte réactivé" },
   "application.domain_certificate_reported": {
     category: "network",
     label: "Certificat de domaine : tentative rapportée",
