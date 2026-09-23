@@ -61,7 +61,7 @@ Fait, avec tests de non-régression :
 - **Egg Minecraft Java unifié** : `infra/eggs/minecraft-java/`.
 - **Machine injoignable** : `nodes.unreachableSince` (seul écrivain : `node-health-watcher.service.ts`) → `nodeOutageBlock()` (`packages/contracts/src/server.ts`) → blocage complet de l'interface serveur.
 - **Rechiffrement des secrets** : `rekey-secrets.mts` reprend le format `v3:` (il le sautait, une rotation de la clé maître perdait tout) ; cœur testé dans `apps/api/src/common/rekey.ts`.
-- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node, machine injoignable et clé maître (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`). README à jour.
+- **Documentation** (`docs/`) : six ADR (`docs/adr/`), runbooks jeton de node, machine injoignable, clé maître, déplacement de serveur, restauration de la base et incident de sécurité (`docs/runbooks/`), guide du contributeur (`docs/contribuer.md`). README à jour.
 - **Schéma et migrations en phase** : instantané `0038`, migration `0038_constraint_names`, `pnpm db:check` (drizzle-kit sort en succès même quand il s'arrête sur une question).
 - **Certificats des revendeurs** : un certificat expiré n'est plus « actif » (`certificateStanding`).
 - **Traduction complète** : page d'erreur et page introuvable ; routes citées dans les textes vérifiées contre l'API.

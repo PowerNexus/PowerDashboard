@@ -10,6 +10,9 @@ dans l'ordre, et comment vérifier que c'est terminé.
 | [Changer l'adresse ou les ports d'un node](./modifier-liaison-node.md) | Nouveau nom de domaine, passage en https, port du daemon ou du SFTP changé |
 | [Machine injoignable](./machine-injoignable.md) | Un node passe « Injoignable », webhook `node.unreachable`, intervention prévue |
 | [Clé maître des secrets](./cle-maitre-secrets.md) | Rotation de `APP_SECRET_KEY`, sel de dérivation changé, clé perdue |
+| [Déplacer un serveur entre nodes](./migration-serveur.md) | Machine pleine ou à rendre, changement de région, serveur bloqué « en transfert » |
+| [Restaurer la base du panel](./restauration-base.md) | Mise à jour ratée, données effacées, machine du panel perdue |
+| [Incident de sécurité](./incident-securite.md) | Compte détourné, clé ou jeton qui a fuité, machine compromise |
 
 L'installation et l'exploitation courante sont décrites à côté de
 l'infrastructure :
