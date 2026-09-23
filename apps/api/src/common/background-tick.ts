@@ -24,8 +24,13 @@ import type { Logger } from "@nestjs/common";
  * si la panne dure, le journal en porte une ligne par tour plutôt qu'un
  * processus mort et aucune trace de ce qui l'a tué.
  */
-export function battre(logger: Logger, label: string, tick: () => Promise<void>): void {
-  tick().catch((error: unknown) => {
+export function battre(logger: Logger, label: string, tick: () => Promise<void>): Promise<void> {
+  /*
+   * La promesse rendue **ne rejette jamais** : elle ne sert qu'à qui veut
+   * savoir que la tâche est finie — un test, un arrêt propre. Les appelants
+   * habituels l'ignorent sans risque.
+   */
+  return tick().catch((error: unknown) => {
     logger.error(`${label} : ${error instanceof Error ? error.message : "erreur inconnue"}`);
   });
 }

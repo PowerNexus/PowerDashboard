@@ -62,6 +62,16 @@ export async function forwardedIdentityHeaders(): Promise<Record<string, string>
   const host = requestHost(incoming);
   if (host) forwarded["x-gd-host"] = host;
 
+  /*
+   * Le pays, quand un frontal Cloudflare l'a posé.
+   *
+   * Il ne sert qu'à l'alerte « nouvelle connexion » (§5.1), et l'API ne le
+   * croit que s'il lui arrive d'un intermédiaire de `TRUSTED_PROXIES`. Même
+   * statut que les autres : un repère affiché au titulaire, jamais un droit.
+   */
+  const country = incoming.get("cf-ipcountry");
+  if (country) forwarded["cf-ipcountry"] = country.slice(0, 8);
+
   return forwarded;
 }
 

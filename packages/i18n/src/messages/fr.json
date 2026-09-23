@@ -1917,5 +1917,26 @@
     "title": "Page introuvable",
     "description": "Cette page n'existe pas ou vous n'y avez pas accès.",
     "home": "Retour à l'accueil"
+  },
+  "securityAlerts": {
+    "failureSubject": "Tentatives de connexion échouées sur votre compte {brand}",
+    "failureTitle": "Tentatives de connexion échouées",
+    "failureBody": "{count} tentatives de connexion à votre compte ont échoué coup sur coup. La dernière venait de l'adresse {ip}, le {time}.",
+    "failureAdvice": "Si ce n'était pas vous, quelqu'un essaie peut-être de deviner votre mot de passe. Changez-le et activez la double authentification :",
+    "failureReassure": "Si c'était vous, il n'y a rien à faire. Au-delà de dix échecs, les connexions à ce compte sont suspendues quelques minutes.",
+    "newDeviceSubject": "Nouvelle connexion à votre compte {brand}",
+    "newDeviceTitle": "Connexion depuis un nouvel appareil",
+    "newDeviceBody": "Votre compte vient d'être ouvert depuis un appareil ou un réseau qu'il n'avait jamais utilisé.",
+    "newDeviceSummary": "Nouvelle connexion : {device}, adresse {ip}, le {time}.",
+    "detailDevice": "Appareil : {device}",
+    "detailIp": "Adresse IP : {ip}",
+    "detailCountry": "Pays : {country}",
+    "detailTime": "Heure : {time}",
+    "newDeviceAdvice": "Si ce n'était pas vous, fermez les autres sessions et changez votre mot de passe :",
+    "newDeviceReassure": "Si c'était vous, ignorez ce message.",
+    "deviceOn": "{browser} sur {platform}",
+    "unknownDevice": "appareil non identifié",
+    "unknownIp": "inconnue",
+    "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification."
   }
 }
