@@ -13,7 +13,7 @@ Comptez **30 à 45 minutes**, dont une bonne partie à attendre.
 | [1. Comprendre en deux minutes](#1-comprendre-en-deux-minutes) | — | 2 min |
 | [2. Ce qu'il vous faut](#2-ce-quil-vous-faut) | — | 5 min |
 | [3. Préparer les noms de domaine](#3-préparer-les-noms-de-domaine) | chez votre registraire | 5 min |
-| [4. Installer le panel](#4-installer-le-panel) — `pnpm app:install`, `app:setup`, `app:start` | machine du panel | 10 min |
+| [4. Installer le panel](#4-installer-le-panel) — une seule commande | machine du panel | 10 min |
 | [5. Première connexion](#5-première-connexion) | navigateur | 5 min |
 | [6. Ajouter une machine de jeu](#6-ajouter-une-machine-de-jeu-wings) | machine de jeu + navigateur | 10 min |
 | [7. Créer un premier serveur](#7-créer-un-premier-serveur-de-jeu) | navigateur | 5 min |
@@ -155,81 +155,39 @@ Si l'hébergeur vous a donné un utilisateur autre que root (souvent `debian`
 ou `ubuntu`), connectez-vous avec lui : toutes les commandes ci-dessous
 commencent déjà par `sudo`.
 
-### 4.2 Installer Node.js et pnpm
+### 4.2 Une seule commande
 
-Le panel est livré prêt à l'emploi, mais il lui faut Node.js 24 pour
-fonctionner, et pnpm pour installer ses dépendances :
-
-```bash
-sudo apt-get update && sudo apt-get install -y curl
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash -
-sudo apt-get install -y nodejs
-sudo corepack enable        # fournit pnpm, à la version exacte que le projet demande
-node -v                     # doit afficher v24.x
-```
-
-### 4.3 Télécharger le panel
-
-Chaque version est publiée sur la page **Releases** du dépôt
-(`https://github.com/PowerNexus/PowerDashboard/releases`), **déjà compilée** :
-votre serveur n'a rien à construire, et une petite machine suffit. Prenez
-la plus récente (étiquetée *Latest*) et téléchargez les deux fichiers
-`gamedashboard-vX.Y.Z.tar.gz` et `gamedashboard-vX.Y.Z.tar.gz.sha256`.
-
-- **Dépôt public** : copiez le lien du fichier et téléchargez-le directement
-  sur la machine :
-  ```bash
-  curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz
-  curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz.sha256
-  ```
-- **Dépôt privé** : téléchargez les deux fichiers dans votre navigateur (où
-  vous êtes connecté à GitHub), puis envoyez-les sur la machine :
-  ```bash
-  # depuis votre ordinateur, dans le dossier des téléchargements
-  scp gamedashboard-v1.0.0.tar.gz* root@panel.mondomaine.fr:
-  ```
-
-Puis, sur la machine :
+Sur la machine du panel, collez :
 
 ```bash
-sha256sum -c gamedashboard-v1.0.0.tar.gz.sha256   # doit répondre « OK »
-tar -xzf gamedashboard-v1.0.0.tar.gz
-cd gamedashboard-v1.0.0
+curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh | sudo bash -s -- install
 ```
 
-`OK` prouve que le fichier est arrivé intact. Autre chose qu'`OK` :
-téléchargez-le à nouveau.
+C'est tout. Cette commande :
 
-> **Préférez-vous git ?** `git clone https://github.com/PowerNexus/PowerDashboard.git`
-> fonctionne aussi, et la suite est identique. Le panel est alors compilé sur
-> votre serveur pendant l'installation : comptez cinq minutes de plus et
-> 2 Go de mémoire. Pour un dépôt privé, `git` demande un *jeton d'accès* en
-> guise de mot de passe (GitHub › Settings › Developer settings › Personal
-> access tokens › Fine-grained, lecture seule sur ce dépôt).
+1. télécharge la dernière version publiée du panel, **déjà compilée** —
+   votre serveur n'a rien à construire, une petite machine suffit ;
+2. vérifie son empreinte : un fichier abîmé ou altéré n'est jamais utilisé ;
+3. installe la commande **`gamedashboard`**, qui servira ensuite à tout
+   (`gamedashboard help`) ;
+4. lance l'installation guidée ci-dessous.
 
-### 4.4 Trois commandes
+> **Lire avant d'exécuter ?** C'est une bonne habitude. Le même script, en
+> deux temps :
+> ```bash
+> curl -fsSLO https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh
+> less gamedashboard.sh                 # le lire
+> sudo bash gamedashboard.sh install    # puis l'exécuter
+> ```
 
-```bash
-pnpm app:install    # vérifie Node.js et pnpm, installe les dépendances (une à deux minutes)
-pnpm app:setup      # l'installation guidée : quelques questions, puis tout se fait seul
-pnpm app:start      # démarre le panel (déjà fait par app:setup la première fois)
-```
-
-Toutes les commandes du panel commencent par **`app:`** — `pnpm app:help`
-les liste. N'oubliez pas le préfixe : `pnpm setup` tout court est une
-commande de pnpm lui-même, qui ne lance rien du panel.
-
-`pnpm app:setup` demande lui-même les droits d'administrateur (votre mot
-de passe `sudo`, si vous n'êtes pas root).
-
-Le script pose **quatre questions**, puis récapitule et demande
+L'installation guidée pose **quatre questions**, puis récapitule et demande
 confirmation. Rien n'est modifié sur la machine avant cette confirmation.
 
 ```
 GameDashboard — installation du panel
 
 [1/9] Vérifications avant de commencer
-  ✔ Dépôt trouvé : /root/gamedashboard-v1.0.0
+  ✔ Dépôt trouvé : /opt/gamedashboard/releases/gamedashboard-v1.0.0
   ✔ Système : Debian GNU/Linux 12 (bookworm)
   ✔ Architecture : x86_64
   • Mémoire : 3915 Mo, fichier d'échange : 0 Mo
@@ -263,9 +221,9 @@ Viennent ensuite, sans intervention :
 | 3. Le domaine pointe-t-il ici ? | Vérifie l'enregistrement DNS. Derrière une box ou un NAT, l'avertissement est normal. |
 | 4. Paquets du système | nginx, certbot et quelques outils. Fichier d'échange si la mémoire est juste. |
 | 5. Node.js et PostgreSQL | Node.js 24 et PostgreSQL 18 depuis leurs dépôts officiels. Un PostgreSQL déjà installé est réutilisé. |
-| 6. Copie du panel | Le panel est copié dans `/opt/gamedashboard/app`, d'où il tourne. Le dossier téléchargé peut ensuite être supprimé. |
+| 6. Copie du panel | Le panel est copié dans `/opt/gamedashboard/app`, d'où il tourne. |
 | 7. Certificat HTTPS | Let's Encrypt, renouvelé ensuite tout seul. |
-| 8. Construction et démarrage | **La plus longue.** Base de données, secrets, services, puis contrôle que les pages s'affichent vraiment. Depuis une archive publiée, la compilation est déjà faite : deux à trois minutes. Depuis git, compter 5 à 10 minutes de plus. |
+| 8. Démarrage | **La plus longue : deux à trois minutes.** Dépendances, base de données, secrets, services, puis contrôle que les pages s'affichent vraiment. |
 | 9. Premier administrateur | Crée votre compte. |
 
 À la fin :
@@ -282,36 +240,85 @@ Viennent ensuite, sans intervention :
 
 > ⚠ **Notez le mot de passe maintenant.** Il n'est enregistré nulle part en
 > clair. Perdu, il se réinitialise avec
-> `pnpm app:password moi@mondomaine.fr`, voir [§ 9](#9-en-cas-de-problème).
+> `gamedashboard password moi@mondomaine.fr`, voir [§ 9](#9-en-cas-de-problème).
 
-### 4.5 Sauvegarder la clé maître — tout de suite
+### 4.3 Sauvegarder — tout de suite
 
-Le dossier `/opt/gamedashboard/env/` contient `APP_SECRET_KEY`, la clé qui
-chiffre les secrets rangés en base (jetons des nodes, mots de passe des bases
-de données des clients…). **Sans elle, une sauvegarde de la base est
-inutilisable.** Copiez-le hors de la machine :
+```bash
+gamedashboard backup
+```
+
+Le fichier produit, dans `/opt/gamedashboard/backups/`, contient la base
+**et** `APP_SECRET_KEY`, la clé qui chiffre les secrets rangés en base
+(jetons des nodes, mots de passe des bases de données des clients…). Sans
+cette clé, une sauvegarde de la base ne sert à rien : c'est pourquoi les
+deux voyagent ensemble. Copiez-le hors de la machine :
 
 ```bash
 # depuis votre ordinateur
-scp -r root@panel.mondomaine.fr:/opt/gamedashboard/env ./gamedashboard-env-sauvegarde
+scp 'root@panel.mondomaine.fr:/opt/gamedashboard/backups/*.tar' .
 ```
 
-Rangez cette copie comme un mot de passe : dans un gestionnaire de secrets,
-pas dans un dossier partagé.
+Rangez-le comme un mot de passe : dans un gestionnaire de secrets ou un
+stockage chiffré, pas dans un dossier partagé.
 
-### 4.6 Sans aucune question
+### 4.4 Sans aucune question
 
 Pour une installation automatisée (Ansible, cloud-init…), toutes les
-réponses se donnent en options :
+réponses se donnent en options, après `install` :
 
 ```bash
-pnpm app:setup --oui \
-  --domaine panel.mondomaine.fr --courriel moi@mondomaine.fr \
-  --prenom Alex --nom Martin
+curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh \
+  | sudo bash -s -- install --oui \
+      --domaine panel.mondomaine.fr --courriel moi@mondomaine.fr --prenom Alex --nom Martin
 ```
 
 `--oui` accepte aussi le fichier d'échange. Le mot de passe s'affiche de la
-même façon à la fin.
+même façon à la fin. `GD_VERSION=v1.0.0` installe une version précise plutôt
+que la dernière.
+
+### 4.5 Autre méthode : depuis une archive ou un clone
+
+Pour qui préfère tout avoir sous les yeux, ou contribuer au projet. Il faut
+d'abord Node.js 24 et pnpm :
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash -
+sudo apt-get install -y nodejs
+sudo corepack enable        # fournit pnpm, à la version exacte que le projet demande
+```
+
+Puis, au choix, l'archive de la page
+[Releases](https://github.com/PowerNexus/PowerDashboard/releases) (déjà
+compilée) :
+
+```bash
+curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz
+curl -fLO https://github.com/PowerNexus/PowerDashboard/releases/download/v1.0.0/gamedashboard-v1.0.0.tar.gz.sha256
+sha256sum -c gamedashboard-v1.0.0.tar.gz.sha256      # doit répondre « OK »
+tar -xzf gamedashboard-v1.0.0.tar.gz && cd gamedashboard-v1.0.0
+```
+
+ou le dépôt (le panel est alors compilé pendant l'installation : cinq
+minutes et 2 Go de mémoire de plus) :
+
+```bash
+git clone https://github.com/PowerNexus/PowerDashboard.git && cd PowerDashboard
+```
+
+Et dans ce dossier, trois commandes :
+
+```bash
+pnpm app:install    # vérifie Node.js et pnpm, installe les dépendances
+pnpm app:setup      # la même installation guidée qu'au § 4.2
+pnpm app:start      # démarre le panel (déjà fait par app:setup la première fois)
+```
+
+Toutes les commandes du dossier commencent par **`app:`** (`pnpm app:help`) ;
+ce sont les mêmes que `gamedashboard …`, qui est installée aussi. N'oubliez
+pas le préfixe : `pnpm setup` tout court est une commande de pnpm lui-même,
+qui ne lance rien du panel.
 
 ---
 
@@ -347,23 +354,17 @@ Le panel est en ligne mais ne peut encore rien héberger : il lui faut un node.
 
 ### 6.1 Installer Wings sur la machine de jeu
 
-**Si les jeux tournent sur la machine du panel**, restez dans le dossier du
-panel et lancez :
+**Si les jeux tournent sur la machine du panel** :
 
 ```bash
-pnpm app:wings
+gamedashboard wings
 ```
 
-**Sur une autre machine**, le script se suffit à lui-même. Il est publié
-seul sur la page Releases (`installer-wings.sh`, avec son `.sha256`) :
-téléchargez-le comme l'archive à l'étape 4.3, ou copiez-le depuis la
-machine du panel :
+**Sur une autre machine**, la même commande d'une ligne que pour le panel,
+avec `wings` au lieu d'`install` — rien d'autre à télécharger :
 
 ```bash
-# depuis la machine du panel
-scp infra/prod/installer-wings.sh root@node1.mondomaine.fr:
-ssh root@node1.mondomaine.fr
-sudo bash installer-wings.sh
+curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh | sudo bash -s -- wings
 ```
 
 Il demande le nom de domaine **de la machine de jeu** (`node1.mondomaine.fr`)
@@ -446,53 +447,82 @@ sudo ufw allow 25565:25575/tcp && sudo ufw allow 25565:25575/udp
 
 ### Mettre à jour
 
-Téléchargez et vérifiez la nouvelle archive comme à l'étape 4.3, puis :
-
 ```bash
-tar -xzf gamedashboard-v1.1.0.tar.gz && cd gamedashboard-v1.1.0
-pnpm app:install
-pnpm app:setup
+gamedashboard update
 ```
 
-(Depuis un clone git : `git pull && pnpm app:install && pnpm app:setup`.)
+Dans l'ordre, elle :
 
-`pnpm app:setup` reconnaît l'installation existante : il ne pose aucune
-question, ne touche ni aux comptes ni aux secrets, installe la nouvelle
-version, applique les migrations de base et redémarre. Le panel est indisponible une trentaine de
-secondes ; **les serveurs de jeu, eux, ne s'arrêtent pas** (ils vivent sur
-les nodes).
+1. compare la version installée à la dernière publiée — si ce sont les
+   mêmes, elle s'arrête là (« Déjà à jour ») ;
+2. **fait une sauvegarde** (`gamedashboard backup`) : une mise à jour peut
+   modifier la base, c'est le seul moyen d'en revenir ;
+3. télécharge la nouvelle version et vérifie son empreinte ;
+4. l'installe sans poser de question : comptes, secrets et réglages sont
+   conservés, les migrations de base appliquées, le panel redémarré.
 
-Pour mettre Wings à jour, relancez `installer-wings.sh` sur chaque node.
+Le panel est indisponible une trentaine de secondes ; **les serveurs de jeu,
+eux, ne s'arrêtent pas** (ils vivent sur les nodes).
+
+| Option | Effet |
+|---|---|
+| `--version v1.2.0` | installe cette version plutôt que la dernière |
+| `--forcer` | réinstalle même si la version est déjà la bonne |
+| `--sans-sauvegarde` | saute la sauvegarde (déconseillé) |
+
+Depuis un clone git, la mise à jour suit le dépôt plutôt que les versions
+publiées : `git pull && pnpm app:install && pnpm app:setup`.
+
+Pour mettre Wings à jour : `gamedashboard wings` (ou la commande `curl … wings`)
+sur chaque node.
 
 ### Démarrer, arrêter, surveiller
 
-Depuis le dossier du panel (n'importe quelle version extraite) :
+De n'importe quel dossier :
 
 | Commande | Effet |
 |---|---|
-| `pnpm app:status` | état des deux services, adresse et version installée |
-| `pnpm app:start` | démarre le panel et attend qu'il réponde |
-| `pnpm app:stop` | l'arrête — les serveurs de jeu continuent de tourner |
-| `pnpm app:restart` | l'arrête puis le redémarre |
-| `pnpm app:logs` | journaux en direct (`pnpm app:logs api` ou `web` pour un seul) ; `Ctrl+C` pour sortir |
-| `pnpm app:admin <email> <prénom> <nom>` | crée un autre compte administrateur |
-| `pnpm app:password <email>` | tire un nouveau mot de passe pour un compte, affiché une fois |
-| `pnpm app:help` | la liste complète |
+| `gamedashboard status` | état des deux services, adresse et version installée |
+| `gamedashboard start` | démarre le panel et attend qu'il réponde |
+| `gamedashboard stop` | l'arrête — les serveurs de jeu continuent de tourner |
+| `gamedashboard restart` | l'arrête puis le redémarre |
+| `gamedashboard logs` | journaux en direct (`logs api` ou `logs web` pour un seul) ; `Ctrl+C` pour sortir |
+| `gamedashboard admin <email> <prénom> <nom>` | crée un autre compte administrateur |
+| `gamedashboard password <email>` | tire un nouveau mot de passe pour un compte, affiché une fois |
+| `gamedashboard help` | la liste complète |
 
 Ces commandes parlent à systemd, qui fait tourner le panel : il redémarre
 aussi tout seul avec la machine. Elles demandent les droits
-d'administrateur d'elles-mêmes. Sur un node : `journalctl -u wings -f`.
+d'administrateur d'elles-mêmes. Depuis un clone ou une archive extraite,
+`pnpm app:status`, `pnpm app:start`… font exactement la même chose. Sur un
+node : `journalctl -u wings -f`.
 
 ### Sauvegarder
 
-Deux choses, et **les deux** sont indispensables :
-
 ```bash
-# la base (comptes, serveurs, réglages)
-sudo -u postgres pg_dump -Fc gamedashboard > gamedashboard-$(date +%F).dump
-# la clé qui déchiffre ses secrets (à ne faire qu'une fois, elle ne change pas)
-sudo tar czf gamedashboard-env.tgz -C /opt/gamedashboard env
+gamedashboard backup
 ```
+
+Un seul fichier, `/opt/gamedashboard/backups/gamedashboard-<date>.tar`,
+lisible par root seul, qui contient **les deux moitiés indispensables** : la
+base (comptes, serveurs, réglages) et la clé qui déchiffre ses secrets. Les
+sept plus récentes sont gardées, les plus anciennes effacées.
+
+| Variable | Effet |
+|---|---|
+| `GD_GARDER=30` | nombre de sauvegardes gardées (7 par défaut) |
+| `GD_SAUVEGARDES=/mnt/disque` | dossier de destination |
+
+**Chaque nuit, automatiquement** — une ligne dans la table de root
+(`sudo crontab -e`) :
+
+```
+30 4 * * * /usr/local/bin/gamedashboard backup >> /var/log/gamedashboard-backup.log 2>&1
+```
+
+Une sauvegarde restée sur la machine ne protège pas de la perte de la
+machine : copiez-les régulièrement ailleurs (`scp`, `rclone`, stockage
+objet).
 
 Les **fichiers des serveurs de jeu** ne sont pas dans la base : ils vivent
 sur les nodes, et se sauvegardent depuis l'onglet *Sauvegardes* de chaque
@@ -501,14 +531,20 @@ serveur.
 ### Restaurer sur une machine neuve
 
 1. Installer le panel normalement (étape 4), avec le **même domaine**.
-2. Remettre la clé, puis la base :
+2. Y copier la sauvegarde, puis :
 
    ```bash
-   sudo systemctl stop gamedashboard-api gamedashboard-web
-   sudo tar xzf gamedashboard-env.tgz -C /opt/gamedashboard
-   sudo -u postgres pg_restore --clean --if-exists -d gamedashboard gamedashboard-2026-09-23.dump
-   pnpm app:setup                        # depuis le dossier du panel : réaligne le mot de passe de la base et redémarre
+   sudo gamedashboard stop
+   sudo mkdir -p /tmp/restauration && sudo tar -xf gamedashboard-20260923-043000.tar -C /tmp/restauration
+   sudo cp -a /tmp/restauration/env/. /opt/gamedashboard/env/
+   sudo -u postgres pg_restore --clean --if-exists -d gamedashboard < /tmp/restauration/base.dump
+   sudo gamedashboard setup      # réaligne le mot de passe de la base et redémarre
+   sudo rm -rf /tmp/restauration
    ```
+
+   La même marche à suivre est dans le fichier `LISEZMOI.txt` de chaque
+   sauvegarde. Le dump passe par l'entrée standard (`<`) : le dossier
+   extrait n'est lisible que par root, et c'est voulu.
 
 ---
 
@@ -523,14 +559,16 @@ régénèrent jamais un secret existant.
 | « Let's Encrypt n'a pas pu vérifier… » | DNS pas encore propagé, ou port 80 fermé | `getent hosts panel.mondomaine.fr` doit donner l'adresse de la machine ; ouvrir le port 80 chez l'hébergeur ; relancer. Après cinq échecs, Let's Encrypt bloque une heure. |
 | La construction s'arrête sur `Killed` | Mémoire épuisée | Relancer et accepter le fichier d'échange, ou en créer un à la main (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`). |
 | `pnpm setup` a affiché « export PNPM_HOME=… » et rien installé | Préfixe `app:` oublié : c'est la commande de pnpm | Lancer `pnpm app:setup`. La ligne ajoutée à `~/.bashrc` par pnpm est sans danger et peut être retirée. |
-| `pnpm : commande introuvable` | corepack pas activé | `sudo corepack enable`, voir l'étape 4.2. |
-| « Le panel n'est pas encore installé » sur `pnpm app:start` | `pnpm app:setup` n'a pas abouti | Relancer `pnpm app:setup`. |
-| `Missing script: app:…` | Commande mal tapée | `pnpm app:help` donne la liste exacte. |
-| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `pnpm app:setup`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
+| `pnpm : commande introuvable` | corepack pas activé (méthode du § 4.5) | `sudo corepack enable`. |
+| « Aucune version publiée » | Le dépôt n'a pas encore de release | Installer depuis un clone (§ 4.5). |
+| « L'empreinte … ne correspond pas » | Téléchargement abîmé, ou fichier altéré | Relancer. Si cela persiste, ne pas insister et le signaler : rien n'a été installé. |
+| « Le panel n'est pas encore installé » | L'installation n'a pas abouti | Relancer la commande d'installation (§ 4.2). |
+| `Missing script: app:…` ou « Commande inconnue » | Commande mal tapée | `gamedashboard help` (ou `pnpm app:help`) donne la liste exacte. |
+| « Domaine inconnu » en lançant `deploy.sh` | Premier passage sans domaine | Passer par `gamedashboard setup`, ou `GD_DOMAIN=panel.mondomaine.fr bash infra/prod/deploy.sh`. |
 | `nginx -t` échoue sur un autre fichier | Un autre site de la machine est mal configuré | Le message nomme le fichier fautif. Le panel n'y touche pas ; corriger ce site, puis relancer. |
-| Page « 502 Bad Gateway » | Un service est arrêté | `pnpm app:status`, puis `pnpm app:logs`. `pnpm app:start` le relance. |
-| L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre la sauvegarde de l'étape 4.5. **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
-| Mot de passe administrateur perdu | — | `pnpm app:password moi@mondomaine.fr` depuis le dossier du panel : un nouveau mot de passe s'affiche une fois. La double authentification et les sessions ouvertes sont conservées. |
+| Page « 502 Bad Gateway » | Un service est arrêté | `gamedashboard status`, puis `gamedashboard logs`. `gamedashboard start` le relance. |
+| L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre `env/` depuis une sauvegarde (§ 8, *Restaurer*). **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
+| Mot de passe administrateur perdu | — | `gamedashboard password moi@mondomaine.fr` : un nouveau mot de passe s'affiche une fois. La double authentification et les sessions ouvertes sont conservées. |
 | Le node reste « Injoignable » | Wings arrêté, port 8080 fermé, ou nom de domaine différent entre le node et le certificat | Sur le node : `journalctl -u wings -n 50`. Voir aussi le [runbook machine injoignable](./runbooks/machine-injoignable.md). |
 | `wings configure` répond 401 ou 403 | Clé expirée (trente minutes) ou déjà utilisée | *Configurer le daemon › Émettre une nouvelle clé*. |
 | La console d'un serveur reste vide | Node déclaré en `http` alors que le panel est en `https`, ou proxy Cloudflare actif | Déclarer le node en `https` ; nuage gris sur Cloudflare. |
@@ -546,7 +584,7 @@ avant : elle ne doit contenir aucun mot de passe).
 ## Annexe A — Installation manuelle, sans le script
 
 Pour qui veut tout maîtriser, ou pour une machine qui a déjà nginx,
-PostgreSQL et Node.js. `pnpm app:setup` (`infra/prod/installer.sh`) ne fait rien d'autre que ceci :
+PostgreSQL et Node.js. L'installation guidée (`infra/prod/installer.sh`) ne fait rien d'autre que ceci :
 
 1. **Prérequis** : Node.js 24 ou plus avec `corepack`, PostgreSQL 17 ou
    plus en service, nginx, certbot, `rsync`, `openssl`, `sudo`.
@@ -566,7 +604,7 @@ PostgreSQL et Node.js. `pnpm app:setup` (`infra/prod/installer.sh`) ne fait rien
    [`infra/prod/README.md`](../infra/prod/README.md).
 5. **Administrateur** :
    ```bash
-   pnpm app:admin moi@mondomaine.fr Alex Martin
+   gamedashboard admin moi@mondomaine.fr Alex Martin
    ```
    Le script ne reçoit que `DATABASE_URL`, lue dans `/opt/gamedashboard/env/api.env`.
 
@@ -576,12 +614,14 @@ dans l'étape « configure ».
 
 ## Annexe B — Ce que les scripts modifient sur la machine
 
-Rien n'est caché. `pnpm app:setup` (`infra/prod/installer.sh`) :
+Rien n'est caché. L'installation (`gamedashboard.sh install`, puis `infra/prod/installer.sh`) :
 
 | Quoi | Où |
 |---|---|
 | Paquets | `nginx`, `certbot`, `rsync`, `openssl`, `curl`, `sudo`, Node.js (NodeSource), PostgreSQL (apt.postgresql.org) |
-| Code du panel | `/opt/gamedashboard/app` |
+| Code du panel | `/opt/gamedashboard/app` ; les versions téléchargées dans `/opt/gamedashboard/releases/` (les deux dernières) |
+| Commande | `/usr/local/bin/gamedashboard` |
+| Sauvegardes | `/opt/gamedashboard/backups/`, par `gamedashboard backup` et avant chaque `update` |
 | Secrets | `/opt/gamedashboard/env/` (`api.env`, `web.env`, `.dbpass`), lisibles par root et le service seulement |
 | Utilisateur système | `gamedashboard`, sans shell ni mot de passe |
 | Base | rôle et base `gamedashboard` ; les autres bases ne sont pas touchées |
@@ -603,8 +643,11 @@ sudo rm /etc/systemd/system/gamedashboard-{api,web}.service && sudo systemctl da
 sudo rm /etc/nginx/sites-enabled/panel.mondomaine.fr.conf /etc/nginx/sites-available/panel.mondomaine.fr.conf
 sudo nginx -t && sudo systemctl reload nginx
 sudo -u postgres dropdb gamedashboard && sudo -u postgres dropuser gamedashboard   # efface les données
-sudo rm -rf /opt/gamedashboard && sudo userdel gamedashboard
+sudo rm -rf /opt/gamedashboard /usr/local/bin/gamedashboard && sudo userdel gamedashboard
 ```
+
+`rm -rf /opt/gamedashboard` efface aussi les sauvegardes qui y sont : copiez-les
+d'abord ailleurs si vous voulez les garder.
 
 Les paquets (nginx, PostgreSQL, Node.js) restent installés : d'autres
 programmes peuvent s'en servir.

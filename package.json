@@ -8,6 +8,8 @@
   "scripts": {
     "app:install": "bash infra/prod/app.sh install",
     "app:setup": "bash infra/prod/app.sh setup",
+    "app:update": "bash infra/prod/app.sh update",
+    "app:backup": "bash infra/prod/app.sh backup",
     "app:start": "bash infra/prod/app.sh start",
     "app:stop": "bash infra/prod/app.sh stop",
     "app:restart": "bash infra/prod/app.sh restart",

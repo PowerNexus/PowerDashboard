@@ -191,3 +191,44 @@ describe("commandes app: du package.json", () => {
     });
   }
 });
+
+/**
+ * La ligne de commande s'exécute sans le dépôt.
+ *
+ * `curl …/gamedashboard.sh | sudo bash -s -- install` lit app.sh seul, sans
+ * dossier autour : tout fichier du dépôt qu'il lirait par un chemin relatif
+ * manquerait. Il ne doit donc en atteindre qu'à travers un dossier qu'il a
+ * lui-même résolu ou téléchargé — et il doit être publié à chaque version.
+ */
+describe("CLI autonome (gamedashboard.sh)", () => {
+  const app = readFileSync(join(PROD, "app.sh"), "utf8");
+  const code = app
+    .split("\n")
+    .filter((ligne) => !/^\s*#/.test(ligne))
+    .join("\n");
+
+  it("n'atteint un fichier du dépôt qu'à travers un dossier résolu", () => {
+    const chemins = [...code.matchAll(/(\S*)\/?(infra\/[\w./-]+)/g)];
+    expect(chemins.length).toBeGreaterThan(0);
+    for (const [, prefixe] of chemins) {
+      expect(prefixe).toMatch(/^"?\$(RACINE|DOSSIER|depuis)\/?$/);
+    }
+    expect(code).not.toMatch(/^\s*(source|\.)\s/m);
+  });
+
+  it("est publiée à chaque version, empreinte comprise, et attestée", () => {
+    const assembler = readFileSync(join(RACINE, "infra", "release", "assembler.sh"), "utf8");
+    expect(assembler).toContain('infra/prod/app.sh "$SORTIE/gamedashboard.sh"');
+    expect(assembler).toContain("sha256sum gamedashboard.sh");
+    const release = readFileSync(join(RACINE, ".github", "workflows", "release.yml"), "utf8");
+    expect(release).toContain("dist/gamedashboard.sh");
+  });
+
+  it("vérifie l'empreinte de tout ce qu'elle télécharge", () => {
+    // Tout fichier écrit par curl l'est dans telecharger(), qui vérifie
+    // ensuite l'un par l'autre : le fichier et son empreinte.
+    const ecrits = [...code.matchAll(/curl [^\n]*-o "([^"]+)"/g)].map((m) => m[1]);
+    expect(ecrits).toEqual(["$dossier/$nom", "$dossier/$nom.sha256"]);
+    expect(code).toContain('sha256sum -c --quiet "$nom.sha256"');
+  });
+});

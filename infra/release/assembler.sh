@@ -81,5 +81,10 @@ tar --sort=name --mtime="@$DATE" --owner=0 --group=0 --numeric-owner \
 install -m 755 infra/prod/installer-wings.sh "$SORTIE/installer-wings.sh"
 ( cd "$SORTIE" && sha256sum installer-wings.sh > installer-wings.sh.sha256 )
 
+# La ligne de commande, publiée seule sous un nom sans version : c'est elle
+# que télécharge `curl …/releases/latest/download/gamedashboard.sh | bash`.
+install -m 755 infra/prod/app.sh "$SORTIE/gamedashboard.sh"
+( cd "$SORTIE" && sha256sum gamedashboard.sh > gamedashboard.sh.sha256 )
+
 echo "Archive : $SORTIE/$NOM.tar.gz ($(du -h "$SORTIE/$NOM.tar.gz" | cut -f1))"
 cat "$SORTIE/$NOM.tar.gz.sha256"

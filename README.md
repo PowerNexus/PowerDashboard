@@ -24,23 +24,23 @@ docs/               ADR, runbooks, guide du contributeur, reprise Pterodactyl
 
 ## Installer sur un serveur
 
-**Première installation ?** Suivez [docs/installation.md](./docs/installation.md) :
-un guide pas à pas, du serveur vide au premier serveur de jeu, pensé pour qui
-découvre le projet. Chaque version est publiée **déjà compilée** dans les
-Releases du dépôt ; dans le dossier extrait :
+Sur une Debian ou une Ubuntu neuve, une seule commande — rien d'autre à
+télécharger, pas de dépôt à cloner :
 
 ```bash
-pnpm app:install    # vérifie Node.js et pnpm, installe les dépendances
-pnpm app:setup      # questions, paquets, base, certificat, services, premier administrateur
-pnpm app:start      # démarre le panel sous systemd
+curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh | sudo bash -s -- install
 ```
 
-Toutes les commandes d'exploitation sont sous `app:` — `pnpm app:help` les
-liste : `app:stop`, `app:restart`, `app:status`, `app:logs`, `app:admin`,
-`app:password`, `app:wings`, `app:release`. Le préfixe les met à l'abri des
-commandes de pnpm lui-même (`pnpm setup` en est une). Relancé sur une
-nouvelle version, `pnpm app:setup` met à jour. Une machine de jeu se
-prépare avec `installer-wings.sh`, publié à côté de l'archive.
+Elle télécharge la dernière version publiée (déjà compilée), vérifie son
+empreinte, lance l'installation guidée et installe la commande
+`gamedashboard` : `status`, `start`, `stop`, `restart`, `logs`, `backup`,
+`update`, `admin`, `password`, `wings`, `help`. Le pas à pas complet, pensé
+pour qui découvre le projet : [docs/installation.md](./docs/installation.md).
+
+Depuis un clone ou une archive extraite, les mêmes commandes s'appellent
+`pnpm app:install`, `pnpm app:setup`, `pnpm app:start`… (`pnpm app:help`).
+Le préfixe les met à l'abri des commandes de pnpm lui-même (`pnpm setup` en
+est une).
 
 ## Démarrer (développement)
 

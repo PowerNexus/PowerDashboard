@@ -95,6 +95,7 @@ jobs:
         with:
           subject-path: |
             dist/gamedashboard-*.tar.gz
+            dist/gamedashboard.sh
             dist/installer-wings.sh
 
       - name: Publier
@@ -105,7 +106,15 @@ jobs:
           cat > notes.md <<EOF
           ## Installer
 
-          Sur une Debian 12/13 ou Ubuntu 22.04/24.04, avec Node.js 24 et \`corepack enable\` :
+          Sur une Debian 12/13 ou Ubuntu 22.04/24.04 neuve, une seule commande :
+
+          \`\`\`bash
+          curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/gamedashboard.sh | sudo bash -s -- install
+          \`\`\`
+
+          Ensuite : \`gamedashboard help\` (\`status\`, \`backup\`, \`update\`…).
+
+          À la main, avec Node.js 24 et \`corepack enable\` :
 
           \`\`\`bash
           sha256sum -c $ARCHIVE.tar.gz.sha256      # l'archive est intacte
@@ -116,11 +125,10 @@ jobs:
           \`\`\`
 
           Le guide pas à pas : [docs/installation.md](https://github.com/${{ github.repository }}/blob/$VERSION/docs/installation.md).
-          Machine de jeu : \`installer-wings.sh\`, ci-dessous, se télécharge seul.
-          Toutes les commandes : \`pnpm app:help\`.
+          Machine de jeu : \`curl -fsSL …/gamedashboard.sh | sudo bash -s -- wings\`.
 
-          Mettre à jour une installation : extraire la nouvelle archive, puis \`pnpm app:install && pnpm app:setup\`
-          dans son dossier. Comptes, secrets et base sont conservés.
+          Mettre à jour une installation : \`gamedashboard update\` (sauvegarde d'abord, puis applique cette version).
+          Comptes, secrets et base sont conservés.
           EOF
 
           PRE=()

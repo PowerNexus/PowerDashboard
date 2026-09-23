@@ -417,6 +417,10 @@ if ! GD_DOMAIN=$DOMAIN bash "$APP/infra/prod/deploy.sh"; then
 fi
 trap 'interrompu $LINENO' ERR
 
+# La commande `gamedashboard`, pour tout ce qui suit : démarrer, sauvegarder,
+# mettre à jour. Elle vient de la version installée et suit ses mises à jour.
+install -m 755 "$APP/infra/prod/app.sh" /usr/local/bin/gamedashboard
+
 # ---------------------------------------------------------------------------
 etape "Premier administrateur"
 # ---------------------------------------------------------------------------
@@ -455,14 +459,16 @@ cat <<EOF
        (Compte › Sécurité).
     2. Configurer l'envoi de courriels (Administration › Paramètres).
     3. Installer Wings sur la machine qui fera tourner les jeux :
-         pnpm app:wings   (ici)   ou   sudo bash installer-wings.sh   (ailleurs)
+         gamedashboard wings   (sur cette machine), ou sur une autre :
+         curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/latest/download/gamedashboard.sh | sudo bash -s -- wings
        puis la déclarer dans Administration › Nodes.
 
-  ${G}Sauvegardez dès maintenant $ENVDIR${Z} hors de cette machine :
-  sa clé APP_SECRET_KEY déchiffre les secrets de la base. Sans elle, une
-  sauvegarde de la base ne sert à rien.
+  ${G}Sauvegardez dès maintenant${Z} : gamedashboard backup, puis copiez le
+  fichier produit hors de cette machine. Il contient APP_SECRET_KEY, sans
+  laquelle une sauvegarde de la base ne sert à rien.
 
-  Au quotidien, depuis ce dossier (pnpm app:help pour la liste) :
-    pnpm app:status | app:start | app:stop | app:restart | app:logs [api|web]
-  Mettre à jour : nouvelle archive (ou git pull), puis pnpm app:install && pnpm app:setup
+  Au quotidien, de n'importe où (gamedashboard help pour la liste) :
+    gamedashboard status | start | stop | restart | logs [api|web]
+    gamedashboard backup      sauvegarde la base et la clé maître
+    gamedashboard update      sauvegarde, puis passe à la dernière version
 EOF

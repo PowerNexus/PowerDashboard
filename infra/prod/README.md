@@ -7,8 +7,9 @@ installation en service aujourd'hui est la production locale
 dossier en est la version pour une vraie machine, et ce qui la distingue du
 local y est écrit.
 
-**Première installation** : `pnpm app:install && pnpm app:setup` (ou
-`sudo bash infra/prod/installer.sh`), qui installe
+**Première installation** : `curl -fsSL …/releases/latest/download/gamedashboard.sh | sudo bash -s -- install`,
+ou depuis un dossier `pnpm app:install && pnpm app:setup` (ou
+`sudo bash infra/prod/installer.sh`). L'installation guidée installe
 les paquets, obtient le certificat, appelle `deploy.sh` et crée le premier
 administrateur. Le pas à pas est dans [docs/installation.md](../../docs/installation.md) ;
 `installer-wings.sh` prépare de même une machine de jeu.
@@ -59,7 +60,21 @@ sources : elle n'a pas d'étape de compilation (voir « Points ouverts »).
 
 ## Commandes d'exploitation
 
-Toutes sous `app:`, toutes servies par `app.sh` : `pnpm app:help` les liste.
+Toutes servies par `app.sh`, qui se suffit à lui-même. Il est publié à chaque
+version sous le nom `gamedashboard.sh`, installé en `/usr/local/bin/gamedashboard`,
+et appelé par les scripts `app:` du package.json. Hors de tout dossier (lu
+par `curl | bash`, ou depuis `/usr/local/bin`), il télécharge ce qui lui
+manque dans GitHub Releases, **empreinte vérifiée** : `install` pose la
+dernière version dans `/opt/gamedashboard/releases/` puis lance
+`installer.sh` ; `update` sauvegarde, pose la nouvelle version et relance
+`installer.sh --oui` ; `wings` télécharge `installer-wings.sh`. Lu par un
+tuyau, son entrée standard est le script lui-même : les étapes
+interactives lisent donc `/dev/tty`.
+
+`backup` écrit un seul fichier, base (`pg_dump -Fc`) **et** `env/` : l'un sans
+l'autre ne restaure rien. Sept sont gardés (`GD_GARDER`).
+
+Côté pnpm, les commandes sont sous `app:`.
 Le préfixe n'est pas décoratif. pnpm fait passer ses propres commandes avant
 les scripts du projet : `pnpm setup` règle le dossier global de pnpm et
 modifie le `.bashrc` sans lancer l'installation, et `pnpm restart` enchaîne
