@@ -30,7 +30,7 @@ import { ActivityService } from "../activity/activity.service";
 import { isAdminRole } from "../admin/admin.guard";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
-import { BrandingService } from "../reseller/branding.service";
+import { AccountMailService } from "./account-mail.service";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
@@ -40,6 +40,7 @@ import { consumeChallenge, issueChallenge, readChallenge } from "./login-challen
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
+import { SecurityAlertService } from "./security-alert.service";
 import { SESSION_COOKIE, SessionGuard } from "./session.guard";
 import {
   SESSION_TTL_MS,
@@ -48,6 +49,7 @@ import {
   type SessionUser,
 } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
+import { trustedCountry, trustedProxiesSetting } from "./sign-in-origin";
 import { SshKeyRepository, type SshKeySummary } from "./ssh-key.repository";
 import { SsoDisabledError, SsoExchangeError, SsoService } from "./sso.service";
 import { TurnstileService } from "./turnstile.service";
@@ -190,6 +192,11 @@ interface Reply {
 interface ClientRequest {
   ip?: string;
   headers: Record<string, string | string[] | undefined>;
+  /**
+   * Interlocuteur direct de l'API — nginx ou le serveur de rendu, pas le
+   * navigateur. Sert à décider si l'en-tête de pays est digne de foi.
+   */
+  socket?: { remoteAddress?: string };
   user?: SessionUser;
   sessionToken?: string;
 }
@@ -211,9 +218,10 @@ export class AuthController {
     @Inject(AuthTokenRepository) private readonly tokens: AuthTokenRepository,
     @Inject(MailerService) private readonly mail: MailerService,
     @Inject(PlatformSettingsService) private readonly platform: PlatformSettingsService,
-    @Inject(BrandingService) private readonly branding: BrandingService,
     @Inject(SshKeyRepository) private readonly sshKeys: SshKeyRepository,
     @Inject(TurnstileService) private readonly turnstile: TurnstileService,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
+    @Inject(AccountMailService) private readonly accountMail: AccountMailService,
   ) {}
 
   /**
@@ -288,7 +296,7 @@ export class AuthController {
     const valid = await verifyPassword(digest, parsed.data.password);
 
     if (!user || !valid) {
-      await this.users.recordAttempt(parsed.data.email, request.ip ?? null, false);
+      await this.recordFailure(parsed.data.email, request, user);
       // Délai progressif : gênant pour une énumération automatisée, invisible
       // pour quelqu'un qui se trompe deux fois. Le verrou, lui, est plus haut.
       await pause(throttle.delayMs);
@@ -382,7 +390,7 @@ export class AuthController {
       : await this.twoFactor.verifyCode(sealed.userId, parsed.data.code ?? "");
 
     if (!accepted) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
@@ -407,6 +415,30 @@ export class AuthController {
     // durant, depuis un autre onglet ou un autre poste.
     consumeChallenge(parsed.data.challenge);
     await this.issueSession(user.id, request, reply, sealed.method ?? "password");
+  }
+
+  /**
+   * Consigne un échec, et prévient le titulaire au cinquième d'affilée (§5.1).
+   *
+   * `account` est nul pour une adresse inconnue : il n'y a alors personne à
+   * prévenir. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
+   * l'alerte part en tâche détachée, sans rien attendre ni rien renvoyer, si
+   * bien qu'un compte existant et une adresse inventée répondent pareil et
+   * dans le même temps.
+   */
+  private async recordFailure(
+    email: string,
+    request: ClientRequest,
+    account: { id: string; email: string } | null,
+  ): Promise<void> {
+    await this.users.recordAttempt(email, request.ip ?? null, false);
+    if (!account) return;
+    this.alerts.afterFailure({
+      userId: account.id,
+      email: account.email,
+      ip: request.ip ?? null,
+      host: arrivalHost(request),
+    });
   }
 
   /**
@@ -452,7 +484,18 @@ export class AuthController {
   ): Promise<void> {
     const payload = await this.issuer.issue(
       userId,
-      { ip: request.ip ?? null, userAgent: headerValue(request.headers["user-agent"]) },
+      {
+        ip: request.ip ?? null,
+        userAgent: headerValue(request.headers["user-agent"]),
+        // Le pays n'est cru que s'il arrive d'un intermédiaire de
+        // `TRUSTED_PROXIES` ; il n'y a pas de base GeoIP pour le deviner.
+        country: trustedCountry(
+          request.headers,
+          request.socket?.remoteAddress,
+          trustedProxiesSetting(),
+        ),
+        host: arrivalHost(request),
+      },
       reply,
       authMethod,
     );
@@ -588,7 +631,7 @@ export class AuthController {
     if (throttle === null) return;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.currentPassword))) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe actuel incorrect.", problems: [] });
       return;
@@ -679,36 +722,34 @@ export class AuthController {
     const email = (body as { email?: unknown })?.email;
     if (typeof email !== "string" || email.trim() === "") return;
 
-    /*
-     * Sans courrier, on n'émet **rien**.
-     *
-     * Émettre un jeton que personne ne recevra laisse une ligne vivante une
-     * heure durant, invalide les jetons précédents du même compte, et fait
-     * croire au journal d'audit qu'une réinitialisation est en cours. Le
-     * silence rendu à l'appelant reste le même — il ne doit rien apprendre sur
-     * l'adresse saisie — mais l'exploitant, lui, trouve la raison dans son
-     * journal au lieu de chercher pourquoi « le courriel n'arrive pas ».
-     *
-     * L'écran ne propose plus ce parcours dans ce cas ; cette garde est là
-     * pour la requête qui arrive quand même, depuis un signet ou hors écran.
-     */
-    if (!(await this.mail.isConfigured())) {
-      this.logger.warn(
-        "Réinitialisation de mot de passe demandée alors que le SMTP n'est pas configuré : aucun jeton émis.",
-      );
-      return;
-    }
-
     const user = await this.users.findByEmail(email.trim());
     // Compte inconnu, ou compte sans mot de passe local — créé par SSO : dans
     // les deux cas il n'y a rien à réinitialiser, et dans les deux cas on se
     // tait. Dire « ce compte passe par le SSO » renseignerait sur son existence.
     if (!user?.passwordHash) return;
 
-    // Plafond d'envoi atteint : même silence que pour un compte inconnu.
-    const issued = await this.tokens.issue(user.id, "password_reset", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
+    /*
+     * Sans courrier, on n'émet **rien**, et plafond atteint vaut le même
+     * silence qu'un compte inconnu (voir `AccountMailService`).
+     *
+     * Le silence rendu à l'appelant reste le même dans tous les cas — il ne
+     * doit rien apprendre sur l'adresse saisie — mais l'exploitant, lui,
+     * trouve la raison dans son journal au lieu de chercher pourquoi « le
+     * courriel n'arrive pas ». L'écran ne propose plus ce parcours sans SMTP ;
+     * cette garde est là pour la requête qui arrive quand même.
+     */
+    const outcome = await this.accountMail.sendPasswordReset(
+      user,
+      arrivalHost(request),
+      request.ip ?? null,
+    );
+    if (outcome === "mail_disabled") {
+      this.logger.warn(
+        "Réinitialisation de mot de passe demandée alors que le SMTP n'est pas configuré : aucun jeton émis.",
+      );
+      return;
+    }
+    if (outcome !== "sent") return;
 
     await this.activity.record({
       event: "account.password_reset_requested",
@@ -721,12 +762,6 @@ export class AuthController {
       // Ni le jeton ni son condensat : un journal d'audit se lit par des gens
       // qui n'ont pas à pouvoir s'en servir.
       properties: {},
-    });
-
-    void this.mail.send({
-      to: user.email,
-      subject: "Réinitialisation de votre mot de passe",
-      text: await this.resetMessage(token, arrivalHost(request)),
     });
   }
 
@@ -798,42 +833,6 @@ export class AuthController {
     });
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
-  }
-
-  /**
-   * Le courrier, en texte brut.
-   *
-   * Il dit trois choses, et pas une de plus : ce qui a été demandé, le lien, et
-   * quoi faire si l'on n'a rien demandé. Cette dernière phrase n'est pas une
-   * politesse — c'est ainsi que quelqu'un apprend qu'un autre s'intéresse à son
-   * compte.
-   */
-  private async resetMessage(token: string, host: string | null): Promise<string> {
-    /*
-     * Le lien repart vers le domaine **par lequel on est venu**.
-     *
-     * Un client d'un revendeur a demandé sa réinitialisation depuis le domaine
-     * de son revendeur : le renvoyer vers celui de la plateforme lui ferait
-     * découvrir une marque qu'il ne connaît pas, sur un lien qu'il est censé
-     * suivre en confiance. La marque du courrier suit la même règle.
-     */
-    const branding = await this.branding.forHost(host);
-    const domain = await this.linkDomain(host, branding.resellerId);
-    const brand = branding.name;
-    const link = `https://${domain}/reset?token=${encodeURIComponent(token)}`;
-
-    return [
-      `Une réinitialisation de mot de passe a été demandée pour votre compte ${brand}.`,
-      "",
-      "Ouvrez ce lien pour en choisir un nouveau :",
-      link,
-      "",
-      "Le lien est valable une heure et ne peut servir qu'une fois.",
-      "",
-      "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message :",
-      "votre mot de passe actuel reste valable, et personne n'a eu accès à votre compte.",
-      "",
-    ].join("\n");
   }
 
   /* --- Inscription --------------------------------------------------------- */
@@ -985,14 +984,7 @@ export class AuthController {
      * lue. Faire patienter devant un écran blanc le temps qu'un courriel
      * arrive ferait perdre la moitié des inscrits pour rien.
      */
-    const issued = await this.tokens.issue(user.id, "email_verify", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
-    void this.mail.send({
-      to: user.email,
-      subject: "Confirmez votre adresse e-mail",
-      text: await this.verifyMessage(token, arrivalHost(request)),
-    });
+    await this.accountMail.sendEmailVerification(user, arrivalHost(request), request.ip ?? null);
 
     await this.issueSession(user.id, request, reply, "password");
   }
@@ -1069,51 +1061,7 @@ export class AuthController {
     if (!user || user.emailVerifiedAt !== null) return;
 
     // Plafond d'envoi atteint : la route répond comme si le courriel partait.
-    const issued = await this.tokens.issue(user.id, "email_verify", request.ip ?? null);
-    if (!issued) return;
-    const { token } = issued;
-
-    void this.mail.send({
-      to: user.email,
-      subject: "Confirmez votre adresse e-mail",
-      text: await this.verifyMessage(token, arrivalHost(request)),
-    });
-  }
-
-  /**
-   * Domaine sur lequel un lien porteur de jeton peut être émis.
-   *
-   * L'hôte d'arrivée vient d'un en-tête que le navigateur peut forger : il ne
-   * sert de domaine de lien que s'il désigne un revendeur au domaine
-   * **vérifié** (`forHost` ne renvoie un `resellerId` que dans ce cas). Tout
-   * autre hôte retombe sur le domaine de la plateforme, sans quoi un jeton de
-   * réinitialisation partirait vers l'adresse choisie par l'attaquant.
-   */
-  private async linkDomain(host: string | null, resellerId: string | null): Promise<string> {
-    if (host !== null && resellerId !== null) return host;
-    return await this.platform.text("brand.domain");
-  }
-
-  private async verifyMessage(token: string, host: string | null): Promise<string> {
-    // Même règle que la réinitialisation : le lien et la marque suivent le
-    // domaine d'arrivée, pas celui de la plateforme.
-    const branding = await this.branding.forHost(host);
-    const domain = await this.linkDomain(host, branding.resellerId);
-    const brand = branding.name;
-    const link = `https://${domain}/verify?token=${encodeURIComponent(token)}`;
-
-    return [
-      `Confirmez que cette adresse est bien la vôtre pour votre compte ${brand}.`,
-      "",
-      "Ouvrez ce lien :",
-      link,
-      "",
-      "Le lien est valable vingt-quatre heures et ne peut servir qu'une fois.",
-      "",
-      "Si vous n'avez pas de compte chez nous, ignorez ce message : sans ce clic,",
-      "l'adresse ne sera rattachée à aucun compte.",
-      "",
-    ].join("\n");
+    await this.accountMail.sendEmailVerification(user, arrivalHost(request), request.ip ?? null);
   }
 
   /* --- Double authentification ------------------------------------------- */
@@ -1755,7 +1703,7 @@ export class AuthController {
       // Pas de délai progressif : une signature ne se devine pas par essais
       // successifs, contrairement à six chiffres. Le ralentissement viserait
       // un risque qui n'existe pas ici.
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
     }
@@ -1795,7 +1743,7 @@ export class AuthController {
     if (throttle === null) return null;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.password))) {
-      await this.users.recordAttempt(user.email, request.ip ?? null, false);
+      await this.recordFailure(user.email, request, user);
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe incorrect." });
       return null;
@@ -1934,7 +1882,7 @@ function headerCookie(request: ClientRequest, name: string): string | null {
  *
  * **L'en-tête est forgeable** : il ne choisit la marque du courrier et le
  * domaine du lien que s'il correspond à un domaine revendeur vérifié (voir
- * `linkDomain`). Les routes qui accordent quelque chose lisent la session,
+ * `AccountMailService.linkDomain`). Les routes qui accordent quelque chose lisent la session,
  * jamais cet en-tête.
  */
 function arrivalHost(request: ClientRequest): string | null {

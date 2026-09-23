@@ -47,6 +47,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
     group: "Serveurs",
   },
   {
+    method: "GET",
+    path: "/servers/{server}/metrics?range={plage}",
+    summary:
+      "Historique agrégé CPU, mémoire, disque, réseau et joueurs sur 1h, 24h, 7d ou 30d. Un pas sans mesure vaut null, jamais zéro.",
+    scope: "console.read",
+    group: "Serveurs",
+  },
+  {
     method: "POST",
     path: "/servers/{server}/power",
     summary: "Envoyer un signal start, stop, restart ou kill.",
@@ -127,6 +135,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
   },
   {
     method: "POST",
+    path: "/servers/{server}/files/chmod",
+    summary:
+      "Changer les permissions d'entrées : `{ root, files: [{ file, mode }] }`, mode octal de 000 à 777 en chaîne.",
+    scope: "files.write",
+    group: "Fichiers",
+  },
+  {
+    method: "POST",
     path: "/servers/{server}/files/delete",
     summary: "Supprimer définitivement des fichiers ou dossiers.",
     scope: "files.delete",
@@ -194,6 +210,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
     summary: "Exécuter une tâche immédiatement.",
     scope: "schedules.update",
     group: "Planification",
+  },
+  {
+    method: "GET",
+    path: "/servers/{server}/subusers/presets",
+    summary:
+      "Presets de permissions proposés à l'invitation, tels que l'administration les a définis.",
+    scope: "subusers.read",
+    group: "Accès",
   },
   {
     method: "GET",
@@ -452,6 +476,14 @@ export const APPLICATION_ROUTES: ApiRoute[] = [
     group: "Comptes",
   },
   {
+    method: "POST",
+    path: "/users/sso-link",
+    summary:
+      "Lien de connexion d'un client, désigné par userId ou externalId. Vaut deux minutes, sert une fois ; refusé pour le personnel.",
+    scope: "users.sso",
+    group: "Comptes",
+  },
+  {
     method: "GET",
     path: "/servers?ownerId={user}",
     summary: "Lister les serveurs, éventuellement ceux d'un seul client.",
@@ -471,6 +503,14 @@ export const APPLICATION_ROUTES: ApiRoute[] = [
     summary:
       "Créer un serveur pour un client, par offre + localisation ou par node + ressources. Accepte Idempotency-Key.",
     scope: "servers.create",
+    group: "Serveurs",
+  },
+  {
+    method: "PATCH",
+    path: "/servers/{server}",
+    summary:
+      "Changer les limites d'un serveur (mémoire, disque, CPU, swap, allocations, sauvegardes, bases). Seuls les champs envoyés changent.",
+    scope: "servers.resize",
     group: "Serveurs",
   },
   {

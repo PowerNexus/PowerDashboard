@@ -7,6 +7,8 @@
  * par personne. La déclaration est donc ce qui rend la table exploitable.
  */
 
+import type { BrandingOverrides } from "./branding";
+
 export type SettingKind = "text" | "number" | "boolean" | "secret" | "choice";
 
 export interface SettingDescriptor {
@@ -27,6 +29,15 @@ export interface SettingDescriptor {
    * où l'interface et l'API la lisent toutes deux.
    */
   choices?: readonly { value: string; label: string; description?: string }[];
+  /**
+   * Forme imposée à un réglage textuel, vérifiée **à l'écriture** par l'API.
+   *
+   * - `url` : `https://` ou chemin interne (`isSafeBrandUrl`), comme la marque
+   *   des revendeurs. Ces valeurs finissent dans un `src` ou un `href`.
+   * - `hex` : couleur hexadécimale (`normalizeHex`). Elle finit dans une
+   *   variable CSS, où une chaîne libre injecterait des déclarations.
+   */
+  format?: "url" | "hex";
 }
 
 export interface SettingGroup {
@@ -63,6 +74,60 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         label: "Couleur d'accent",
         description: "Notation hexadécimale, employée pour les boutons et les liens.",
         fallback: "#7c3aed",
+        format: "hex",
+      },
+      /*
+       * Les mêmes champs que la marque d'un revendeur, et avec les mêmes
+       * règles : un revendeur les surcharge sur son domaine, champ par champ,
+       * et ceux qu'il laisse vides retombent sur ceux-ci.
+       *
+       * Aucun repli déclaré ici : un logo vide retombe sur celui du produit
+       * (`DEFAULT_BRANDING`), un lien vide n'est simplement pas proposé.
+       */
+      {
+        key: "brand.logoUrl",
+        kind: "text",
+        label: "Logo",
+        description: "Adresse https:// ou chemin interne (/…). Vide : logo GameDashboard.",
+        placeholder: "https://cdn.exemple.fr/logo.webp",
+        format: "url",
+      },
+      {
+        key: "brand.faviconUrl",
+        kind: "text",
+        label: "Icône d'onglet (favicon)",
+        description: "Vide : le logo sert aussi d'icône d'onglet.",
+        placeholder: "/brand/favicon.png",
+        format: "url",
+      },
+      {
+        key: "brand.supportUrl",
+        kind: "text",
+        label: "Lien d'assistance",
+        description: "Proposé aux clients. Vide : aucun lien affiché.",
+        placeholder: "https://aide.exemple.fr",
+        format: "url",
+      },
+      {
+        key: "brand.termsUrl",
+        kind: "text",
+        label: "Conditions générales",
+        description: "Lien proposé sur la page d'inscription.",
+        placeholder: "https://exemple.fr/cgu",
+        format: "url",
+      },
+      {
+        key: "brand.footerText",
+        kind: "text",
+        label: "Texte de pied de page",
+        description: "Affiché au bas de la page de connexion.",
+        placeholder: "© Exemple SAS",
+      },
+      {
+        key: "brand.loginTagline",
+        kind: "text",
+        label: "Accroche de connexion",
+        description: "Courte phrase en tête de la page de connexion.",
       },
     ],
   },
@@ -390,6 +455,24 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
 export const SETTING_BY_KEY: ReadonlyMap<string, SettingDescriptor> = new Map(
   PLATFORM_SETTINGS.flatMap((group) => group.settings.map((s) => [s.key, s] as const)),
 );
+
+/**
+ * Où chaque champ de la marque de la plateforme est rangé dans les réglages.
+ *
+ * Typé sur `BrandingOverrides` : un champ ajouté à la marque des revendeurs
+ * sans son pendant ici ne compile pas. C'est ce qui manquait quand la
+ * plateforme ne lisait que son nom et son accent.
+ */
+export const PLATFORM_BRAND_SETTINGS: Readonly<Record<keyof BrandingOverrides, string>> = {
+  name: "brand.name",
+  logoUrl: "brand.logoUrl",
+  faviconUrl: "brand.faviconUrl",
+  accent: "brand.accent",
+  supportUrl: "brand.supportUrl",
+  termsUrl: "brand.termsUrl",
+  footerText: "brand.footerText",
+  loginTagline: "brand.loginTagline",
+};
 
 export function isSecretSetting(key: string): boolean {
   return SETTING_BY_KEY.get(key)?.kind === "secret";

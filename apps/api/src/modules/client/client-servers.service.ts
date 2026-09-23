@@ -146,12 +146,12 @@ export class ClientServersService {
           order by m.at desc limit 1
         )`,
         memBytes: sql<number | null>`(
-          select m.mem_bytes from server_metrics m
+          select m.mem_bytes::float8 from server_metrics m
           where m.server_id = ${servers.id} and m.at > now() - ${FRESH_WINDOW}::interval
           order by m.at desc limit 1
         )`,
         diskBytes: sql<number | null>`(
-          select m.disk_bytes from server_metrics m
+          select m.disk_bytes::float8 from server_metrics m
           where m.server_id = ${servers.id} and m.at > now() - ${FRESH_WINDOW}::interval
           order by m.at desc limit 1
         )`,

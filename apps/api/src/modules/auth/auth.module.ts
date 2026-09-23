@@ -3,7 +3,9 @@ import { databaseProvider } from "../../common/database.provider";
 import { ActivityModule } from "../activity/activity.module";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { BrandingService } from "../reseller/branding.service";
+import { AccountMailService } from "./account-mail.service";
 import { ApiKeyRepository } from "./api-key.repository";
 import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
@@ -11,6 +13,8 @@ import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
 import { PasskeyRepository } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
+import { SecurityAlertRepository } from "./security-alert.repository";
+import { SecurityAlertService } from "./security-alert.service";
 import { SessionGuard } from "./session.guard";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
@@ -21,7 +25,9 @@ import { TwoFactorRepository } from "./two-factor.repository";
 import { UserRepository } from "./user.repository";
 
 @Module({
-  imports: [ActivityModule],
+  // Les notifications, pour la cloche des alertes de sécurité. Le module ne
+  // dépend de rien : l'importer ne forme aucun cycle.
+  imports: [ActivityModule, NotificationsModule],
   controllers: [AuthController],
   providers: [
     databaseProvider,
@@ -42,6 +48,10 @@ import { UserRepository } from "./user.repository";
     // L'unique fabricant de sessions, partagé avec le contrôleur des
     // invitations : un second finirait par diverger d'un détail invisible.
     SessionIssuerService,
+    // Alertes de sécurité (§5.1) : cinquième échec, nouvel appareil. Appelées
+    // par le fabricant de sessions et par le contrôleur, jamais attendues.
+    SecurityAlertService,
+    SecurityAlertRepository,
     // Le lien de connexion remis au plugin de facturation. Ici et non dans le
     // module applicatif : il émet et consomme un jeton d'authentification, et
     // l'y loger aurait formé un cycle, `ApplicationModule` important déjà
@@ -56,6 +66,9 @@ import { UserRepository } from "./user.repository";
     BrandingService,
     SshKeyRepository,
     TurnstileService,
+    // Les courriers porteurs de jeton, partagés avec l'administration qui
+    // déclenche une réinitialisation ou revérifie une adresse changée.
+    AccountMailService,
   ],
   // Exporté pour que le module client puisse protéger ses routes sans
   // redéclarer la logique de session.
@@ -74,6 +87,10 @@ import { UserRepository } from "./user.repository";
     // avant d'ouvrir sa session.
     UserRepository,
     BillingSsoService,
+    AccountMailService,
+    // Sort pour la suspension d'un compte : les liens déjà envoyés meurent
+    // avec elle, et la règle vit avec les jetons.
+    AuthTokenRepository,
     databaseProvider,
   ],
 })

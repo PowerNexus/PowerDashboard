@@ -1,4 +1,4 @@
-import type { PlatformAccess } from "@gamedashboard/contracts";
+import type { PlatformAccess, RolePresetsView } from "@gamedashboard/contracts";
 import { notFound } from "next/navigation";
 import { ApiError, apiFetch } from "./client";
 
@@ -75,7 +75,17 @@ export interface AdminServer {
 export interface AdminUser {
   id: string;
   name: string;
+  /** Les deux moitiés du nom, que la fiche de modification édite séparément. */
+  nameFirst: string;
+  nameLast: string;
   email: string;
+  /** `null` tant que l'adresse n'est pas confirmée ; une adresse changée y revient. */
+  emailVerifiedAt: string | null;
+  locale: string;
+  /** Compte suspendu depuis cet instant, ou `null` pour un compte actif. */
+  suspendedAt: string | null;
+  /** Motif interne, montré au support seulement. */
+  suspensionReason: string | null;
   role: "admin" | "support" | "reseller" | "user";
   is2faEnabled: boolean;
   /**
@@ -244,6 +254,47 @@ export const fetchAdminServers = () => unwrap<AdminServer[]>("/api/v1/admin/serv
 export const fetchAdminUsers = () => unwrap<AdminUser[]>("/api/v1/admin/users");
 export const fetchAdminEggs = () => unwrap<AdminEgg[]>("/api/v1/admin/eggs");
 
+/** Une variable d'egg, avec le nombre de serveurs qui lui ont une valeur. */
+export interface AdminEggVariable {
+  id: string;
+  name: string;
+  envVariable: string;
+  description: string | null;
+  defaultValue: string;
+  userViewable: boolean;
+  userEditable: boolean;
+  rules: string;
+  servers: number;
+}
+
+/** L'egg complet, tel que l'éditeur le reçoit. */
+export interface AdminEggDetail {
+  id: string;
+  nest: string;
+  name: string;
+  description: string | null;
+  author: string | null;
+  dockerImages: Record<string, string>;
+  startup: string;
+  configFiles: unknown;
+  configStartup: unknown;
+  configStop: string | null;
+  configLogs: unknown;
+  installScript: string;
+  installContainer: string;
+  installEntrypoint: string;
+  features: string[];
+  fileDenylist: string[];
+  enabled: boolean;
+  locallyModified: boolean;
+  sourceRef: string | null;
+  servers: number;
+  variables: AdminEggVariable[];
+}
+
+export const fetchAdminEgg = (eggId: string) =>
+  unwrap<AdminEggDetail>(`/api/v1/admin/eggs/${encodeURIComponent(eggId)}`);
+
 /**
  * Un secret n'a pas de `value` : l'API ne renvoie qu'un « configuré ou non ».
  * Le type le rend impossible à oublier — il n'existe aucun champ où la valeur
@@ -294,3 +345,9 @@ export interface RetentionReport {
 }
 
 export const fetchRetention = () => unwrap<RetentionReport>("/api/v1/admin/maintenance/retention");
+
+/**
+ * Presets de sous-utilisateurs : ceux en vigueur, ceux du code, et lesquels
+ * s'en écartent.
+ */
+export const fetchSubuserPresets = () => unwrap<RolePresetsView>("/api/v1/admin/subuser-presets");

@@ -1,7 +1,7 @@
 import { generateToken, hashToken } from "@gamedashboard/auth";
 import { authTokens, type Database } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 /** Fenêtre d'émission par compte et par usage. */
@@ -120,6 +120,30 @@ export class AuthTokenRepository {
     });
 
     return { token, expiresAt };
+  }
+
+  /**
+   * Éteint les jetons encore valables d'un compte, pour les usages donnés.
+   *
+   * Marqués consommés plutôt que supprimés, comme à l'émission d'un nouveau :
+   * la trace de ce qui a été demandé reste lisible. Deux occasions : une
+   * adresse qui change — un lien parti vers l'ancienne boîte ne doit plus
+   * ouvrir le compte — et une suspension, qui ferme toutes les portes.
+   */
+  async revokePending(userId: string, purposes: readonly TokenPurpose[]): Promise<number> {
+    if (purposes.length === 0) return 0;
+    const rows = await this.db
+      .update(authTokens)
+      .set({ consumedAt: sql`now()`, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(authTokens.userId, userId),
+          inArray(authTokens.purpose, [...purposes]),
+          isNull(authTokens.consumedAt),
+        ),
+      )
+      .returning({ id: authTokens.id });
+    return rows.length;
   }
 
   /**

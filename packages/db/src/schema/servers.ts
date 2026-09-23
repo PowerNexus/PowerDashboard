@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -209,10 +210,17 @@ export const serverMetrics = pgTable(
     /** État rapporté par Wings à l'instant de la mesure, conservé pour l'historique. */
     state: varchar("state", { length: 20 }).notNull(),
     cpuPct: real("cpu_pct").notNull(),
-    memBytes: integer("mem_bytes").notNull(),
-    diskBytes: integer("disk_bytes").notNull(),
-    netRx: integer("net_rx").notNull(),
-    netTx: integer("net_tx").notNull(),
+    /*
+     * `bigint` et non `integer` : le plafond d'un `integer` est 2 Gio. Un
+     * serveur ordinaire le dépasse en disque dès son premier monde, et ses
+     * compteurs réseau cumulés en quelques heures ; l'insertion échouait alors
+     * sans bruit, et le serveur n'avait aucun historique. `mode: "number"`
+     * reste exact jusqu'à 8 Pio, bien au-delà de tout volume.
+     */
+    memBytes: bigint("mem_bytes", { mode: "number" }).notNull(),
+    diskBytes: bigint("disk_bytes", { mode: "number" }).notNull(),
+    netRx: bigint("net_rx", { mode: "number" }).notNull(),
+    netTx: bigint("net_tx", { mode: "number" }).notNull(),
     /** Nul quand la sonde n'a pas abouti : zéro joueur et mesure absente diffèrent. */
     players: integer("players"),
   },

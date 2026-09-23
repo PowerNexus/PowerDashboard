@@ -539,6 +539,36 @@ export class WingsClientService {
   }
 
   /**
+   * Change les permissions d'entrées, relatives à `root`.
+   *
+   * **Contrat relevé dans la source de Wings** (`router/router.go` et
+   * `router/router_server_files.go`, `postServerChmodFile`) :
+   *
+   * - `POST /api/servers/:uuid/files/chmod`, corps
+   *   `{ root, files: [{ file, mode }] }` ;
+   * - `mode` est une **chaîne** octale, passée à `strconv.ParseUint(mode, 8,
+   *   32)` — un nombre JSON ferait échouer le décodage du corps entier ;
+   * - 204 sans corps en cas de réussite ; 400 « Invalid file mode. » pour un
+   *   mode illisible, 422 pour une liste vide ;
+   * - une entrée **absente est ignorée en silence** (`os.ErrNotExist` rend
+   *   `nil`) : un 204 ne prouve donc pas que le fichier existait ;
+   * - rien n'est récursif : un dossier change, pas son contenu.
+   *
+   * Le daemon ne filtre pas les bits spéciaux (`os.FileMode(mode)`) : le
+   * mode est validé en amont (`FileMode` dans `contracts`), pas ici.
+   */
+  chmodFiles(
+    serverId: string,
+    root: string,
+    files: { file: string; mode: string }[],
+  ): Promise<void> {
+    return this.call<void>(serverId, `/api/servers/${serverId}/files/chmod`, {
+      method: "POST",
+      body: { root, files: files.map(({ file, mode }) => ({ file, mode })) },
+    });
+  }
+
+  /**
    * Demande au daemon de relire la configuration du serveur.
    *
    * Indispensable après un changement de ports : Wings ne lit la configuration

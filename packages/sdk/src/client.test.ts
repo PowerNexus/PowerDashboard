@@ -1,3 +1,9 @@
+import {
+  APPLICATION_ROUTES,
+  type ApiRoute,
+  CLIENT_ROUTES,
+  SESSION_ROUTES,
+} from "@gamedashboard/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ApiProblem, GameDashboardClient } from "./client";
 
@@ -71,7 +77,7 @@ describe("GameDashboardClient", () => {
     const appel = espion(() => fausseReponse({ data: {} }));
     const c = client(appel);
 
-    await c.suspendServer("31201e0c");
+    await c.terminateServer("31201e0c");
     expect(entetes(appel, 0)["Content-Type"]).toBeUndefined();
 
     await c.command("31201e0c", "say bonjour");
@@ -122,4 +128,68 @@ describe("GameDashboardClient", () => {
     await client(appel).servers();
     expect(entetes(appel, 0).Authorization).toBe("Bearer gd_live_essai");
   });
+
+  /*
+   * Non-régression : `suspendServer` et `unsuspendServer` appelaient
+   * `…/suspend` et `…/unsuspend`, deux routes que l'API applicative n'a jamais
+   * servies — la seule est `…/suspension`. Chaque appel rendait 404, et le
+   * défaut ne se voyait que chez l'intégrateur. Chaque méthode du SDK doit
+   * donc viser une route du catalogue, celui-là même que publie openapi.json.
+   */
+  it("n'appelle que des routes du catalogue", async () => {
+    const catalogue: [string, ApiRoute[]][] = [
+      ["/api/v1/client", CLIENT_ROUTES],
+      ["/api/v1", SESSION_ROUTES],
+      ["/api/v1/application", APPLICATION_ROUTES],
+    ];
+    const connues = new Set(
+      catalogue.flatMap(([prefixe, routes]) =>
+        routes.map((r) => `${r.method} ${forme(`${prefixe}${r.path.split("?")[0]}`)}`),
+      ),
+    );
+    // Servie hors catalogue, par le générateur lui-même.
+    connues.add("GET /api/v1/openapi.json");
+
+    const appel = espion(() => fausseReponse({ data: {} }));
+    const c = client(appel);
+    const id = "31201e0c";
+    await c.servers();
+    await c.server(id);
+    await c.resources(id);
+    await c.power(id, "start");
+    await c.websocketGrant(id);
+    await c.command(id, "say bonjour");
+    await c.createServer({});
+    await c.suspendServer(id, "impayé");
+    await c.unsuspendServer(id);
+    await c.resizeServer(id, { memoryMb: 4096 });
+    await c.terminateServer(id);
+    await c.ssoLink({ externalId: "client-42" });
+    await c.openapi();
+
+    const visees = appel.mock.calls.map(
+      ([url, init]) =>
+        `${init?.method ?? "GET"} ${forme(new URL(String(url)).pathname.replace(id, "{x}"))}`,
+    );
+    expect(visees.filter((route) => !connues.has(route))).toEqual([]);
+  });
+
+  it("suspend et rétablit par la même route, avec un booléen", async () => {
+    const appel = espion(() => fausseReponse({ data: {} }));
+    const c = client(appel);
+
+    await c.suspendServer("31201e0c", "impayé");
+    await c.unsuspendServer("31201e0c");
+
+    expect(JSON.parse(String(initDe(appel, 0).body))).toEqual({
+      suspended: true,
+      reason: "impayé",
+    });
+    expect(JSON.parse(String(initDe(appel, 1).body))).toEqual({ suspended: false });
+  });
 });
+
+/** `{server}` et un identifiant réel reviennent au même segment. */
+function forme(chemin: string): string {
+  return chemin.replace(/\{[a-zA-Z]+\}/g, "{x}");
+}

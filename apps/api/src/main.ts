@@ -4,6 +4,7 @@ import { assertEncryptionKey } from "@gamedashboard/auth";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
+import { trustedProxiesSetting } from "./modules/auth/sign-in-origin";
 import { CHUNK_SIZE } from "./modules/client/file-upload.service";
 
 /**
@@ -29,8 +30,11 @@ async function bootstrap(): Promise<void> {
      * n'importe quel appelant, y compris à celui qui se serait glissé jusqu'au
      * port. Ne sont crus que les intermédiaires nommés ici, la boucle locale
      * par défaut — c'est de là que parlent nginx et le rendu.
+     *
+     * La même liste décide si l'en-tête de pays (`CF-IPCountry`) est cru :
+     * elle est lue au même endroit pour les deux usages.
      */
-    new FastifyAdapter({ trustProxy: process.env.TRUSTED_PROXIES ?? "127.0.0.1, ::1" }),
+    new FastifyAdapter({ trustProxy: trustedProxiesSetting() }),
   );
 
   await app.register(cookie);

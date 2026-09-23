@@ -12,10 +12,14 @@ import { AdminController } from "./admin.controller";
 import { AdminGuard } from "./admin.guard";
 import { AdminService } from "./admin.service";
 import { AdminActionsService } from "./admin-actions.service";
+import { AdminNodesController } from "./admin-nodes.controller";
 import { AdminServerService } from "./admin-server.service";
+import { AdminUsersController } from "./admin-users.controller";
+import { AdminUsersService } from "./admin-users.service";
 import { AdminWriteGuard } from "./admin-write.guard";
 import { AnnouncementsService } from "./announcements.service";
 import { DatabaseHostsService } from "./database-hosts.service";
+import { EggEditorService } from "./egg-editor.service";
 import { EggImportService } from "./egg-import.service";
 import { InfrastructureService } from "./infrastructure.service";
 import { MountsService } from "./mounts.service";
@@ -47,7 +51,10 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     ActivityModule,
     SchedulerModule,
   ],
-  controllers: [AdminController],
+  // La fiche d'un node et la modification d'un compte ont leurs contrôleurs,
+  // sous le même préfixe et les mêmes gardes : `AdminController` dépasse déjà
+  // le millier de lignes.
+  controllers: [AdminController, AdminNodesController, AdminUsersController],
   providers: [
     AdminService,
     // Fourni ici comme dans les autres modules qui envoient : le service ne
@@ -62,6 +69,7 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     // le lise : ce garde est ce qui le rend vrai.
     StaffTwoFactorGuard,
     AdminActionsService,
+    AdminUsersService,
     ServerTransferService,
     // Sans hôte déclaré, la fonction « bases de données » de l'espace client
     // est complète mais inutilisable : c'est cet écran qui la met en service.
@@ -74,6 +82,7 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     NodeLoadService,
     PlatformSettingsService,
     EggImportService,
+    EggEditorService,
     InfrastructureService,
   ],
   // Sortent pour l'API applicative : la suspension, la suppression et les

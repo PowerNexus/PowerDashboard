@@ -1,7 +1,12 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
+import { SecurityAlertService } from "./security-alert.service";
 import { SESSION_COOKIE } from "./session.guard";
 import { SESSION_TTL_MS, SessionRepository } from "./session.repository";
 import { UserRepository } from "./user.repository";
+
+/** Ce que lit quelqu'un dont le compte est suspendu, quelle que soit la porte. */
+export const ACCOUNT_SUSPENDED_MESSAGE =
+  "Ce compte est suspendu. Contactez le support de votre hébergeur pour en connaître la raison.";
 
 /**
  * Le seul endroit qui ouvre une session.
@@ -24,6 +29,13 @@ import { UserRepository } from "./user.repository";
 export interface SessionOrigin {
   ip: string | null;
   userAgent: string | null;
+  /**
+   * Pays, seulement quand un intermédiaire de confiance l'a fourni (voir
+   * `trustedCountry`). Absent, l'alerte de nouvel appareil n'en parle pas.
+   */
+  country?: string | null;
+  /** Domaine d'arrivée : marque et lien du courriel d'alerte. */
+  host?: string | null;
 }
 
 /** Ce qu'il a besoin de faire à la réponse. Fastify le satisfait tel quel. */
@@ -36,6 +48,7 @@ export class SessionIssuerService {
   constructor(
     @Inject(SessionRepository) private readonly sessions: SessionRepository,
     @Inject(UserRepository) private readonly users: UserRepository,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
   ) {}
 
   /**
@@ -50,6 +63,23 @@ export class SessionIssuerService {
     reply: CookieSink,
     authMethod: string,
   ): Promise<{ user: unknown }> {
+    /*
+     * Un compte suspendu n'entre par **aucune** porte.
+     *
+     * Le contrôle est ici parce que c'est le seul point par lequel passent
+     * toutes les connexions — mot de passe, second facteur, clé d'accès,
+     * fournisseur d'identité, lien de la facturation, invitation. Le poser dans
+     * chaque contrôleur ferait autant d'endroits à ne pas oublier, et c'est
+     * toujours le chemin le moins fréquenté qu'on oublie.
+     *
+     * Le refus arrive après la preuve d'identité : seul celui qui tient déjà le
+     * mot de passe ou la clé apprend que le compte est suspendu. Le motif, lui,
+     * reste au support — c'est une note interne, pas un message au client.
+     */
+    if (await this.users.isSuspended(userId)) {
+      throw new ForbiddenException(ACCOUNT_SUSPENDED_MESSAGE);
+    }
+
     const token = await this.sessions.create(userId, {
       ip: origin.ip,
       userAgent: origin.userAgent,
@@ -67,6 +97,27 @@ export class SessionIssuerService {
      * être écrite serait absurde.
      */
     void this.users.noteLogin(userId);
+
+    /*
+     * Nouvel appareil ou nouveau réseau ? (§5.1)
+     *
+     * Ici, parce que c'est ici que passent **toutes** les connexions : mot de
+     * passe (avec ou sans second facteur), clé d'accès, authentification
+     * unique, lien venu de la facturation, inscription, invitation. Une alerte
+     * posée dans chaque route aurait oublié la moins fréquentée — et c'est par
+     * elle qu'entre celui qu'on n'attend pas.
+     *
+     * Détachée : la réponse n'attend ni la base ni le serveur SMTP.
+     */
+    this.alerts.afterSignIn({
+      userId,
+      token,
+      ip: origin.ip,
+      userAgent: origin.userAgent,
+      country: origin.country ?? null,
+      host: origin.host ?? null,
+      authMethod,
+    });
 
     /*
      * La ligne lue en base porte le condensat du mot de passe. Seuls les champs

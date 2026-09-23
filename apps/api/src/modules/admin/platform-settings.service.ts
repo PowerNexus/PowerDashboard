@@ -2,7 +2,13 @@ import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
 import {
   FEATURE_FLAGS,
   featureFlagDefault,
+  isSafeBrandUrl,
+  normalizeHex,
   PLATFORM_SETTINGS,
+  ROLE_PRESETS_SETTING_KEY,
+  RolePresetsInput,
+  type RolePresetsView,
+  resolveRolePresets,
   SETTING_BY_KEY,
   type SettingKind,
   SSO_DEFAULT_SCOPES,
@@ -394,7 +400,32 @@ export class PlatformSettingsService {
         }
       }
 
-      await this.upsert(key, coerce(raw, descriptor.kind, descriptor.fallback), false);
+      /*
+       * La forme des réglages de marque, contrôlée comme pour un revendeur.
+       *
+       * Ces valeurs finissent dans un `src`, un `href` ou une variable CSS de
+       * chaque page, domaines des revendeurs compris quand ils n'ont rien
+       * surchargé. Le contrôle est celui de `BrandingService.save`, par la
+       * même fonction : la plateforme n'a pas à être moins protégée qu'un
+       * revendeur.
+       */
+      const text = typeof raw === "string" ? raw.trim() : String(raw ?? "");
+      if (descriptor.format === "url" && !isSafeBrandUrl(text)) {
+        throw new BadRequestException(
+          `« ${descriptor.label} » doit commencer par « https:// » ou par « / » (chemin interne).`,
+        );
+      }
+      if (descriptor.format === "hex" && text !== "" && normalizeHex(text) === null) {
+        throw new BadRequestException(
+          `« ${descriptor.label} » doit être une couleur hexadécimale, comme #0ea5e9.`,
+        );
+      }
+
+      await this.upsert(
+        key,
+        coerce(descriptor.format ? text : raw, descriptor.kind, descriptor.fallback),
+        false,
+      );
       saved.push(key);
     }
 
@@ -413,6 +444,62 @@ export class PlatformSettingsService {
         target: featureFlags.key,
         set: { enabled, updatedAt: new Date().toISOString() },
       });
+  }
+
+  /* --- Presets de sous-utilisateurs (§5.2) -------------------------------- */
+
+  /**
+   * Les presets proposés à l'invitation, tels que l'administration les a
+   * redéfinis, avec repli sur ceux du code.
+   *
+   * Rangés dans `settings` sous une clé hors du catalogue des réglages : ce
+   * n'est pas un champ de formulaire mais une structure, et `save()` doit
+   * continuer de refuser toute clé qu'il ne connaît pas. `all()` ne la montre
+   * pas pour la même raison.
+   */
+  async rolePresets(): Promise<RolePresetsView> {
+    const [row] = await this.db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, ROLE_PRESETS_SETTING_KEY))
+      .limit(1);
+
+    return resolveRolePresets(row?.value);
+  }
+
+  /**
+   * Redéfinit les presets.
+   *
+   * **Ne touche à aucun sous-utilisateur existant**, et c'est voulu : leurs
+   * permissions ont été recopiées une à une au moment de l'invitation, et la
+   * liste stockée fait foi (`server_subusers.permissions`). Élargir un preset
+   * n'élargit donc les droits de personne rétroactivement — ce serait accorder
+   * à des gens invités il y a des mois ce que leur propriétaire n'a jamais
+   * coché. Seules les invitations à venir partent de la nouvelle définition.
+   *
+   * Le jeu entier est enregistré d'un bloc, validé avant d'écrire : un preset
+   * refusé n'en laisse pas deux autres à moitié enregistrés.
+   */
+  async saveRolePresets(input: unknown): Promise<RolePresetsView> {
+    const parsed = RolePresetsInput.safeParse(input);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.issues[0]?.message ?? "Presets invalides.");
+    }
+
+    await this.upsert(ROLE_PRESETS_SETTING_KEY, parsed.data, false);
+    return resolveRolePresets(parsed.data);
+  }
+
+  /**
+   * Rétablit les presets du code.
+   *
+   * La ligne est supprimée plutôt que réécrite avec les valeurs actuelles du
+   * code : une installation « aux valeurs par défaut » doit suivre les
+   * défauts des versions suivantes, pas rester figée sur ceux du jour du clic.
+   */
+  async resetRolePresets(): Promise<RolePresetsView> {
+    await this.db.delete(settings).where(eq(settings.key, ROLE_PRESETS_SETTING_KEY));
+    return resolveRolePresets(undefined);
   }
 
   private async upsert(key: string, value: unknown, isSecret: boolean): Promise<void> {

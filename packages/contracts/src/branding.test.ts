@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   composeBranding,
   DEFAULT_BRANDING,
+  isSafeBrandUrl,
   isValidDomain,
   normalizeHex,
   ownershipRecordName,
@@ -91,5 +92,29 @@ describe("domaine propre", () => {
     // Sous `_gamedashboard.` et non sur le domaine lui-même : celui-ci porte déjà un
     // CNAME, et un CNAME exclut tout autre enregistrement au même nom.
     expect(ownershipRecordName("Panel.Revendeur.fr")).toBe("_gamedashboard.panel.revendeur.fr");
+  });
+});
+
+describe("adresses de marque", () => {
+  it.each([
+    "",
+    "/brand/logo.webp",
+    "https://cdn.exemple.fr/logo.webp",
+    "HTTPS://cdn.exemple.fr/logo.webp",
+  ])("accepte « %s »", (adresse) => {
+    expect(isSafeBrandUrl(adresse)).toBe(true);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    " javascript:alert(1)",
+    "http://cdn.exemple.fr/logo.webp",
+    "data:image/svg+xml;base64,PHN2Zz4=",
+    // Commencent par « / » mais désignent un autre hôte.
+    "//malveillant.exemple/logo.webp",
+    "/\\malveillant.exemple/logo.webp",
+    "https://",
+  ])("refuse « %s »", (adresse) => {
+    expect(isSafeBrandUrl(adresse)).toBe(false);
   });
 });

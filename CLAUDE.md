@@ -57,6 +57,7 @@ Fait, avec tests de non-régression :
 - **Schéma et migrations en phase** : instantané `0038`, migration `0038_constraint_names`, `pnpm db:check` (drizzle-kit sort en succès même quand il s'arrête sur une question).
 - **Certificats des revendeurs** : un certificat expiré n'est plus « actif » (`certificateStanding`).
 - **Traduction complète** : page d'erreur et page introuvable ; routes citées dans les textes vérifiées contre l'API.
+- **API applicative complète et documentée** : `POST users/sso-link` et `PATCH servers/:id` (redimensionnement) ajoutés au catalogue ; toute route applicative doit y figurer. SDK : `suspendServer`/`unsuspendServer` visaient des routes inexistantes (404), corrigés ; `resizeServer` et `ssoLink` ajoutés ; chaque appel du SDK est vérifié contre le catalogue.
 
 **La V1 est terminée.** GitHub Actions est suspendu (facture impayée) : les vérifications se font en local — `pnpm lint && pnpm typecheck && DATABASE_URL=… pnpm test && pnpm db:check && pnpm build`, puis `pnpm e2e`.
 

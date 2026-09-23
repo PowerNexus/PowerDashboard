@@ -105,6 +105,34 @@ export function normalizeHex(value: string): string | null {
 }
 
 /**
+ * Adresse acceptable pour une image ou un lien de marque.
+ *
+ * `https://` ou chemin interne, rien d'autre. Un `javascript:` recopié dans un
+ * attribut `src` ou `href` s'exécute dans la page ; un `http://` sur une page
+ * servie en TLS est bloqué par le navigateur, et le logo disparaît sans
+ * message. Les deux se refusent à la saisie plutôt qu'à l'affichage.
+ *
+ * `//hote/…` et `/\hote/…` sont refusés alors qu'ils commencent par `/` : le
+ * navigateur les lit comme des adresses **d'un autre hôte**, et le « chemin
+ * interne » servirait une image — ou un lien d'assistance — pris ailleurs.
+ *
+ * Partagée par la marque des revendeurs et celle de la plateforme : deux
+ * copies de cette règle finiraient par en laisser passer une que l'autre
+ * refuse.
+ */
+export function isSafeBrandUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "") return true;
+  if (trimmed.startsWith("/")) return !/^\/[/\\]/.test(trimmed);
+  if (!trimmed.toLowerCase().startsWith("https://")) return false;
+  try {
+    return new URL(trimmed).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Nom d'hôte acceptable pour un domaine propre.
  *
  * Refusé plutôt que nettoyé : un domaine se recopie depuis un registre, et

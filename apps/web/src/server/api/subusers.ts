@@ -1,5 +1,6 @@
 "use server";
 
+import type { RolePresets } from "@gamedashboard/contracts";
 import { revalidatePath } from "next/cache";
 import { apiFetch, apiSend } from "./client";
 
@@ -18,6 +19,19 @@ export interface Subuser {
 export async function listSubusers(serverId: string): Promise<Subuser[]> {
   const { data } = await apiFetch<{ data: Subuser[] }>(
     `/api/v1/client/servers/${serverId}/subusers`,
+  );
+  return data;
+}
+
+/**
+ * Presets proposés à l'invitation, lus dans l'API.
+ *
+ * Et non dans `contracts` : l'administration peut les redéfinir, et le
+ * formulaire doit pré-cocher ce qu'elle a décidé, pas ce que le code disait.
+ */
+export async function listSubuserPresets(serverId: string): Promise<RolePresets> {
+  const { data } = await apiFetch<{ data: RolePresets }>(
+    `/api/v1/client/servers/${serverId}/subusers/presets`,
   );
   return data;
 }

@@ -12,6 +12,7 @@
       "!packages/db/migrations",
       "!**/test-results",
       "!**/playwright-report",
+      "!.claude/worktrees",
       "!openapi.json",
       "!infra/eggs/*/egg.json"
     ]

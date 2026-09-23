@@ -50,6 +50,7 @@ export class ApiKeyRepository {
         timezone: users.timezone,
         avatarUrl: users.avatarUrl,
         emailVerifiedAt: users.emailVerifiedAt,
+        suspendedAt: users.suspendedAt,
       })
       .from(apiKeys)
       .innerJoin(users, eq(apiKeys.userId, users.id))
@@ -64,6 +65,9 @@ export class ApiKeyRepository {
     if (!row || !matches) return null;
 
     if (row.revokedAt) return null;
+    // Compte suspendu : ses clés se taisent avec lui, sans qu'il faille les
+    // révoquer une à une — et elles reviennent intactes à la réactivation.
+    if (row.suspendedAt !== null) return null;
     if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
 
     /**

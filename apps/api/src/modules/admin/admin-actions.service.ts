@@ -182,12 +182,25 @@ export class AdminActionsService {
     }
 
     const [target] = await this.db
-      .select({ id: users.id, email: users.email, role: users.role })
+      .select({
+        id: users.id,
+        email: users.email,
+        role: users.role,
+        suspendedAt: users.suspendedAt,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
     if (!target) throw new NotFoundException("Compte inconnu.");
+    // Un compte suspendu ne s'ouvre pas, pas même en lecture : la session
+    // empruntée serait de toute façon refusée à la première requête, et
+    // l'agent se retrouverait déconnecté des deux côtés.
+    if (target.suspendedAt !== null) {
+      throw new ConflictException(
+        "Ce compte est suspendu : il ne peut pas être pris en main. Réactivez-le d'abord si le diagnostic l'exige.",
+      );
+    }
     if (isAdminRole(target.role)) {
       throw new ForbiddenException(
         "La prise en main ne vaut que pour un compte client : un membre du personnel ne se regarde pas depuis le compte d'un autre.",

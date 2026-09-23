@@ -18,7 +18,7 @@ import {
   RelativeTime,
   SelectMenu,
 } from "@gamedashboard/ui";
-import { History, Search } from "lucide-react";
+import { Download, History, Search } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -60,6 +60,20 @@ const CATEGORY_TONE: Record<
 const FAMILIES = ["", "account.", "server.", "backup.", "database.", "node.", "user."];
 
 /**
+ * Adresse de l'export, filtres courants compris.
+ *
+ * Tous les paramètres de l'adresse sont repris — y compris `actorId`,
+ * `serverId` ou `since` posés à la main ou par un lien — sauf la page :
+ * l'export n'est pas une page, c'est tout ce que les filtres désignent.
+ */
+function exportHref(parameters: { toString(): string }, format: "csv" | "jsonl"): string {
+  const next = new URLSearchParams(parameters.toString());
+  next.delete("page");
+  next.set("format", format);
+  return `/api/admin/audit-export?${next}`;
+}
+
+/**
  * Le journal de toute la plateforme.
  *
  * Il existe parce qu'une partie de ce que le panel consigne n'avait **aucun
@@ -76,10 +90,13 @@ export function AuditWorkspace({
   page,
   query,
   event,
+  canExport,
 }: {
   page: AuditPage;
   query: string;
   event: string;
+  /** Vrai pour l'administration seulement : l'export lui est réservé. */
+  canExport: boolean;
 }) {
   const t = useTranslations("audit");
   const ta = useTranslations("activity");
@@ -204,6 +221,24 @@ export function AuditWorkspace({
               label: family === "" ? t("allFamilies") : family,
             }))}
           />
+
+          {/*
+           * L'export reprend les filtres **de l'adresse**, pas ceux du champ
+           * en cours de saisie : ce qui part est ce que la liste affiche.
+           * Réservé à l'administration — le support lit le journal, il ne
+           * l'emporte pas ; l'API refuserait de toute façon.
+           */}
+          {canExport ? (
+            <div className="flex items-center gap-2">
+              {(["csv", "jsonl"] as const).map((format) => (
+                <Button key={format} asChild variant="secondary">
+                  <a href={exportHref(parameters, format)} download>
+                    <Download /> {t(format === "csv" ? "exportCsv" : "exportJsonl")}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       }
     >

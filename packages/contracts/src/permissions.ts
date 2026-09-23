@@ -73,6 +73,135 @@ export const ROLE_PRESETS: Record<SubuserRolePreset, readonly ServerPermission[]
   owner: SERVER_PERMISSIONS,
 };
 
+/* --- Presets modifiables par l'administration (§5.2) ---------------------- */
+
+/**
+ * Les presets qu'une administration peut redéfinir.
+ *
+ * « owner » n'en fait pas partie : il ne se délègue pas — l'écran d'invitation
+ * ne le propose pas — et il veut dire « tout ». Le restreindre produirait un
+ * preset dont le nom mentirait sur son contenu, pour un usage qui n'existe
+ * pas. Il reste défini par le code, et ne sert plus que de repli aux lignes
+ * anciennes.
+ */
+export const DELEGABLE_ROLE_PRESETS = ["viewer", "moderator", "developer"] as const;
+export type DelegableRolePreset = (typeof DELEGABLE_ROLE_PRESETS)[number];
+export type RolePresets = Record<DelegableRolePreset, ServerPermission[]>;
+
+/** Clé de la table `settings` qui porte les presets redéfinis. */
+export const ROLE_PRESETS_SETTING_KEY = "subusers.rolePresets";
+
+/** Les presets tels que le code les définit : le repli, et ce que « rétablir » remet. */
+export function defaultRolePresets(): RolePresets {
+  return {
+    viewer: [...ROLE_PRESETS.viewer],
+    moderator: [...ROLE_PRESETS.moderator],
+    developer: [...ROLE_PRESETS.developer],
+  };
+}
+
+/**
+ * Les permissions d'un preset, validées.
+ *
+ * Trois refus, chacun avec un message qui nomme la permission fautive :
+ *
+ * - une permission `admin.*` : un preset décrit ce qu'on délègue **sur un
+ *   serveur**, jamais un pouvoir sur la plateforme. Aucune n'existe aujourd'hui
+ *   dans `SERVER_PERMISSIONS`, et c'est justement pour cela que le refus est
+ *   explicite — le jour où une permission de ce nom apparaîtrait, elle ne
+ *   deviendrait pas distribuable par une case cochée ;
+ * - une permission inconnue : écrite, elle ne serait jamais vérifiée nulle part
+ *   et ferait croire à un droit accordé ;
+ * - une liste vide : l'invitation refuse un accès sans permission, un preset
+ *   vide pré-cocherait donc un formulaire impossible à envoyer.
+ *
+ * Les doublons sont retirés plutôt que refusés : ils ne changent rien au sens.
+ */
+export const RolePresetPermissions = z
+  .array(z.string())
+  .superRefine((permissions, context) => {
+    const administration = permissions.filter((p) => p.startsWith("admin."));
+    if (administration.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: `Une permission d'administration ne peut pas figurer dans un preset : ${administration.join(", ")}.`,
+      });
+      return;
+    }
+    const inconnues = permissions.filter(
+      (p) => !(SERVER_PERMISSIONS as readonly string[]).includes(p),
+    );
+    if (inconnues.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: `Permission inconnue dans un preset : ${inconnues.join(", ")}.`,
+      });
+      return;
+    }
+    if (permissions.length === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Un preset doit accorder au moins une permission.",
+      });
+    }
+  })
+  .transform((permissions) => [...new Set(permissions)] as ServerPermission[]);
+
+/**
+ * Le jeu complet des presets délégables, tel que l'administration l'enregistre.
+ *
+ * Strict : une clé « owner » ou mal orthographiée est refusée, pas ignorée —
+ * l'ignorer laisserait croire qu'elle a été prise en compte.
+ */
+export const RolePresetsInput = z
+  .object({
+    viewer: RolePresetPermissions,
+    moderator: RolePresetPermissions,
+    developer: RolePresetPermissions,
+  })
+  .strict();
+
+/** Les presets en vigueur, et ce qui les distingue des valeurs du code. */
+export interface RolePresetsView {
+  presets: RolePresets;
+  defaults: RolePresets;
+  /** Presets qui s'écartent du code : l'écran les signale, « rétablir » les ramène. */
+  customized: DelegableRolePreset[];
+}
+
+/**
+ * Les presets en vigueur, à partir de ce que la table `settings` contient.
+ *
+ * **Repli preset par preset** sur la valeur du code : rien d'enregistré, une
+ * ligne abîmée, une permission retirée du catalogue depuis l'enregistrement —
+ * dans chaque cas, le preset concerné redevient celui du code, et les autres
+ * gardent ce que l'administration a choisi. Tout jeter pour un seul preset
+ * illisible effacerait sans prévenir un travail qui, lui, était valable.
+ *
+ * Le repli n'élargit personne : un preset ne sert qu'à pré-cocher le
+ * formulaire d'invitation, les droits accordés sont ceux qu'on envoie.
+ */
+export function resolveRolePresets(stored: unknown): RolePresetsView {
+  const defaults = defaultRolePresets();
+  const presets = defaultRolePresets();
+  const record =
+    stored && typeof stored === "object" && !Array.isArray(stored)
+      ? (stored as Record<string, unknown>)
+      : {};
+
+  for (const name of DELEGABLE_ROLE_PRESETS) {
+    const parsed = RolePresetPermissions.safeParse(record[name]);
+    if (parsed.success) presets[name] = parsed.data;
+  }
+
+  const customized = DELEGABLE_ROLE_PRESETS.filter((name) => {
+    const current = new Set(presets[name]);
+    return current.size !== defaults[name].length || defaults[name].some((p) => !current.has(p));
+  });
+
+  return { presets, defaults, customized };
+}
+
 export function hasPermission(
   granted: readonly ServerPermission[],
   required: ServerPermission,

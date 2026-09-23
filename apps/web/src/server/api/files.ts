@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { apiFetch, apiSend, apiSendFor } from "./client";
+import { ApiError, apiFetch, apiSend, apiSendFor } from "./client";
 
 /**
  * Opérations sur les fichiers d'un serveur.
@@ -90,14 +90,49 @@ export async function createDirectory(
   );
 }
 
+/**
+ * Renomme ou déplace une entrée. `to` est relatif à `root`, comme `from`.
+ *
+ * `conflict` est rendu à part : l'API répond 409 quand la destination existe
+ * déjà, et l'écran le dit dans la langue de la personne plutôt que de relayer
+ * la phrase de l'API — c'est le refus le plus courant, il mérite d'être clair.
+ */
 export async function renameFile(
   serverId: string,
   root: string,
   from: string,
   to: string,
+): Promise<{ error: string | null; conflict: boolean }> {
+  try {
+    await apiSend(`/api/v1/client/servers/${serverId}/files/rename`, { root, from, to });
+    revalidatePath(`/server/${serverId}/files`);
+    return { error: null, conflict: false };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Opération refusée.",
+      conflict: error instanceof ApiError && error.status === 409,
+    };
+  }
+}
+
+/**
+ * Change le mode d'une entrée (chmod), en octal sur trois chiffres.
+ *
+ * Une entrée à la fois : c'est ce que l'écran propose. La route accepte une
+ * liste, pour les intégrateurs qui en auraient l'usage.
+ */
+export async function chmodFile(
+  serverId: string,
+  root: string,
+  file: string,
+  mode: string,
 ): Promise<{ error: string | null }> {
   return act(
-    () => apiSend(`/api/v1/client/servers/${serverId}/files/rename`, { root, from, to }),
+    () =>
+      apiSend(`/api/v1/client/servers/${serverId}/files/chmod`, {
+        root,
+        files: [{ file, mode }],
+      }),
     `/server/${serverId}/files`,
   );
 }

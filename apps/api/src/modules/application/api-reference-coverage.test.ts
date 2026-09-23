@@ -145,6 +145,27 @@ describe("documentation de l'API", () => {
     expect(absentes).toEqual([]);
   });
 
+  /*
+   * Non-régression, dans l'autre sens : deux routes de l'API applicative
+   * existaient sans figurer au catalogue — le lien de connexion d'un client
+   * (`POST users/sso-link`), pourtant son chemin d'entrée ordinaire, et le
+   * redimensionnement (`PATCH servers/:id`). Absentes de la page API et
+   * d'`openapi.json`, un facturier ne pouvait pas les découvrir.
+   *
+   * L'API applicative est un contrat public : tout ce qu'elle sert doit y être.
+   * Les autres espaces ne sont pas soumis à la règle, l'interface y appelant
+   * des routes qui ne regardent pas les intégrateurs.
+   */
+  it("documente chaque route de l'API applicative", () => {
+    const documentes = new Set(documentees().map(({ route }) => normalise(route)));
+    const prefixe = PREFIXES.APPLICATION_ROUTES as string;
+    const nonDocumentees = [...routes]
+      .filter((route) => route.split(" ")[1]?.startsWith(`${prefixe}/`))
+      .filter((route) => !documentes.has(route));
+
+    expect(nonDocumentees).toEqual([]);
+  });
+
   it("ne documente que des routes existantes", () => {
     const absentes = documentees()
       .filter(({ route }) => !routes.has(normalise(route)))

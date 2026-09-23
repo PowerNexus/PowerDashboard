@@ -62,6 +62,7 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
 
   "files.write": { category: "files", label: "Fichier enregistré" },
   "files.rename": { category: "files", label: "Fichier renommé" },
+  "files.chmod": { category: "files", label: "Permissions de fichier modifiées" },
   "files.delete": { category: "files", label: "Fichier supprimé" },
   "files.create-directory": { category: "files", label: "Dossier créé" },
   "files.compress": { category: "files", label: "Archive créée" },
@@ -151,6 +152,10 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
    * depuis quelle adresse », et une trace qui commence le jour où on ouvre
    * l'écran ne répond à rien.
    */
+  // Toute ouverture de session, quel qu'en soit le chemin. Le pays y est noté
+  // quand un frontal de confiance l'a fourni : c'est ce qui permet de
+  // reconnaître un « nouveau pays » sans colonne dédiée.
+  "account.login": { category: "account", label: "Connexion" },
   "account.password": { category: "account", label: "Mot de passe modifié" },
   "account.2fa_enabled": { category: "account", label: "Double authentification activée" },
   "account.2fa_disabled": { category: "account", label: "Double authentification désactivée" },
@@ -249,7 +254,38 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Propriétaire d'un serveur changé",
   },
   "admin.smtp_tested": { category: "settings", label: "Envoi de courrier éprouvé" },
+  "admin.audit_exported": { category: "access", label: "Journal de la plateforme exporté" },
+  "admin.subuser_presets_saved": {
+    category: "access",
+    label: "Presets de sous-utilisateurs redéfinis",
+  },
+  "admin.subuser_presets_reset": {
+    category: "access",
+    label: "Presets de sous-utilisateurs rétablis",
+  },
+  "admin.egg_updated": { category: "settings", label: "Egg modifié" },
   "node.configuration_read": { category: "settings", label: "Configuration de node consultée" },
+  "node.settings_updated": { category: "settings", label: "Réglages d'un node modifiés" },
+  "node.binding_changed": {
+    category: "settings",
+    label: "Adresse ou ports d'un node changés (confirmés par le daemon)",
+  },
+  "node.binding_pending_restart": {
+    category: "settings",
+    label: "Adresse ou ports d'un node : configuration écrite, Wings à redémarrer",
+  },
+  "node.binding_refused": {
+    category: "settings",
+    label: "Adresse ou ports d'un node : daemon injoignable, rien changé",
+  },
+  "node.allocations_removed": { category: "network", label: "Ports retirés du stock d'un node" },
+  "admin.user_updated": { category: "account", label: "Compte modifié par l'administration" },
+  "admin.user_password_reset_sent": {
+    category: "access",
+    label: "Lien de réinitialisation envoyé par l'administration",
+  },
+  "admin.user_suspended": { category: "access", label: "Compte suspendu" },
+  "admin.user_unsuspended": { category: "access", label: "Compte réactivé" },
   "application.domain_certificate_reported": {
     category: "network",
     label: "Certificat de domaine : tentative rapportée",
