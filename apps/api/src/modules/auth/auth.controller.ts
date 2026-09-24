@@ -708,6 +708,14 @@ export class AuthController {
      */
     const revoked = await this.sessions.revokeOthers(user.id, request.sessionToken);
 
+    /*
+     * Les liens de réinitialisation en attente meurent avec l'ancien mot de
+     * passe, pour la même raison que les sessions : celui qui a demandé un
+     * lien « au cas où », ou qui l'a fait demander par un autre, garderait une
+     * heure durant de quoi reprendre le compte qu'on vient de lui fermer.
+     */
+    await this.tokens.revokePending(user.id, ["password_reset"]);
+
     await this.activity.record({
       event: "account.password",
       serverId: null,
