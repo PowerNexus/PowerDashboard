@@ -1,8 +1,10 @@
 import {
   ChmodRequest,
   consoleCommandTrace,
+  PATH_REFUSAL_MESSAGES,
   PowerSignal,
   RenameRequest,
+  refusePath,
   WINGS_RENAME_COLLISION,
 } from "@gamedashboard/contracts";
 import {
@@ -43,6 +45,22 @@ type ClientRequest = AuthenticatedRequest & { ip?: string };
 function principalOf(request: ClientRequest) {
   // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
   return { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) };
+}
+
+/**
+ * Refuse, avant tout relais, un chemin qui remonterait au-dessus du volume ou
+ * porterait un octet nul (`refusePath`). Les `paths` se lisent depuis `base`,
+ * comme le daemon lit les entrées d'un `root`.
+ *
+ * Défense en profondeur : le confinement reste le travail de Wings (§4.3).
+ * Mais le panel relayait tout, et la sûreté de chaque serveur tenait à une
+ * seule ligne de défense, dans un programme qu'il ne contrôle pas.
+ */
+function confine(base: string, ...paths: string[]): void {
+  const refus = [refusePath(base), ...paths.map((path) => refusePath(path, base))].find(
+    (raison) => raison !== null,
+  );
+  if (refus) throw new BadRequestException(PATH_REFUSAL_MESSAGES[refus]);
 }
 
 /**
@@ -220,11 +238,13 @@ export class ServerRuntimeController {
     @Param("id") id: string,
     @Query("directory") directory?: string,
   ) {
+    const dossier = directory ?? "/";
+    // Wings confine le chemin au volume du serveur, et c'est lui qui fait foi
+    // (§4.3). Le panel refuse seulement ce qui n'a rien à y faire — sortie du
+    // volume, octet nul —, en seconde ligne.
+    confine(dossier);
     await this.access.require(principalOf(request), id, "files.read");
-    // Le chemin part tel quel vers Wings, qui le confine au volume du serveur.
-    // Le valider ici en plus donnerait l'illusion que la protection est de
-    // notre côté, alors qu'elle est chez le daemon — et c'est tant mieux (§4.3).
-    return { data: await this.relay(() => this.wings.listDirectory(id, directory ?? "/")) };
+    return { data: await this.relay(() => this.wings.listDirectory(id, dossier)) };
   }
 
   @Get("files/contents")
@@ -234,6 +254,7 @@ export class ServerRuntimeController {
     @Query("file") file?: string,
   ) {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
+    confine(file);
     await this.access.require(principalOf(request), id, "files.read");
     return { data: { content: await this.relay(() => this.wings.readFile(id, file)) } };
   }
@@ -255,6 +276,7 @@ export class ServerRuntimeController {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
     const content = (body as { content?: unknown })?.content;
     if (typeof content !== "string") throw new BadRequestException("Contenu manquant.");
+    confine(file);
 
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
@@ -273,6 +295,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || typeof name !== "string" || name.trim() === "") {
       throw new BadRequestException("Dossier ou nom manquant.");
     }
+    confine(root, name);
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.createDirectory(id, root, name));
@@ -296,6 +319,7 @@ export class ServerRuntimeController {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? "Renommage incomplet.");
     }
     const { root, from, to } = parsed.data;
+    confine(root, from, to);
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     try {
@@ -334,6 +358,7 @@ export class ServerRuntimeController {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? "Permissions invalides.");
     }
     const { root, files } = parsed.data;
+    confine(root, ...files.map((entry) => entry.file));
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.chmodFiles(id, root, files));
@@ -354,6 +379,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || !Array.isArray(files) || files.length === 0) {
       throw new BadRequestException("Rien à supprimer.");
     }
+    confine(root, ...files.map(String));
     await this.access.require(principalOf(request), id, "files.delete");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.deleteFiles(id, root, files.map(String)));
@@ -379,6 +405,9 @@ export class ServerRuntimeController {
     @Query("file") file?: string,
   ) {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
+    // Le chemin est scellé dans le jeton que le daemon honorera : c'est le
+    // dernier moment où le panel peut le refuser.
+    confine(file);
     await this.access.require(principalOf(request), id, "files.read");
     // L'identité vient de la session, jamais de l'URL : le jeton remis au
     // daemon porte le compte au nom duquel le fichier est tiré.
@@ -443,9 +472,11 @@ export class ServerRuntimeController {
       throw new BadRequestException("Nom de fichier manquant.");
     }
     if (typeof payload.size !== "number") throw new BadRequestException("Taille manquante.");
+    const directory = typeof payload.directory === "string" ? payload.directory : "/";
+    confine(directory);
 
     const session = await this.uploads.open(id, request.user.id, {
-      directory: typeof payload.directory === "string" ? payload.directory : "/",
+      directory,
       fileName: payload.fileName,
       size: payload.size,
     });
@@ -546,6 +577,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || !Array.isArray(files) || files.length === 0) {
       throw new BadRequestException("Rien à compresser.");
     }
+    confine(root, ...files.map(String));
     await this.access.require(principalOf(request), id, "files.archive");
     await this.access.requireOperable(id);
     const entry = await this.relay(() => this.wings.compressFiles(id, root, files.map(String)));
@@ -572,6 +604,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || typeof file !== "string" || file.trim() === "") {
       throw new BadRequestException("Archive manquante.");
     }
+    confine(root, file);
     await this.access.require(principalOf(request), id, "files.archive");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.decompressFile(id, root, file));
