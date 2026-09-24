@@ -5,7 +5,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { ArrowRight, Fingerprint, KeyRound, Lock, Mail, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useActionState, useState } from "react";
+import { type ReactNode, useActionState, useState } from "react";
 import { CaptchaField } from "@/components/captcha-field";
 import { INITIAL_LOGIN_STATE, type LoginState } from "@/lib/login-state";
 import { login, passkeyLoginOptions, submitPasskey, submitSecondFactor } from "@/server/api/login";
@@ -24,12 +24,19 @@ export function LoginForm({
   resumed = null,
   captchaSiteKey = null,
   passwordResetByEmail = false,
+  alternative = null,
 }: {
   resumed?: LoginState | null;
   /** Clé de site Turnstile, ou `null` quand la plateforme n'exige rien. */
   captchaSiteKey?: string | null;
   /** Faux quand la plateforme n'a pas de SMTP : le lien ne mènerait à rien. */
   passwordResetByEmail?: boolean;
+  /**
+   * Une autre porte, montrée avec les identifiants — « Se connecter avec
+   * Google ». Jamais pendant le second facteur : le compte est alors nommé, et
+   * proposer d'en ouvrir un autre au milieu de la preuve prêterait à confusion.
+   */
+  alternative?: ReactNode;
 }) {
   const [state, formAction, pending] = useActionState(login, resumed ?? INITIAL_LOGIN_STATE);
 
@@ -38,13 +45,16 @@ export function LoginForm({
   return state.challenge ? (
     <SecondFactorStep state={state} />
   ) : (
-    <CredentialsStep
-      state={state}
-      formAction={formAction}
-      pending={pending}
-      captchaSiteKey={captchaSiteKey}
-      passwordResetByEmail={passwordResetByEmail}
-    />
+    <>
+      {alternative}
+      <CredentialsStep
+        state={state}
+        formAction={formAction}
+        pending={pending}
+        captchaSiteKey={captchaSiteKey}
+        passwordResetByEmail={passwordResetByEmail}
+      />
+    </>
   );
 }
 

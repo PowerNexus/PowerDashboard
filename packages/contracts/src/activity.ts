@@ -164,6 +164,8 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   "account.passkey_removed": { category: "account", label: "Clé d'accès supprimée" },
   "account.sso_login": { category: "account", label: "Connexion par authentification unique" },
   "account.sso_created": { category: "account", label: "Compte créé par authentification unique" },
+  "account.google_login": { category: "account", label: "Connexion avec Google" },
+  "account.google_created": { category: "account", label: "Compte créé avec Google" },
   "account.registered": { category: "account", label: "Compte créé" },
   "account.password_reset_requested": {
     category: "account",

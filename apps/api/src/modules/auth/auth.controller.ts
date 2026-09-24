@@ -51,7 +51,13 @@ import {
 import { SessionIssuerService } from "./session-issuer.service";
 import { trustedCountry, trustedProxiesSetting } from "./sign-in-origin";
 import { SshKeyRepository, type SshKeySummary } from "./ssh-key.repository";
-import { SsoDisabledError, SsoExchangeError, SsoService } from "./sso.service";
+import {
+  SsoDisabledError,
+  SsoExchangeError,
+  SsoNoAccountError,
+  type SsoProvider,
+  SsoService,
+} from "./sso.service";
 import { TurnstileService } from "./turnstile.service";
 import { TwoFactorRepository, type TwoFactorStatus } from "./two-factor.repository";
 import { UserRepository } from "./user.repository";
@@ -1292,7 +1298,59 @@ export class AuthController {
    * mise à l'échelle démentirait.
    */
   @Post("sso/start")
-  async ssoStart(@Body() body: unknown, @Res() reply: Reply): Promise<void> {
+  ssoStart(@Body() body: unknown, @Res() reply: Reply): Promise<void> {
+    return this.startCeremony("oidc", body, reply);
+  }
+
+  /**
+   * Termine la cérémonie : échange le code, reconnaît le compte, ouvre la session.
+   *
+   * L'état n'est **pas** vérifié ici mais par la couche web, seule à détenir
+   * le cookie qui le contient. L'API ne saurait pas le faire : elle ne voit
+   * pas le navigateur.
+   */
+  @Post("sso/callback")
+  ssoCallback(
+    @Body() body: unknown,
+    @Req() request: ClientRequest,
+    @Res() reply: Reply,
+  ): Promise<void> {
+    return this.finishCeremony("oidc", body, request, reply);
+  }
+
+  /**
+   * Le bouton « Se connecter avec Google » est-il proposé ? (PLAN §12.4,
+   * décision 4.)
+   *
+   * Une porte de plus, à côté du mot de passe : jamais quand l'annuaire est
+   * obligatoire, qui est alors le seul chemin.
+   */
+  @Get("google")
+  async googleStatus(): Promise<{ data: { enabled: boolean } }> {
+    return { data: { enabled: await this.sso.googleAvailable() } };
+  }
+
+  /** La même cérémonie que `sso/start`, chez Google. */
+  @Post("google/start")
+  googleStart(@Body() body: unknown, @Res() reply: Reply): Promise<void> {
+    return this.startCeremony("google", body, reply);
+  }
+
+  /**
+   * La même cérémonie que `sso/callback`, chez Google, à une différence près :
+   * elle ne crée un compte que si les inscriptions sont ouvertes. Google
+   * atteste une identité ; il n'ouvre pas le panel à qui n'y a pas de compte.
+   */
+  @Post("google/callback")
+  googleCallback(
+    @Body() body: unknown,
+    @Req() request: ClientRequest,
+    @Res() reply: Reply,
+  ): Promise<void> {
+    return this.finishCeremony("google", body, request, reply);
+  }
+
+  private async startCeremony(provider: SsoProvider, body: unknown, reply: Reply): Promise<void> {
     const parsed = SsoStartInput.safeParse(body);
     if (!parsed.success) {
       reply.status(422).send({ message: "Adresse de retour attendue." });
@@ -1305,7 +1363,7 @@ export class AuthController {
     }
 
     try {
-      reply.status(200).send({ data: await this.sso.start(parsed.data.redirectUri) });
+      reply.status(200).send({ data: await this.sso.start(parsed.data.redirectUri, provider) });
     } catch (error) {
       reply.status(error instanceof SsoDisabledError ? 409 : 502).send({
         message: error instanceof Error ? error.message : "Cérémonie impossible.",
@@ -1313,18 +1371,11 @@ export class AuthController {
     }
   }
 
-  /**
-   * Termine la cérémonie : échange le code, reconnaît le compte, ouvre la session.
-   *
-   * L'état n'est **pas** vérifié ici mais par la couche web, seule à détenir
-   * le cookie qui le contient. L'API ne saurait pas le faire : elle ne voit
-   * pas le navigateur.
-   */
-  @Post("sso/callback")
-  async ssoCallback(
-    @Body() body: unknown,
-    @Req() request: ClientRequest,
-    @Res() reply: Reply,
+  private async finishCeremony(
+    provider: SsoProvider,
+    body: unknown,
+    request: ClientRequest,
+    reply: Reply,
   ): Promise<void> {
     const parsed = SsoCallbackInput.safeParse(body);
     if (!parsed.success) {
@@ -1343,6 +1394,7 @@ export class AuthController {
         parsed.data.code,
         parsed.data.codeVerifier,
         parsed.data.redirectUri,
+        provider,
       );
     } catch (error) {
       reply.status(error instanceof SsoDisabledError ? 409 : 502).send({
@@ -1353,7 +1405,12 @@ export class AuthController {
 
     let resolved: { id: string; created: boolean };
     try {
-      resolved = await this.sso.resolveUser(profile);
+      resolved = await this.sso.resolveUser(profile, {
+        provider,
+        // L'annuaire crée ses comptes : il est la source de vérité de
+        // l'équipe. Le bouton Google suit la règle de la page d'inscription.
+        mayCreate: provider === "oidc" || (await this.isRegistrationOpen()),
+      });
     } catch (error) {
       /**
        * Seuls les refus que le service a rédigés sont répétés au navigateur.
@@ -1362,25 +1419,34 @@ export class AuthController {
        * générique : un message d'erreur SQL affiché sur la page de connexion
        * décrit les colonnes de la table `users` à qui passait par là.
        */
-      if (!(error instanceof SsoExchangeError)) {
+      const redige = error instanceof SsoExchangeError || error instanceof SsoNoAccountError;
+      if (!redige) {
         this.logger.error(
           `Rapprochement SSO impossible : ${error instanceof Error ? error.message : "erreur inconnue"}`,
         );
       }
 
       // Un 409 plutôt qu'un 502 : rien n'est en panne, c'est la situation qui
-      // ne permet pas de conclure.
+      // ne permet pas de conclure. `noAccount` laisse la page de connexion
+      // dire ce qu'il faut faire, plutôt qu'un refus sans raison.
       reply.status(409).send({
-        message:
-          error instanceof SsoExchangeError
-            ? error.message
-            : "Ce compte n'a pas pu être ouvert. Contactez l'administrateur du panel.",
+        message: redige
+          ? error.message
+          : "Ce compte n'a pas pu être ouvert. Contactez l'administrateur du panel.",
+        ...(error instanceof SsoNoAccountError ? { noAccount: true } : {}),
       });
       return;
     }
 
     await this.activity.record({
-      event: resolved.created ? "account.sso_created" : "account.sso_login",
+      event:
+        provider === "google"
+          ? resolved.created
+            ? "account.google_created"
+            : "account.google_login"
+          : resolved.created
+            ? "account.sso_created"
+            : "account.sso_login",
       serverId: null,
       actorId: resolved.id,
       actorType: "user",
@@ -1391,6 +1457,9 @@ export class AuthController {
       // il n'a pas à conserver ce que le fournisseur a répondu.
       properties: { subject: profile.subject },
     });
+
+    // Le moyen d'entrée tel que la liste des sessions le nomme.
+    const method = provider === "google" ? "google" : "sso";
 
     /**
      * Le second facteur du panel s'applique aussi aux comptes SSO.
@@ -1403,14 +1472,14 @@ export class AuthController {
     if (status.enabled) {
       reply.status(200).send({
         twoFactorRequired: true,
-        challenge: issueChallenge("login", resolved.id, { method: "sso" }),
+        challenge: issueChallenge("login", resolved.id, { method }),
         methods: { totp: status.totp, passkeys: status.passkeys > 0 },
         remainingRecoveryCodes: status.remainingRecoveryCodes,
       });
       return;
     }
 
-    await this.issueSession(resolved.id, request, reply, "sso");
+    await this.issueSession(resolved.id, request, reply, method);
   }
 
   /* --- Clés SSH ------------------------------------------------------------ */
