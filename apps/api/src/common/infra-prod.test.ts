@@ -175,6 +175,60 @@ describe("jeton du lien de facturation", () => {
 });
 
 /**
+ * La production locale limite comme le modèle (NC-49, ASVS 2.2.1).
+ *
+ * `infra/local/gamedashboard.local.conf` sert la seule installation réelle
+ * (`gamedashboard.local`), et n'avait **aucune** limitation : ni sur les
+ * écrans de connexion, ni sur l'API applicative, ni sur les routes du daemon.
+ * Les limites posées dans `panel.conf` — le modèle — ne protégeaient donc que
+ * les installations à venir. Chaque bloc limité du modèle doit l'être à
+ * l'identique ici, avec les mêmes zones.
+ *
+ * Le HSTS, lui, reste volontairement absent de la production locale : il
+ * enfermerait le navigateur sur un certificat de développement (commentaire
+ * du fichier).
+ */
+describe("limites de la production locale", () => {
+  const local = readFileSync(join(RACINE, "infra", "local", "gamedashboard.local.conf"), "utf8")
+    .split("\n")
+    .map((ligne) => ligne.replace(/#.*$/, ""))
+    .join("\n");
+
+  /** Les blocs `location` qui portent une limite, et la ligne qui la pose. */
+  function limites(conf: string): Map<string, string> {
+    const blocs = new Map<string, string>();
+    for (const m of conf.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)) {
+      const limite = /limit_req\s+zone=[^;]+;/.exec(m[2] ?? "")?.[0];
+      if (limite) blocs.set((m[1] ?? "").trim(), limite.replace(/\s+/g, " "));
+    }
+    return blocs;
+  }
+
+  const zones = (conf: string) =>
+    [...conf.matchAll(/^limit_req_zone .+;$/gm)].map((m) => m[0].replace(/\s+/g, " ")).sort();
+
+  it("déclare les mêmes zones que le modèle", () => {
+    expect(zones(directives).length).toBeGreaterThan(0);
+    expect(zones(local)).toEqual(zones(directives));
+  });
+
+  it("limite chaque bloc que le modèle limite, à l'identique", () => {
+    const modele = limites(directives);
+    expect(modele.size).toBeGreaterThan(0);
+    expect(Object.fromEntries(limites(local))).toEqual(Object.fromEntries(modele));
+  });
+
+  it("répond 429 aux navigateurs, 503 au daemon, et tait sa version", () => {
+    const https = local.slice(local.indexOf("listen 443"));
+    expect(https).toMatch(/^\s*limit_req_status 429;/m);
+    expect(/location \/api\/remote\/ \{([^}]*)\}/.exec(local)?.[1]).toMatch(
+      /^\s*limit_req_status 503;/m,
+    );
+    expect(local.match(/^\s*server_tokens off;/gm)).toHaveLength(2);
+  });
+});
+
+/**
  * Les routes du daemon sont limitées, sans gêner Wings (NC-49).
  *
  * `/api/remote/` était le seul préfixe exposé sans `limit_req` : un jeton
