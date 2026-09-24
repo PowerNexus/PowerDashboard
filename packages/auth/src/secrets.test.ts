@@ -99,6 +99,62 @@ describe("intégrité", () => {
   });
 });
 
+/*
+ * Non-régression (audit ASVS, NC-18) : aucun appelant ne passait de contexte,
+ * et une valeur `v3:` relue avec un contexte exigeait des données
+ * authentifiées qu'elle n'avait jamais reçues. Lier les colonnes rendait donc
+ * illisible tout ce qui était déjà en base. La valeur liée a sa propre forme,
+ * `v4:`, et `v3:` se relit comme elle a été écrite : sans contexte.
+ */
+describe("liaison d'un secret à sa ligne", () => {
+  const LIGNE_A = "user_credentials_totp.secret_enc:a";
+  const LIGNE_B = "user_credentials_totp.secret_enc:b";
+
+  it("écrit une valeur liée sous un préfixe distinct", () => {
+    expect(encryptSecret("secret", env, LIGNE_A).startsWith("v4:")).toBe(true);
+    expect(encryptSecret("secret", env).startsWith("v3:")).toBe(true);
+  });
+
+  it("refuse une permutation de deux lignes, ou d'une colonne à l'autre", () => {
+    // Le secret TOTP d'un compte recopié sur un autre : son titulaire
+    // passerait le second facteur de la victime avec sa propre application.
+    const a = encryptSecret("secret-de-a", env, LIGNE_A);
+    const b = encryptSecret("secret-de-b", env, LIGNE_B);
+    expect(decryptSecret(a, env, LIGNE_A)).toBe("secret-de-a");
+    expect(() => decryptSecret(b, env, LIGNE_A)).toThrow();
+    expect(() => decryptSecret(a, env, LIGNE_B)).toThrow();
+    expect(() => decryptSecret(a, env, "databases.password_enc:a")).toThrow();
+  });
+
+  it("refuse une valeur liée relue sans contexte, en le disant", () => {
+    const a = encryptSecret("secret-de-a", env, LIGNE_A);
+    expect(() => decryptSecret(a, env)).toThrow(/contexte/);
+  });
+
+  it("refuse une valeur liée ramenée à une forme sans contexte", () => {
+    // Retirer ou changer le préfixe ne dispense pas du contexte : les données
+    // authentifiées font partie du tag, que la forme soit `v3:` ou nue.
+    const [, iv, tag, data] = encryptSecret("secret-de-a", env, LIGNE_A).split(":");
+    expect(() => decryptSecret(`v3:${iv}:${tag}:${data}`, env, LIGNE_A)).toThrow();
+    expect(() => decryptSecret(`${iv}:${tag}:${data}`, env, LIGNE_A)).toThrow();
+  });
+
+  it("relit les valeurs écrites sans contexte, même quand la ligne le fournit", () => {
+    const v3 = encryptSecret("ancien", env);
+    expect(decryptSecret(v3, env, LIGNE_A)).toBe("ancien");
+    expect(decryptSecret(v3.slice(3), env, LIGNE_A)).toBe("ancien");
+  });
+
+  it("refuse un contexte vide, qui ne lierait à rien", () => {
+    expect(() => encryptSecret("secret", env, "")).toThrow(/Contexte de chiffrement vide/);
+  });
+
+  it("reconnaît la forme liée comme chiffrée", () => {
+    expect(looksEncrypted(encryptSecret("x", env, LIGNE_A))).toBe(true);
+    expect(looksEncrypted("v5:a:b:c")).toBe(false);
+  });
+});
+
 describe("clé absente", () => {
   it("échoue bruyamment plutôt que de stocker en clair", () => {
     // Le pire scénario serait un repli silencieux qui écrirait le secret tel

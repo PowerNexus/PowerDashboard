@@ -1,4 +1,3 @@
-import { decryptSecret } from "@gamedashboard/auth";
 import {
   daysUntil,
   HOSTBILL_SILENT,
@@ -10,6 +9,7 @@ import { type Database, settings, users } from "@gamedashboard/db";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { eq, inArray } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Services et échéances d'un client, lus chez HostBill.
@@ -255,7 +255,7 @@ export class HostbillService {
 
     let apiKey: string;
     try {
-      apiKey = decryptSecret(encrypted);
+      apiKey = decryptRowSecret("settings.value", "billing.apiKey", encrypted);
     } catch {
       // Clé maître changée, ligne abîmée : se taire vaut mieux qu'appeler
       // HostBill avec un secret illisible, ce qui compterait comme un échec

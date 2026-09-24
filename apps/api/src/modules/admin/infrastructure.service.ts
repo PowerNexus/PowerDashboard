@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { encryptSecret } from "@gamedashboard/auth";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   type CapacityRefusal,
   capacityRefusals,
@@ -23,6 +22,7 @@ import {
 } from "@nestjs/common";
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { encryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Mise en place de l'infrastructure : classements, localisations, nodes.
@@ -315,10 +315,13 @@ export class InfrastructureService {
      */
     const tokenId = randomBytes(8).toString("hex");
     const token = randomBytes(32).toString("base64url");
+    // Identifiant tiré ici : le jeton est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
 
     const [created] = await this.db
       .insert(nodes)
       .values({
+        id,
         name,
         locationId: input.locationId,
         category: input.category,
@@ -332,7 +335,7 @@ export class InfrastructureService {
         cpuCores: input.cpuCores,
         public: input.isPublic,
         daemonTokenId: tokenId,
-        daemonTokenEnc: encryptSecret(token),
+        daemonTokenEnc: encryptRowSecret("nodes.daemon_token_enc", id, token),
         daemonTokenRotatedAt: new Date().toISOString(),
       })
       .returning({ id: nodes.id });

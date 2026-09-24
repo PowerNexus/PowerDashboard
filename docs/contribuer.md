@@ -91,10 +91,16 @@ diverger.
   Node 24 tue alors le processus entier.
 - **Hacher ou chiffrer** : ce qu'on ne relit jamais (mots de passe, sessions,
   clés d'API) se hache. Ce qu'il faut présenter à un tiers (jeton de node, mot
-  de passe MySQL, secret de webhook) se chiffre avec `encryptSecret`. Une
-  nouvelle colonne chiffrée **s'ajoute aussi à `TARGETS`** dans
-  `apps/api/scripts/rekey-secrets.mts`, sans quoi une rotation de la clé maître
-  la perd ([runbook](./runbooks/cle-maitre-secrets.md)).
+  de passe MySQL, secret de webhook) se chiffre avec `encryptRowSecret`
+  (`apps/api/src/common/row-secrets.ts`), qui lie la valeur à sa ligne : un
+  chiffré recopié sur une autre ligne ne se relit plus. L'identifiant de la
+  ligne doit donc exister avant l'écriture (`randomUUID()` passé à
+  `values({ id, … })`). Une nouvelle colonne chiffrée **s'ajoute à
+  `SECRET_COLUMNS`** (même fichier) **et à `REKEY_TARGETS`**
+  (`apps/api/src/common/rekey.ts`), sans quoi une rotation de la clé maître la
+  perd
+  ([runbook](./runbooks/cle-maitre-secrets.md)) ; `rekey.test.ts` compare les
+  deux listes.
 
 ### Ajouter une route publique
 

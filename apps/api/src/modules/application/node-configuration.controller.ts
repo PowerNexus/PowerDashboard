@@ -1,4 +1,3 @@
-import { decryptSecret } from "@gamedashboard/auth";
 import {
   buildWingsNodeConfiguration,
   WINGS_CONFIGURE_PREFIX,
@@ -17,6 +16,7 @@ import {
 } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import {
   ApplicationGuard,
@@ -124,7 +124,7 @@ export class NodeConfigurationController {
       tokenId: node.tokenId,
       // Chiffré au repos, jamais condensé : le panel doit pouvoir le relire
       // pour parler au daemon, et c'est ici qu'il le rend au daemon lui-même.
-      token: decryptSecret(node.tokenEnc),
+      token: decryptRowSecret("nodes.daemon_token_enc", node.id, node.tokenEnc),
       /*
        * L'origine vient de la configuration du serveur, jamais de la requête.
        *

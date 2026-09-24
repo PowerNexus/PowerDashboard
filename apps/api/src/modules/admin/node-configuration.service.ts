@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { connect } from "node:net";
-import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
 import {
   bindingChanges,
   bindingProblem,
@@ -13,6 +12,7 @@ import { type Database, mounts, nodes } from "@gamedashboard/db";
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret, encryptRowSecret } from "../../common/row-secrets";
 import { PlatformSettingsService } from "./platform-settings.service";
 
 /**
@@ -99,7 +99,7 @@ export class NodeConfigurationService {
    */
   async fileFor(nodeId: string): Promise<NodeConfigurationFile> {
     const node = await this.node(nodeId);
-    const configuration = await this.build(node, node.tokenId, decryptSecret(node.tokenEnc));
+    const configuration = await this.build(node, node.tokenId, tokenOf(node));
 
     return { yaml: await this.toFile(configuration), tokenId: node.tokenId };
   }
@@ -132,7 +132,7 @@ export class NodeConfigurationService {
 
     // La poussée est authentifiée par l'**ancien** jeton : c'est celui que le
     // daemon reconnaît encore au moment où on lui parle.
-    const pushed = await this.push(baseUrl, decryptSecret(node.tokenEnc), configuration);
+    const pushed = await this.push(baseUrl, tokenOf(node), configuration);
 
     /*
      * La vérification tranche, pas la réponse.
@@ -157,7 +157,7 @@ export class NodeConfigurationService {
       .update(nodes)
       .set({
         daemonTokenId: tokenId,
-        daemonTokenEnc: encryptSecret(token),
+        daemonTokenEnc: encryptRowSecret("nodes.daemon_token_enc", nodeId, token),
         daemonTokenRotatedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -215,7 +215,7 @@ export class NodeConfigurationService {
     const changed = bindingChanges(node, target);
     if (changed.length === 0) return { status: "unchanged", changed, failure: null, file: null };
 
-    const token = decryptSecret(node.tokenEnc);
+    const token = tokenOf(node);
     const configuration = await this.build({ ...node, ...target }, node.tokenId, token);
     const pushed = await this.push(baseUrlOf(node), token, configuration, REBIND_STEP_MS);
 
@@ -386,6 +386,11 @@ export class NodeConfigurationService {
     if (!row.fqdn) throw new BadRequestException("Ce node n'a pas d'adresse.");
     return row;
   }
+}
+
+/** Jeton du node en clair, relu sous le contexte de sa ligne. */
+function tokenOf(node: { id: string; tokenEnc: string }): string {
+  return decryptRowSecret("nodes.daemon_token_enc", node.id, node.tokenEnc);
 }
 
 /** Adresse de l'API du daemon pour une liaison donnée. */

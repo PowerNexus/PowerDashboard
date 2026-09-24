@@ -1,5 +1,4 @@
 import { createHmac } from "node:crypto";
-import { decryptSecret } from "@gamedashboard/auth";
 import {
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
@@ -20,6 +19,7 @@ import {
 } from "@nestjs/common";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 import {
   applicationQueue,
   clientQueue,
@@ -116,7 +116,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
      * intermédiaire qui la capte pourrait la renvoyer un an plus tard et faire
      * rouvrir un service résilié.
      */
-    const secret = decryptSecret(due.secretEnc);
+    const secret = decryptRowSecret(queue.secretColumn, due.webhookId, due.secretEnc);
     const signature = createHmac("sha256", secret)
       .update(webhookSignaturePayload(timestamp, body))
       .digest("hex");

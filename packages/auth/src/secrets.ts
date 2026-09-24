@@ -15,8 +15,16 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
  */
 
 const ALGORITHM = "aes-256-gcm";
-/** Préfixe des valeurs produites aujourd'hui. Voir `decryptSecret` pour l'ancienne forme. */
+/** Préfixe d'une valeur chiffrée sans contexte. Voir `decryptSecret` pour la forme antérieure. */
 const FORMAT_VERSION = "v3";
+/**
+ * Préfixe d'une valeur **liée à sa place** : chiffrée avec un contexte
+ * (données authentifiées additionnelles de GCM), qu'il faut redonner pour la
+ * relire. Un préfixe à part, et non `v3:` avec ou sans contexte selon les cas :
+ * la forme dit d'elle-même si le contexte est exigé, et les valeurs écrites
+ * avant la liaison restent lisibles sans rien deviner (voir `decryptSecret`).
+ */
+const BOUND_FORMAT_VERSION = "v4";
 /** 96 bits : taille recommandée pour GCM, et la seule où sa preuve tient. */
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
@@ -118,7 +126,8 @@ export function assertEncryptionKey(env: NodeJS.ProcessEnv = process.env): void 
 }
 
 /**
- * Chiffre une valeur. Le résultat est `iv:tag:chiffré`, en base64url.
+ * Chiffre une valeur. Le résultat est `v3:iv:tag:chiffré` sans contexte,
+ * `v4:iv:tag:chiffré` avec, en base64url.
  *
  * Le vecteur d'initialisation est tiré au hasard à chaque appel : chiffrer deux
  * fois le même jeton produit deux valeurs différentes, sans quoi une simple
@@ -128,14 +137,20 @@ export function encryptSecret(
   plaintext: string,
   env?: NodeJS.ProcessEnv,
   /**
-   * Contexte lié au chiffré (données authentifiées additionnelles), par
-   * exemple `nodes.daemon_token_enc:<id>`. GCM authentifie le contenu, pas
-   * l'endroit où il est rangé : sans contexte, deux chiffrés valides peuvent
-   * être échangés de colonne ou de ligne par qui écrit en base. Avec, le
-   * déchiffrement exige le même contexte.
+   * Contexte lié au chiffré (données authentifiées additionnelles), de la
+   * forme `<table>.<colonne>:<id>` pour un secret rangé en base. GCM
+   * authentifie le contenu, pas l'endroit où il est rangé : sans contexte,
+   * deux chiffrés valides peuvent être échangés de colonne ou de ligne par
+   * qui écrit en base — le secret TOTP d'un compte recopié sur un autre, le
+   * jeton d'un node sur un autre. Avec, le déchiffrement exige le même
+   * contexte. Chaque colonne chiffrée en passe un
+   * (`apps/api/src/common/row-secrets.ts`).
    */
   context?: string,
 ): string {
+  // Un contexte vide ne lierait à rien, tout en produisant la forme `v4:` qui
+  // l'annonce : une erreur d'appelant, pas une valeur à écrire.
+  if (context === "") throw new Error("Contexte de chiffrement vide.");
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, derivedKey(env), iv);
   if (context !== undefined) cipher.setAAD(Buffer.from(context, "utf8"));
@@ -144,7 +159,8 @@ export function encryptSecret(
   const parts = [iv, tag, encrypted].map((part) => part.toString("base64url"));
   // Le préfixe de version dit avec quel format — et demain, quelle clé — la
   // valeur a été produite, plutôt que de l'apprendre par un échec de GCM.
-  return `${FORMAT_VERSION}:${parts.join(":")}`;
+  const version = context === undefined ? FORMAT_VERSION : BOUND_FORMAT_VERSION;
+  return `${version}:${parts.join(":")}`;
 }
 
 /**
@@ -159,16 +175,26 @@ export function encryptSecret(
 export function decryptSecret(payload: string, env?: NodeJS.ProcessEnv, context?: string): string {
   const split = payload.split(":");
   /*
-   * Deux formes lisibles : `v3:iv:tag:données` (versionnée, avec contexte
-   * éventuel) et `iv:tag:données` (antérieure, sans contexte). L'ancienne
-   * reste acceptée telle quelle, même quand un contexte est demandé : les
-   * valeurs déjà en base n'ont pas été liées, et exiger le contexte les
-   * rendrait illisibles d'un coup. Elles le seront à leur prochaine écriture.
+   * Trois formes lisibles :
+   * - `v4:iv:tag:données`, liée à sa place : le contexte est exigé ;
+   * - `v3:iv:tag:données` et `iv:tag:données` (antérieure au préfixe), sans
+   *   contexte. Elles se relisent sans données authentifiées, **même quand
+   *   l'appelant fournit un contexte** : elles ont été écrites avant la
+   *   liaison, et l'exiger les rendrait illisibles d'un coup. Chaque écriture
+   *   les remplace par la forme liée, et `scripts/rekey-secrets.mts` lie d'un
+   *   coup celles qui restent (runbook de la clé maître).
+   *
+   * Ramener une valeur `v4:` à l'une de ces formes ne dispense de rien : ses
+   * données authentifiées sont dans le tag, qui ne se vérifie plus sans elles.
    */
-  const versioned = split.length === 4 && split[0] === FORMAT_VERSION;
+  const bound = split.length === 4 && split[0] === BOUND_FORMAT_VERSION;
+  const versioned = bound || (split.length === 4 && split[0] === FORMAT_VERSION);
   const parts = versioned ? split.slice(1) : split;
   if (parts.length !== 3) {
     throw new Error("Secret chiffré illisible : trois parties attendues.");
+  }
+  if (bound && context === undefined) {
+    throw new Error("Secret chiffré lié à sa place : il ne se relit qu'avec son contexte.");
   }
   const [rawIv, rawTag, rawData] = parts as [string, string, string];
 
@@ -177,7 +203,7 @@ export function decryptSecret(payload: string, env?: NodeJS.ProcessEnv, context?
   const decipher = createDecipheriv(ALGORITHM, derivedKey(env), Buffer.from(rawIv, "base64url"), {
     authTagLength: TAG_BYTES,
   });
-  if (versioned && context !== undefined) decipher.setAAD(Buffer.from(context, "utf8"));
+  if (bound) decipher.setAAD(Buffer.from(context as string, "utf8"));
   const tag = Buffer.from(rawTag, "base64url");
   if (tag.length !== TAG_BYTES) {
     throw new Error("Secret chiffré illisible : étiquette d'authentification invalide.");
@@ -190,9 +216,9 @@ export function decryptSecret(payload: string, env?: NodeJS.ProcessEnv, context?
   ]).toString("utf8");
 }
 
-/** Vrai si la valeur a la forme produite par `encryptSecret`, ancienne ou versionnée. */
+/** Vrai si la valeur a la forme produite par `encryptSecret`, ancienne, versionnée ou liée. */
 export function looksEncrypted(value: string): boolean {
   const parts = value.split(":");
-  if (parts.length === 4) return parts[0] === FORMAT_VERSION;
+  if (parts.length === 4) return parts[0] === FORMAT_VERSION || parts[0] === BOUND_FORMAT_VERSION;
   return parts.length === 3;
 }

@@ -1,11 +1,11 @@
 import http from "node:http";
 import https from "node:https";
 import type { Readable } from "node:stream";
-import { decryptSecret } from "@gamedashboard/auth";
 import { type Database, nodes, servers } from "@gamedashboard/db";
 import { Inject, Injectable, InternalServerErrorException } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Client HTTP vers Wings (§7.4 du plan).
@@ -119,6 +119,7 @@ export class WingsClientService {
   private async endpointFor(serverId: string): Promise<NodeEndpoint> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -134,7 +135,7 @@ export class WingsClientService {
 
     return {
       baseUrl: `${row.scheme}://${row.fqdn}:${row.port}`,
-      token: decryptSecret(row.token),
+      token: decryptRowSecret("nodes.daemon_token_enc", row.nodeId, row.token),
       nodeName: row.nodeName,
     };
   }
@@ -150,6 +151,7 @@ export class WingsClientService {
   private async endpointForNode(nodeId: string): Promise<NodeEndpoint> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -164,7 +166,7 @@ export class WingsClientService {
 
     return {
       baseUrl: `${row.scheme}://${row.fqdn}:${row.port}`,
-      token: decryptSecret(row.token),
+      token: decryptRowSecret("nodes.daemon_token_enc", row.nodeId, row.token),
       nodeName: row.nodeName,
     };
   }

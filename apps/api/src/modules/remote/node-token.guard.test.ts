@@ -1,6 +1,7 @@
-import { encryptSecret, generateToken } from "@gamedashboard/auth";
+import { generateToken } from "@gamedashboard/auth";
 import type { ExecutionContext } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
+import { encryptRowSecret } from "../../common/row-secrets";
 import type { Denial, DenialLogService } from "../activity/denial-log.service";
 import type { NodeIdentity, NodeRepository } from "./node.repository";
 import { NodeTokenGuard } from "./node-token.guard";
@@ -12,11 +13,12 @@ process.env.APP_SECRET_KEY = ENV.APP_SECRET_KEY;
 
 const SECRET = generateToken();
 
+const NODE_ID = "11111111-1111-1111-1111-111111111111";
 const NODE: NodeIdentity = {
-  id: "11111111-1111-1111-1111-111111111111",
+  id: NODE_ID,
   name: "RYZEN-09",
   tokenId: "node-abc",
-  tokenSecret: encryptSecret(SECRET),
+  tokenSecret: encryptRowSecret("nodes.daemon_token_enc", NODE_ID, SECRET),
   maintenanceMode: false,
 };
 
@@ -161,7 +163,10 @@ describe("NodeTokenGuard", () => {
     // tronquerait ce secret et ferait paraître le node injoignable.
     const secret = "une.cle.avec.des.points";
     const repo = repository({
-      findByTokenId: vi.fn(async () => ({ ...NODE, tokenSecret: encryptSecret(secret) })),
+      findByTokenId: vi.fn(async () => ({
+        ...NODE,
+        tokenSecret: encryptRowSecret("nodes.daemon_token_enc", NODE_ID, secret),
+      })),
     } as Partial<NodeRepository>);
     const { context } = contextWith(`Bearer ${NODE.tokenId}.${secret}`);
     expect(await new NodeTokenGuard(repo, silence).canActivate(context)).toBe(true);
@@ -225,5 +230,22 @@ describe("NodeTokenGuard", () => {
     const autre = generateToken();
     const { context } = contextWith(`Bearer ${NODE.tokenId}.${autre}`);
     expect(await new NodeTokenGuard(repository(), silence).canActivate(context)).toBe(false);
+  });
+
+  it("refuse le chiffré d'un autre node recopié sur sa ligne", async () => {
+    // NC-18 : qui écrit en base recopiait le chiffré du jeton d'un node qu'il
+    // tient sur la ligne d'un autre, et s'authentifiait sous l'identité de
+    // celui-ci avec le secret qu'il connaît. Lié au node d'origine, le chiffré
+    // ne se relit plus ailleurs.
+    const recopie = encryptRowSecret(
+      "nodes.daemon_token_enc",
+      "22222222-2222-2222-2222-222222222222",
+      SECRET,
+    );
+    const repo = repository({
+      findByTokenId: vi.fn(async () => ({ ...NODE, tokenSecret: recopie })),
+    } as Partial<NodeRepository>);
+    const { context } = contextWith(`Bearer ${NODE.tokenId}.${SECRET}`);
+    expect(await new NodeTokenGuard(repo, silence).canActivate(context)).toBe(false);
   });
 });

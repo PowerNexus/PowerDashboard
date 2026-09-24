@@ -1,3 +1,4 @@
+import { encryptSecret } from "@gamedashboard/auth";
 import { describe, expect, it } from "vitest";
 import { CHALLENGE_TTL_MS, issueChallenge, readChallenge } from "./login-challenge";
 
@@ -42,6 +43,15 @@ describe("défis scellés", () => {
       jti: login.jti,
       expiresAt: login.expiresAt,
     });
+  });
+
+  it("est lié à son usage : un secret chiffré pour une colonne n'en tient pas lieu", () => {
+    expect(issueChallenge("login", USER, { now: NOW }).startsWith("v4:")).toBe(true);
+    // Même porteur d'un contenu valide, un chiffré lié à une ligne de la base
+    // ne se relit pas comme défi.
+    const contenu = JSON.stringify({ purpose: "login", userId: USER, expiresAt: NOW + 1000 });
+    const colonne = encryptSecret(contenu, undefined, "webhooks.secret_enc:x");
+    expect(readChallenge("login", colonne, NOW)).toBeNull();
   });
 
   it("transporte le défi aléatoire d'une cérémonie WebAuthn", () => {

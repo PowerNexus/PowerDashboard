@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { encryptSecret } from "@gamedashboard/auth";
+import { randomBytes, randomUUID } from "node:crypto";
 import { isWebhookEvent } from "@gamedashboard/contracts";
 import {
   applicationKeys,
@@ -11,6 +10,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, desc, eq, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { assertPublicDestination, PrivateDestinationError } from "../../common/public-url";
+import { encryptRowSecret } from "../../common/row-secrets";
 
 export interface WebhookSummary {
   id: string;
@@ -210,13 +210,16 @@ export class WebhookRegistryService {
     }
 
     const secret = randomBytes(SECRET_BYTES).toString("base64url");
+    // Identifiant tiré ici : le secret est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
 
     const [created] = await this.db
       .insert(applicationWebhooks)
       .values({
+        id,
         applicationKeyId: input.applicationKeyId,
         url,
-        secretEnc: encryptSecret(secret),
+        secretEnc: encryptRowSecret("application_webhooks.secret_enc", id, secret),
         events: [...new Set(input.events)],
       })
       .returning({ id: applicationWebhooks.id });
@@ -243,7 +246,10 @@ export class WebhookRegistryService {
 
     const [updated] = await this.db
       .update(applicationWebhooks)
-      .set({ secretEnc: encryptSecret(secret), updatedAt: new Date().toISOString() })
+      .set({
+        secretEnc: encryptRowSecret("application_webhooks.secret_enc", webhookId, secret),
+        updatedAt: new Date().toISOString(),
+      })
       .where(and(eq(applicationWebhooks.id, webhookId), this.sien(resellerId)))
       .returning({ id: applicationWebhooks.id });
 

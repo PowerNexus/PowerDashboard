@@ -1,7 +1,8 @@
-import { decryptSecret, tokensMatch } from "@gamedashboard/auth";
+import { tokensMatch } from "@gamedashboard/auth";
 import { parseWingsAuthorization } from "@gamedashboard/contracts";
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from "@nestjs/common";
 import { requestOrigin } from "../../common/request-origin";
+import { decryptRowSecret } from "../../common/row-secrets";
 import { DenialLogService } from "../activity/denial-log.service";
 import { type NodeIdentity, NodeRepository } from "./node.repository";
 
@@ -57,7 +58,7 @@ export class NodeTokenGuard implements CanActivate {
     // Un identifiant inconnu et un secret faux doivent coûter le même temps :
     // sans cela, la durée de réponse révèle quels identifiants existent, et il
     // devient possible de les énumérer avant d'attaquer le secret.
-    const expected = node ? safeDecrypt(node.tokenSecret) : "";
+    const expected = node ? safeDecrypt(node.id, node.tokenSecret) : "";
     const matches = tokensMatch(expected, token.secret);
 
     if (!node || !matches) {
@@ -119,14 +120,15 @@ export class NodeTokenGuard implements CanActivate {
 /**
  * Déchiffre sans propager l'échec.
  *
- * Une valeur illisible — clé changée, colonne corrompue — doit refuser la
- * connexion, pas faire tomber la requête avec une erreur 500 que le daemon
- * réessaierait indéfiniment (§7.4). La chaîne vide ne correspondra à aucun
- * jeton présenté, `parseWingsAuthorization` en refusant déjà les secrets vides.
+ * Une valeur illisible — clé changée, colonne corrompue, chiffré recopié
+ * depuis la ligne d'un autre node — doit refuser la connexion, pas faire
+ * tomber la requête avec une erreur 500 que le daemon réessaierait
+ * indéfiniment (§7.4). La chaîne vide ne correspondra à aucun jeton présenté,
+ * `parseWingsAuthorization` en refusant déjà les secrets vides.
  */
-function safeDecrypt(value: string): string {
+function safeDecrypt(nodeId: string, value: string): string {
   try {
-    return decryptSecret(value);
+    return decryptRowSecret("nodes.daemon_token_enc", nodeId, value);
   } catch {
     return "";
   }

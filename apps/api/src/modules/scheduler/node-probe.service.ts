@@ -1,4 +1,3 @@
-import { decryptSecret } from "@gamedashboard/auth";
 import { NODE_HEARTBEAT_INTERVAL_MS } from "@gamedashboard/contracts";
 import { type Database, nodes } from "@gamedashboard/db";
 import {
@@ -11,6 +10,7 @@ import {
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Le panel demande au daemon s'il est là, au lieu d'attendre qu'il parle.
@@ -150,7 +150,7 @@ export class NodeProbeService implements OnModuleInit, OnModuleDestroy {
     try {
       const response = await fetch(`${node.scheme}://${node.fqdn}:${node.port}/api/system`, {
         headers: {
-          Authorization: `Bearer ${decryptSecret(node.tokenEnc)}`,
+          Authorization: `Bearer ${decryptRowSecret("nodes.daemon_token_enc", node.id, node.tokenEnc)}`,
           Accept: "application/json",
         },
         signal: controller.signal,

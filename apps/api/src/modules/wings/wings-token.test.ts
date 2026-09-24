@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
-import { encryptSecret } from "@gamedashboard/auth";
 import type { Database } from "@gamedashboard/db";
 import { describe, expect, it } from "vitest";
+import { encryptRowSecret } from "../../common/row-secrets";
 import { WingsTokenService } from "./wings-token.service";
 
 const SERVER = "11111111-1111-1111-1111-111111111111";
@@ -121,7 +121,10 @@ describe("jeton de transfert", () => {
         scheme: "https",
         fqdn: "node-b.exemple.fr",
         port: 8080,
-        token: encryptSecret(SECRET),
+        nodeId: NODE,
+        // Lié au node d'arrivée, comme en base : relu sous un autre contexte,
+        // il ne signerait rien.
+        token: encryptRowSecret("nodes.daemon_token_enc", NODE, SECRET),
       }),
     );
 
@@ -164,7 +167,17 @@ describe("révocation des consoles d'une session qui se ferme", () => {
     chaine.innerJoin = () => chaine;
     chaine.where = () => chaine;
     chaine.limit = async () => [
-      { scheme: "https", fqdn: "node.exemple.fr", port: 8080, token: encryptSecret("cle-du-node") },
+      {
+        scheme: "https",
+        fqdn: "node.exemple.fr",
+        port: 8080,
+        nodeId: "44444444-4444-4444-4444-444444444444",
+        token: encryptRowSecret(
+          "nodes.daemon_token_enc",
+          "44444444-4444-4444-4444-444444444444",
+          "cle-du-node",
+        ),
+      },
     ];
     return chaine as unknown as Database;
   }

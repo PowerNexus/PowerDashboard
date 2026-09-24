@@ -1,9 +1,10 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { decryptSecret, hashToken } from "@gamedashboard/auth";
+import { hashToken } from "@gamedashboard/auth";
 import { type Database, nodes, servers } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Traduit nos permissions dans celles que Wings vérifie sur le websocket
@@ -207,6 +208,7 @@ export class WingsTokenService {
   ): Promise<WebsocketGrant> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -249,7 +251,7 @@ export class WingsTokenService {
     };
 
     return {
-      token: signHs256(payload, decryptSecret(row.token)),
+      token: signHs256(payload, nodeToken(row)),
       socket: `${row.scheme === "https" ? "wss" : "ws"}://${row.fqdn}:${row.port}/api/servers/${serverId}/ws`,
     };
   }
@@ -268,6 +270,7 @@ export class WingsTokenService {
   async backupDownloadGrant(serverId: string, backupId: string, userId: string): Promise<string> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -296,7 +299,7 @@ export class WingsTokenService {
         backup_uuid: backupId,
         user_uuid: userId,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return `${row.scheme}://${row.fqdn}:${row.port}/download/backup?token=${encodeURIComponent(token)}`;
@@ -318,6 +321,7 @@ export class WingsTokenService {
   async fileDownloadGrant(serverId: string, userId: string, filePath: string): Promise<string> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -345,7 +349,7 @@ export class WingsTokenService {
         user_uuid: userId,
         file_path: filePath,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return `${row.scheme}://${row.fqdn}:${row.port}/download/file?token=${encodeURIComponent(token)}`;
@@ -371,6 +375,7 @@ export class WingsTokenService {
   async uploadGrant(serverId: string, userId: string): Promise<{ token: string; url: string }> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -406,7 +411,7 @@ export class WingsTokenService {
         server_uuid: serverId,
         user_uuid: userId,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return { token, url: `${row.scheme}://${row.fqdn}:${row.port}/upload/file` };
@@ -432,6 +437,7 @@ export class WingsTokenService {
   async transferGrant(serverId: string, toNodeId: string): Promise<TransferGrant> {
     const [target] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -476,7 +482,7 @@ export class WingsTokenService {
        * ne pouvait le voir : la divergence est entre ce que le panel remet et
        * ce que deux programmes distincts en font.
        */
-      token: `Bearer ${signHs256(payload, decryptSecret(target.token))}`,
+      token: `Bearer ${signHs256(payload, nodeToken(target))}`,
       url: `${target.scheme}://${target.fqdn}:${target.port}/api/transfers`,
     };
   }
@@ -501,4 +507,9 @@ function signHs256(payload: Record<string, unknown>, secret: string): string {
 
 function base64url(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
+}
+
+/** Jeton du node en clair, relu sous le contexte de sa ligne : c'est la clé de signature. */
+function nodeToken(row: { nodeId: string; token: string }): string {
+  return decryptRowSecret("nodes.daemon_token_enc", row.nodeId, row.token);
 }

@@ -43,6 +43,17 @@ export type ChallengePurpose = "login" | "passkey-register" | "passkey-login";
  */
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Contexte de chiffrement des jetons d'attente.
+ *
+ * Ils ne sont rangés nulle part, mais ils sortent chiffrés vers le navigateur.
+ * Sans contexte, ce serait le seul chiffré sans contexte que le panel
+ * produise encore : un jeton recopié dans une colonne chiffrée s'y relirait
+ * (les valeurs d'avant la liaison y restent acceptées, NC-18), et un secret de
+ * colonne présenté comme jeton serait déchiffré. Lié, il ne vaut qu'ici.
+ */
+const CHALLENGE_CONTEXT = "login-challenge";
+
 interface ChallengePayload {
   purpose: ChallengePurpose;
   userId: string;
@@ -93,7 +104,7 @@ export function issueChallenge(
       : undefined,
     expiresAt: now + CHALLENGE_TTL_MS,
   };
-  return encryptSecret(JSON.stringify(payload));
+  return encryptSecret(JSON.stringify(payload), undefined, CHALLENGE_CONTEXT);
 }
 
 /** Contenu d'un défi lu et vérifié. */
@@ -131,7 +142,7 @@ export function readChallenge(
 ): SealedChallenge | null {
   let payload: ChallengePayload;
   try {
-    payload = JSON.parse(decryptSecret(token)) as ChallengePayload;
+    payload = JSON.parse(decryptSecret(token, undefined, CHALLENGE_CONTEXT)) as ChallengePayload;
   } catch {
     return null;
   }

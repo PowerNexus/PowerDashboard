@@ -1,4 +1,4 @@
-import { encryptSecret } from "@gamedashboard/auth";
+import { randomUUID } from "node:crypto";
 import { type Database, databaseHosts, databases, nodes } from "@gamedashboard/db";
 import { MysqlHostUnreachableError, probeHost } from "@gamedashboard/mysql";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { count, eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { encryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Hôtes MySQL sur lesquels le panel crée les bases des clients.
@@ -132,14 +133,17 @@ export class DatabaseHostsService {
 
     await this.probe(input);
 
+    // Identifiant tiré ici : le mot de passe est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
     const [row] = await this.db
       .insert(databaseHosts)
       .values({
+        id,
         name: input.name.trim(),
         host: input.host.trim(),
         port: input.port,
         username: input.username.trim(),
-        passwordEnc: encryptSecret(input.password),
+        passwordEnc: encryptRowSecret("database_hosts.password_enc", id, input.password),
         nodeId: input.nodeId,
         maxDatabases: input.maxDatabases,
       })
@@ -174,7 +178,9 @@ export class DatabaseHostsService {
         host: input.host.trim(),
         port: input.port,
         username: input.username.trim(),
-        ...(input.password === "" ? {} : { passwordEnc: encryptSecret(input.password) }),
+        ...(input.password === ""
+          ? {}
+          : { passwordEnc: encryptRowSecret("database_hosts.password_enc", id, input.password) }),
         nodeId: input.nodeId,
         maxDatabases: input.maxDatabases,
         updatedAt: new Date().toISOString(),
