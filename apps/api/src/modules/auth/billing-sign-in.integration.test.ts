@@ -106,6 +106,9 @@ describe.skipIf(!HAS_DATABASE)("connexion par le lien de la facturation (intégr
       {} as never,
       { afterFailure: () => undefined } as unknown as SecurityAlertService,
       {} as never,
+      // Les consoles de Wings : aucune n'est ouverte ici.
+      {} as never,
+      {} as never,
     );
   }, 60_000);
 
