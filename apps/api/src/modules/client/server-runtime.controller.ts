@@ -154,6 +154,11 @@ export class ServerRuntimeController {
    * Les permissions effectives sont scellées dans le jeton signé. Le navigateur
    * ne peut donc pas s'en attribuer d'autres : c'est Wings qui vérifie, avec la
    * liste que nous avons signée.
+   *
+   * **Le jeton ne sert qu'à lire** (`toWingsWebsocketPermissions`). Commandes
+   * et signaux passent par `POST command` et `POST power`, qui vérifient que le
+   * serveur peut obéir et consignent le geste ; les sceller ici en faisait une
+   * seconde porte, qui ne vérifiait ni l'un ni l'autre.
    */
   @Post("websocket")
   async websocket(@Req() request: ClientRequest, @Param("id") id: string) {
@@ -163,10 +168,10 @@ export class ServerRuntimeController {
 
     /*
      * Une clé d'API ne scelle jamais plus que ses portées. `require` a borné
-     * cette requête, mais le jeton vit dix minutes et ouvre commandes et
-     * signaux d'alimentation sans repasser par ici : le propriétaire y
-     * recevrait « * » alors que sa clé ne porte que « console.read ». Les
-     * portées s'appliquent donc aussi ici, en intersection pour un invité.
+     * cette requête, mais le jeton vit dix minutes sans repasser par ici : le
+     * propriétaire y recevrait « * », donc le suivi des sauvegardes, alors que
+     * sa clé ne porte que « console.read ». Les portées s'appliquent donc
+     * aussi ici, en intersection pour un invité.
      */
     const permissions =
       principal.scopes === null

@@ -90,6 +90,75 @@ describe("révocation des consoles d'un compte suspendu", () => {
 });
 
 /**
+ * Le jeton de console ne sert qu'à **lire**.
+ *
+ * Il scellait `control.console` et `control.*` pour qui avait `console.send`
+ * ou `power.*` — et `*` pour le propriétaire, qui les contient. Une porte
+ * parallèle : commandes et alimentation envoyées sur la socket passaient à
+ * côté de `requireOperable` (serveur suspendu, en installation, en transfert)
+ * et du journal du panel. L'interface et le SDK passent déjà tout par l'API ;
+ * la socket ne leur sert qu'à recevoir.
+ */
+describe("permissions du jeton de console", () => {
+  const SECRET = "jeton-du-node";
+
+  /** Un double de base qui rend le node du serveur, quelle que soit la requête. */
+  function dbAvecNode(): Database {
+    const chaine: Record<string, unknown> = {};
+    chaine.select = () => chaine;
+    chaine.from = () => chaine;
+    chaine.innerJoin = () => chaine;
+    chaine.where = () => chaine;
+    chaine.limit = async () => [
+      { scheme: "https", fqdn: "node.exemple.fr", port: 8080, token: encryptSecret(SECRET) },
+    ];
+    return chaine as unknown as Database;
+  }
+
+  async function scelle(accordees: string[]): Promise<string[]> {
+    process.env.APP_SECRET_KEY ??= randomBytes(32).toString("base64");
+    const grant = await new WingsTokenService(dbAvecNode()).websocketGrant(SERVER, USER, accordees);
+    const [, corps] = grant.token.split(".");
+    return JSON.parse(Buffer.from(corps ?? "", "base64url").toString("utf8")).permissions;
+  }
+
+  it("ne scelle jamais d'ordre, même pour le propriétaire", async () => {
+    const permissions = await scelle(["*", "admin.websocket.install"]);
+    expect(permissions).not.toContain("*");
+    expect(permissions.filter((p) => p.startsWith("control."))).toEqual([]);
+  });
+
+  it("garde au propriétaire tout ce qui se lit : flux, sauvegardes, installation", async () => {
+    // Wings envoie console, statistiques et état à tout jeton connecté ; il ne
+    // filtre que la sortie d'installation (`admin.websocket.install`, que son
+    // joker exclut) et les événements de sauvegarde (`backup.read`).
+    expect((await scelle(["*", "admin.websocket.install"])).sort()).toEqual([
+      "admin.websocket.install",
+      "backup.read",
+      "websocket.connect",
+    ]);
+  });
+
+  it("ne scelle pour un invité que la lecture, quels que soient ses droits d'agir", async () => {
+    const permissions = await scelle([
+      "console.read",
+      "console.send",
+      "power.start",
+      "power.stop",
+      "power.restart",
+      "power.kill",
+      "backups.read",
+    ]);
+    expect(permissions.sort()).toEqual(["backup.read", "websocket.connect"]);
+  });
+
+  it("ne scelle rien de plus que ce que l'invité peut lire", async () => {
+    expect(await scelle(["console.read"])).toEqual(["websocket.connect"]);
+    expect(await scelle(["files.read"])).toEqual([]);
+  });
+});
+
+/**
  * Le jeton de transfert porte son préfixe `Bearer `.
  *
  * **Relevé en faisant tourner deux daemons côte à côte, pas en lisant du

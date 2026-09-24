@@ -655,7 +655,8 @@ export class WingsClientService {
    * Retirer un accès dans la base ne ferme pas les consoles ouvertes : le jeton
    * remis au navigateur est signé, autonome, et valable dix minutes. Sans cet
    * appel, quelqu'un dont on vient de retirer l'accès continuerait de lire la
-   * console — et d'y envoyer des commandes — pendant tout ce temps.
+   * console pendant tout ce temps. (Plus d'y envoyer des commandes : le jeton
+   * ne scelle plus aucun `control.*`, voir `toWingsWebsocketPermissions`.)
    */
   denyWebsocketTokens(serverId: string, jtis: string[]): Promise<void> {
     if (jtis.length === 0) return Promise.resolve();

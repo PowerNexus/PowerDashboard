@@ -632,16 +632,11 @@ export const REALTIME_EVENTS: RealtimeEvent[] = [
     summary: "Avancement d'une sauvegarde en cours.",
     scope: "backups.read",
   },
-  {
-    name: "console.send",
-    direction: "in",
-    summary: "Envoyer une commande à la console.",
-    scope: "console.send",
-  },
-  {
-    name: "power",
-    direction: "in",
-    summary: "Envoyer un signal d'alimentation.",
-    scope: "power.*",
-  },
+  /*
+   * Aucun événement entrant : le jeton de console ne sert qu'à lire. Commandes
+   * et signaux d'alimentation passent par `POST /servers/{server}/command` et
+   * `POST /servers/{server}/power`, qui vérifient que le serveur peut obéir et
+   * consignent le geste. Les annoncer ici promettait une porte que le daemon
+   * refuse désormais (audit ASVS, NC-14).
+   */
 ];
