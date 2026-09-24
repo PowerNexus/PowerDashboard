@@ -336,7 +336,8 @@ Compensations, puisque le mécanisme lui-même n'est pas renforçable sans modif
 | Mesure | Détail |
 |---|---|
 | Un jeton par node | Une fuite compromet un node, pas la flotte. Jamais de jeton partagé. |
-| Rotation | Rotation planifiée et rotation immédiate sur incident, depuis `/admin/nodes`. Le jeton n'est affiché qu'une fois. |
+| Rotation | Rotation planifiée et rotation immédiate sur incident, depuis `/admin/nodes`. |
+| Lecture du jeton | Le jeton n'est **pas** « affiché une fois » : il est rendu à la création, puis reste lisible dans le `config.yml` que l'administration télécharge pour configurer ou réparer une machine (`GET /admin/nodes/:id/configuration`). Cette lecture est réservée à l'écriture admin (`AdminWriteGuard`, jamais le support ni une clé d'API) et consignée au journal avec l'acteur (`node.configuration_read`), de même que le fichier rendu quand une modification de liaison échoue. C'est le prix d'un node qu'on configure ou répare en un geste, sans rotation ; une fuite se traite par la rotation ([runbook](./docs/runbooks/rotation-jeton-node.md)). |
 | Réseau d'administration isolé | L'API de Wings n'est jamais exposée publiquement : VPN ou VLAN dédié entre le panel et les nodes, filtrage au pare-feu sur l'IP du panel. |
 | Chiffrement au repos | Les jetons de node sont chiffrés en base (AES-256-GCM, clé maître), comme tout secret (§5.4). |
 | Journalisation | Tout appel du panel vers un node est tracé dans l'audit log avec l'acteur à l'origine. |

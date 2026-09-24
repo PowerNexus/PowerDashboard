@@ -242,11 +242,12 @@ export class InfrastructureService {
   /**
    * Déclare une machine.
    *
-   * Le jeton du daemon est tiré ici et rendu **une seule fois** : c'est lui
+   * Le jeton du daemon est tiré ici et rendu dans la réponse : c'est lui
    * qu'on recopie dans la configuration de Wings. Seule sa forme chiffrée est
    * gardée — le panel doit pouvoir le relire pour parler au daemon, ce qui
-   * interdit de le condenser comme un mot de passe, mais rien n'oblige à le
-   * réafficher.
+   * interdit de le condenser comme un mot de passe. Il se relit ensuite dans
+   * le `config.yml` du node, lecture réservée à l'administrateur et
+   * consignée (PLAN §5.5).
    *
    * Le node est créé **sans allocation** : les ports s'ajoutent ensuite, par
    * plages, depuis la fiche. Les demander ici ferait un formulaire de quinze

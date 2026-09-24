@@ -1270,8 +1270,10 @@ export class AdminController {
   /**
    * Déclare une machine.
    *
-   * Le jeton du daemon n'est rendu **qu'ici**. C'est lui qu'on recopie dans la
-   * configuration de Wings ; aucune lecture ultérieure ne le redonne en clair.
+   * Le jeton du daemon est rendu ici, pour qu'on le recopie dans la
+   * configuration de Wings. Il reste lisible ensuite dans le `config.yml` du
+   * node (`nodeConfiguration`), lecture réservée à l'administrateur et
+   * consignée : voir PLAN §5.5.
    */
   @Post("nodes")
   @UseGuards(AdminWriteGuard)
