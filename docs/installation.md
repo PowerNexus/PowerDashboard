@@ -346,6 +346,20 @@ mot de passe affichés.
    *2FA obligatoire pour le personnel* dès que quelqu'un d'autre administre
    le panel avec vous.
 
+**Facultatif : « Se connecter avec Google ».** Un bouton au-dessus du
+formulaire, pour qui préfère son compte Google au mot de passe :
+
+1. Dans la [console Google Cloud](https://console.cloud.google.com/apis/credentials),
+   *Créer des identifiants › ID client OAuth*, type **Application Web**.
+2. *URI de redirection autorisés* : `https://panel.mondomaine.fr/auth/google/callback`,
+   à l'identique.
+3. Recopier l'identifiant et le secret dans *Administration › Paramètres ›
+   Connexion avec Google*, puis cocher *Proposer le bouton*.
+
+Un compte du panel est reconnu par son adresse, vérifiée par Google. Un
+compte n'est **créé** que si les inscriptions publiques sont ouvertes ; sinon,
+seuls les comptes existants entrent par ce bouton.
+
 ---
 
 ## 6. Ajouter une machine de jeu (Wings)
@@ -526,7 +540,9 @@ objet).
 
 Les **fichiers des serveurs de jeu** ne sont pas dans la base : ils vivent
 sur les nodes, et se sauvegardent depuis l'onglet *Sauvegardes* de chaque
-serveur.
+serveur. Ces sauvegardes restent sur le disque du node tant qu'aucun
+compartiment compatible S3 n'est réglé (Administration › Paramètres ›
+Stockage des sauvegardes) : sans lui, elles meurent avec la machine.
 
 ### Restaurer sur une machine neuve
 

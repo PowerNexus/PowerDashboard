@@ -261,6 +261,40 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
     ],
   },
   {
+    /*
+     * Une porte de plus, pas un annuaire (PLAN §12.4, décision 4) : le mot de
+     * passe reste possible, et les adresses de Google sont fixes — seuls
+     * l'identifiant et le secret du client se règlent.
+     */
+    key: "google",
+    label: "Connexion avec Google",
+    description:
+      "Un bouton « Se connecter avec Google » sous le formulaire de connexion, pour qui préfère " +
+      "son compte Google au mot de passe, qui reste possible. Un compte du panel est reconnu " +
+      "par son adresse, vérifiée par Google ; un compte n'est créé que si les inscriptions sont " +
+      "ouvertes. Sans effet quand l'annuaire externe est obligatoire : il est alors le seul " +
+      "chemin.",
+    settings: [
+      {
+        key: "google.enabled",
+        kind: "boolean",
+        label: "Proposer le bouton",
+        fallback: false,
+      },
+      {
+        key: "google.clientId",
+        kind: "text",
+        label: "Identifiant client",
+        description:
+          "Console Google Cloud › API et services › Identifiants › ID client OAuth, de type " +
+          "« Application Web ». URI de redirection autorisé : l'adresse du panel suivie de " +
+          "/auth/google/callback.",
+        placeholder: "123456789-abc.apps.googleusercontent.com",
+      },
+      { key: "google.clientSecret", kind: "secret", label: "Secret client" },
+    ],
+  },
+  {
     key: "backups",
     label: "Stockage des sauvegardes",
     description:
@@ -270,8 +304,14 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         key: "s3.endpoint",
         kind: "text",
         label: "Point d'accès",
+        /*
+         * Wings télécharge l'archive lui-même pour la restaurer, et refuse
+         * toute adresse privée qu'on ne lui a pas autorisée : sans cette
+         * phrase, un MinIO du réseau local sauvegarde sans erreur et ne
+         * restaure jamais.
+         */
         description:
-          "Adresse du service, sans le nom du compartiment. À laisser vide pour Amazon S3 lui-même.",
+          "Adresse du service, sans le nom du compartiment. À laisser vide pour Amazon S3 lui-même. Une adresse privée (MinIO sur le réseau local) doit être autorisée sur chaque machine de jeu : restore_host_allowlist, section system.backups du config.yml de Wings.",
         placeholder: "https://s3.fr-par.scw.cloud",
       },
       { key: "s3.bucket", kind: "text", label: "Compartiment" },

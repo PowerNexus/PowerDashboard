@@ -48,6 +48,16 @@ export const PART_SIZE = 100 * 1024 * 1024;
  */
 const SIGNATURE_TTL_SECONDS = 6 * 3600;
 
+/**
+ * Type de contenu des archives.
+ *
+ * Wings n'extrait une archive distante que servie en `application/x-gzip` ou
+ * `application/gzip` : c'est le contrôle qu'il fait avant de restaurer. Un
+ * objet déposé sans type est servi en `binary/octet-stream`, et **toute
+ * restauration échouait**.
+ */
+export const ARCHIVE_TYPE = "application/x-gzip";
+
 export interface UploadTicket {
   uploadId: string;
   parts: string[];
@@ -84,10 +94,14 @@ export class S3Service {
    * Ouvre un dépôt fractionné et signe une adresse par partie.
    *
    * Le nombre de parties est calculé à partir de la taille **annoncée par le
-   * daemon**, qui vient de peser l'archive : c'est la seule source possible, le
-   * panel n'a pas le fichier. Une partie de plus est signée par sécurité —
-   * `Math.ceil` sur une taille au dernier octet près se retrouverait à court si
-   * l'archive grossissait entre la pesée et l'envoi.
+   * daemon**, qui vient de peser l'archive terminée : c'est la seule source
+   * possible, le panel n'a pas le fichier.
+   *
+   * **Exactement** une adresse par partie. Wings découpe l'archive d'après la
+   * liste reçue : `part_size` octets par adresse, sauf la dernière, qui prend
+   * le reste. Une adresse de plus, signée « par sécurité », lui faisait
+   * annoncer une partie pleine là où il ne restait que la fin du fichier :
+   * l'envoi échouait, et avec lui toute sauvegarde distante.
    */
   async openUpload(key: string, size: number): Promise<UploadTicket | null> {
     const client = await this.client();
@@ -96,13 +110,13 @@ export class S3Service {
     const bucket = await this.settings.text("s3.bucket");
 
     const created = await client.send(
-      new CreateMultipartUploadCommand({ Bucket: bucket, Key: key }),
+      new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: ARCHIVE_TYPE }),
     );
     if (!created.UploadId) return null;
 
     // Dix mille parties : la limite de S3, et un plafond sur ce qu'une taille
     // annoncée par le daemon peut faire signer ici.
-    const count = Math.min(10_000, Math.max(1, Math.ceil(Math.max(size, 1) / PART_SIZE) + 1));
+    const count = Math.min(10_000, Math.max(1, Math.ceil(size / PART_SIZE)));
     const parts: string[] = [];
 
     for (let number = 1; number <= count; number += 1) {
@@ -205,6 +219,10 @@ export class S3Service {
    * celui de faire circuler l'adresse. Elle donne accès à l'archive entière
    * sans authentification — c'est ce qui permet au navigateur de la tirer
    * directement, et c'est aussi pourquoi elle expire vite.
+   *
+   * C'est aussi le lien que suit Wings pour une restauration. Le type de
+   * contenu y est donc imposé, en plus d'être posé à l'ouverture du dépôt : le
+   * daemon refuse d'extraire une archive servie sous un autre (`ARCHIVE_TYPE`).
    */
   async presignDownload(key: string): Promise<string | null> {
     const client = await this.client();
@@ -212,9 +230,24 @@ export class S3Service {
 
     return getSignedUrl(
       client,
-      new GetObjectCommand({ Bucket: await this.settings.text("s3.bucket"), Key: key }),
+      new GetObjectCommand({
+        Bucket: await this.settings.text("s3.bucket"),
+        Key: key,
+        ResponseContentType: ARCHIVE_TYPE,
+      }),
       { expiresIn: 900 },
     );
+  }
+
+  /**
+   * Efface une archive, dépôt encore ouvert compris.
+   *
+   * Pour une sauvegarde que le panel oublie : un dépôt resté ouvert garderait
+   * ses morceaux facturés, invisibles dans la liste des objets.
+   */
+  async discard(key: string, uploadId: string | null): Promise<void> {
+    if (uploadId) await this.abortUpload(key, uploadId);
+    await this.remove(key);
   }
 
   /** Supprime une archive. Une sauvegarde effacée du panel doit l'être partout. */
@@ -275,6 +308,15 @@ export class S3Service {
       region: region || "us-east-1",
       forcePathStyle: pathStyle,
       credentials: { accessKeyId, secretAccessKey },
+      /*
+       * Aucune empreinte d'office. Par défaut, le SDK en signe une dans chaque
+       * adresse de partie : celle d'un corps **vide**, puisqu'il n'a pas les
+       * octets (`x-amz-checksum-crc32=AAAAAA==`). Amazon S3 la vérifie, et
+       * refusait donc chaque partie envoyée par Wings. Un MinIO l'ignore, ce
+       * qui cachait le défaut à l'essai.
+       */
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
     });
 
     this.cached = { key: signature, client };

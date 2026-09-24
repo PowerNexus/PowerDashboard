@@ -50,7 +50,7 @@ import type { TwoFactorStatus } from "@/server/api/two-factor";
  * lire « autre » n'apprend rien.
  */
 function methodLabel(t: (key: string) => string, method: string): string {
-  const known = new Set(["password", "passkey", "sso", "apiKey"]);
+  const known = new Set(["password", "passkey", "sso", "google", "apiKey"]);
   // `api-key` côté API, `apiKey` côté clés de traduction : les identifiants
   // d'une langue ne portent pas de tiret.
   const key = method === "api-key" ? "apiKey" : method;

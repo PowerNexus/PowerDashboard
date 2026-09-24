@@ -56,45 +56,59 @@ export function OrDivider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Bouton OAuth pleine largeur avec logo. */
+/**
+ * Bouton OAuth pleine largeur avec logo.
+ *
+ * Un lien quand `href` est donné : une cérémonie OAuth part par une
+ * navigation, que la route suivie renvoie chez le fournisseur.
+ */
 export function OAuthButton({
   icon,
   children,
   onClick,
+  href,
 }: {
   icon: ReactNode;
   children: ReactNode;
   onClick?: () => void;
+  href?: string;
 }) {
+  const className =
+    "flex h-11 w-full cursor-pointer items-center justify-center gap-3 rounded-field border border-border bg-surface text-sm font-semibold text-fg transition-colors hover:bg-surface-2 [&_svg]:size-[18px]";
+  if (href) {
+    return (
+      <a href={href} className={className}>
+        {icon}
+        {children}
+      </a>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex h-11 w-full cursor-pointer items-center justify-center gap-3 rounded-field border border-border bg-surface text-sm font-semibold text-fg transition-colors hover:bg-surface-2 [&_svg]:size-[18px]"
-    >
+    <button type="button" onClick={onClick} className={className}>
       {icon}
       {children}
     </button>
   );
 }
 
+/** Le « G » de Google, dans les couleurs de la marque (`--gd-google-*`). */
 export function GoogleIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden>
       <path
-        fill="#4285F4"
+        fill="var(--gd-google-blue)"
         d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.7-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"
       />
       <path
-        fill="#34A853"
+        fill="var(--gd-google-green)"
         d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.2v3.1C3.2 21.3 7.3 24 12 24z"
       />
       <path
-        fill="#FBBC05"
+        fill="var(--gd-google-yellow)"
         d="M5.3 14.3c-.5-1.5-.5-3.1 0-4.6V6.6H1.2c-1.6 3.2-1.6 7.1 0 10.3l4.1-2.6z"
       />
       <path
-        fill="#EA4335"
+        fill="var(--gd-google-red)"
         d="M12 4.8c1.7 0 3.3.6 4.5 1.7l3.4-3.4C17.9 1.2 15.1 0 12 0 7.3 0 3.2 2.7 1.2 6.6l4.1 3.1c.9-2.9 3.6-4.9 6.7-4.9z"
       />
     </svg>

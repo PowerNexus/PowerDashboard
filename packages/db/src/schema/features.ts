@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -28,7 +29,14 @@ export const backups = pgTable(
     ignoredFiles: text("ignored_files").array().notNull().default([]),
     disk: backupDisk("disk").notNull().default("local"),
     checksum: varchar("checksum", { length: 128 }),
-    bytes: integer("bytes").notNull().default(0),
+    /*
+     * `bigint`, comme les mesures de `server_stats` : le plafond d'un
+     * `integer` est 2 Gio, qu'un monde ordinaire dépasse. Le compte rendu d'une
+     * archive plus grosse échouait en base, et Wings, faute d'accusé de
+     * réception, **effaçait l'archive** — la sauvegarde restait « en cours »,
+     * sans rien derrière.
+     */
+    bytes: bigint("bytes", { mode: "number" }).notNull().default(0),
     /**
      * Nul tant que la sauvegarde est en cours. Un booléen à `false` par défaut
      * ferait passer une sauvegarde en cours pour une sauvegarde ratée.

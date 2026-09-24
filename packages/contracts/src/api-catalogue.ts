@@ -304,6 +304,28 @@ export const SESSION_ROUTES: ApiRoute[] = [
     group: "Connexion",
   },
   {
+    method: "GET",
+    path: "/auth/google",
+    summary: "Le bouton « Se connecter avec Google » est-il proposé.",
+    scope: null,
+    group: "Connexion",
+  },
+  {
+    method: "POST",
+    path: "/auth/google/start",
+    summary: "Ouvre une cérémonie chez Google et rend son URL, l'état et le vérificateur.",
+    scope: null,
+    group: "Connexion",
+  },
+  {
+    method: "POST",
+    path: "/auth/google/callback",
+    summary:
+      "Échange le code, reconnaît le compte, ouvre la session. Ne crée un compte que si les inscriptions sont ouvertes.",
+    scope: null,
+    group: "Connexion",
+  },
+  {
     method: "POST",
     path: "/auth/logout",
     summary: "Révoque la session courante et retire le cookie.",

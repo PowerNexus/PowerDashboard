@@ -30,6 +30,7 @@ import { UserRepository } from "../auth/user.repository";
 import type { MailerService } from "../mail/mailer.service";
 import { SftpAuthService } from "../remote/sftp-auth.service";
 import type { BrandingService } from "../reseller/branding.service";
+import type { S3Service } from "../storage/s3.service";
 import type { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 import type { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
@@ -303,6 +304,7 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
       sessionsRepo,
       { emit: async () => undefined } as unknown as WebhookEmitterService,
       new WingsTokenService(db),
+      {} as S3Service,
     );
     await expect(actions.impersonationTarget(admin.id, client.id)).rejects.toThrow(/suspendu/);
   });

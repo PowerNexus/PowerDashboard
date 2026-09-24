@@ -1086,7 +1086,8 @@
       "denied": "The provider refused the sign-in, or you cancelled it.",
       "expired": "The request expired. Start again.",
       "state": "The provider's answer does not match the request that was sent. Start again from this page.",
-      "refused": "The provider answered, but the account could not be opened."
+      "refused": "The provider answered, but the account could not be opened.",
+      "noAccount": "No account on this panel uses the address of this Google account, and sign-ups are closed. Sign in with your email and password."
     }
   },
   "marketplace": {
@@ -1498,6 +1499,7 @@
     "method_password": "with a password",
     "method_passkey": "with a passkey",
     "method_sso": "with a GameDashboard account",
+    "method_google": "with a Google account",
     "method_apiKey": "with an API key",
     "columnOpened": "Opened",
     "neverSeen": "Never",
