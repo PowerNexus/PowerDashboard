@@ -130,6 +130,24 @@ describe("listServers", () => {
     expect(list).toHaveBeenCalledWith(NODE.id, { page: 1, perPage: 50 });
   });
 
+  it("plafonne la taille de page", async () => {
+    // Sans plafond, `per_page=1000000` faisait construire en une requête la
+    // configuration complète de tous les serveurs du node. Le plafond reste
+    // cohérent pour Wings : il pagine jusqu'à `last_page`, calculé avec la
+    // taille retenue.
+    const list = vi.fn(async () => ({
+      data: [],
+      meta: { current_page: 1, from: 0, last_page: 1, per_page: 500, to: 0, total: 0 },
+    }));
+    await controller({ list } as Partial<RemoteServerService>).listServers(
+      request,
+      undefined,
+      "1",
+      "1000000",
+    );
+    expect(list).toHaveBeenCalledWith(NODE.id, { page: 1, perPage: 500 });
+  });
+
   it("lit le node depuis le jeton vérifié et non depuis la requête", async () => {
     // Aucune route ne prend d'identifiant de node en paramètre : sinon un node
     // compromis piloterait les serveurs d'un autre en changeant un champ.

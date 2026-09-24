@@ -49,6 +49,9 @@ const REMOTE_UUID = new ParseUUIDPipe({
   exceptionFactory: () => new BadRequestException("Identifiant mal formé : un UUID est attendu."),
 });
 
+/** Taille de page maximale de l'inventaire, quelle que soit la demande du daemon. */
+const MAX_SERVERS_PER_PAGE = 500;
+
 interface RemoteRequest {
   /** Posé par `NodeTokenGuard` : le node authentifié, jamais un identifiant du corps. */
   node: NodeIdentity;
@@ -108,7 +111,12 @@ export class RemoteController {
     await this.nodes.recordHeartbeat(request.node.id, parseWingsVersion(userAgent));
     return this.servers.list(request.node.id, {
       page: toPositiveInt(page, 1),
-      perPage: toPositiveInt(perPage, 50),
+      // Plafonnée : chaque ligne coûte une configuration complète, et
+      // `per_page=1000000` les construisait toutes en une requête. Wings
+      // demande 50 par défaut et pagine jusqu'à `meta.last_page`, calculé avec
+      // la taille retenue : au-delà du plafond, il voit tout le parc, en plus
+      // de pages.
+      perPage: Math.min(toPositiveInt(perPage, 50), MAX_SERVERS_PER_PAGE),
     });
   }
 
