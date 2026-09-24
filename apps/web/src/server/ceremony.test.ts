@@ -200,3 +200,45 @@ describe("cookie de la cérémonie après un échec", () => {
     expect(efface(reponse, "gd_google", "/auth/google")).toBe(true);
   });
 });
+
+/**
+ * Le retour reste sur le domaine où le navigateur est arrivé.
+ *
+ * Next bâtit l'URL de la requête sur son adresse d'écoute, pas sur l'hôte
+ * demandé : derrière nginx, `https://localhost:3210`. Une redirection
+ * construite sur `request.nextUrl.origin` renvoyait le navigateur vers sa
+ * propre machine, sans le cookie posé pour le domaine du panel.
+ */
+describe("domaine du retour", () => {
+  /** La requête telle que Next la voit derrière nginx. */
+  const derriereNginx = (chemin: string, cookie: string) =>
+    new NextRequest(`https://localhost:3210${chemin}`, {
+      headers: { host: "panel.gamedashboard.test", cookie },
+    });
+  const ceremonie = `gd_sso=${encodeURIComponent(
+    JSON.stringify({ state: "etat-de-la-ceremonie", codeVerifier: "verificateur" }),
+  )}`;
+
+  beforeEach(() => {
+    echange.mockReset();
+    echange.mockResolvedValue(Response.json({ user: { id: "compte" } }));
+  });
+
+  it("renvoie à l'accueil par une adresse relative", async () => {
+    const reponse = await finishCeremony(
+      "sso",
+      derriereNginx("/auth/sso/callback?code=c&state=etat-de-la-ceremonie", ceremonie),
+    );
+
+    expect(reponse.headers.get("location")).toBe("/");
+  });
+
+  it("renvoie un refus par une adresse relative", async () => {
+    const reponse = await finishCeremony(
+      "sso",
+      derriereNginx("/auth/sso/callback?code=c&state=autre", ceremonie),
+    );
+
+    expect(reponse.headers.get("location")).toBe("/login?sso=state");
+  });
+});
