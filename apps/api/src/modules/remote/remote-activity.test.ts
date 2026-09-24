@@ -144,6 +144,18 @@ describe("journal remonté par le daemon", () => {
     await svc.record(NODE, [entry({ event: undefined })]);
     expect(inserted).toEqual([]);
   });
+
+  it("ne garde d'une commande de console que son premier mot et la longueur du reste", async () => {
+    // Wings consigne en clair la commande tapée sur la socket. Même règle que
+    // pour celles qui passent par le panel : un `/login <mot de passe>` n'a
+    // pas à survivre un an dans un journal lisible par un invité.
+    const { svc, inserted } = service();
+    await svc.record(NODE, [
+      entry({ event: "server:console.command", metadata: { command: "login hunter2-secret" } }),
+    ]);
+    expect(inserted[0]?.properties).toEqual({ command: "login", argumentsLength: 14 });
+    expect(JSON.stringify(inserted[0])).not.toContain("hunter2");
+  });
 });
 
 describe("journal du panel", () => {

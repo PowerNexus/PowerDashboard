@@ -8,6 +8,7 @@ export * from "./audit";
 export * from "./auth-cookies";
 export * from "./branding";
 export * from "./client-webhooks";
+export * from "./console-command";
 export * from "./cron";
 export * from "./egg-editor";
 export * from "./egg-rules";

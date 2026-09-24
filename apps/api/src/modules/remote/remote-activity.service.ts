@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { consoleCommandTrace } from "@gamedashboard/contracts";
 import { activityLogs, type Database, serverSubusers, servers, users } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, exists, inArray, isNotNull, or, sql } from "drizzle-orm";
@@ -100,7 +101,7 @@ export class RemoteActivityService {
           serverId: entry.server as string,
           event: String(entry.event).slice(0, 120),
           ip: toIp(entry.ip),
-          properties: toProperties(entry.metadata),
+          properties: toProperties(entry.event, entry.metadata),
           // L'horodatage vient du daemon : c'est lui qui sait quand l'action a
           // eu lieu, et un lot peut arriver avec du retard après une coupure
           // réseau. Une valeur inexploitable, ou hors des bornes, retombe sur
@@ -196,15 +197,27 @@ function isUuid(value: unknown): value is string {
 }
 
 /** Wings envoie `null`, une chaîne, ou un objet. Le stockage attend un objet. */
+/** Nom que Wings donne à une commande envoyée par la socket de console. */
+const CONSOLE_COMMAND_EVENT = "server:console.command";
+
 /** Taille maximale des propriétés d'une entrée, une fois sérialisées. */
 const MAX_PROPERTIES_BYTES = 8 * 1024;
 
-function toProperties(metadata: unknown): Record<string, unknown> {
+function toProperties(event: unknown, metadata: unknown): Record<string, unknown> {
   if (metadata === null || metadata === undefined) return {};
   const properties =
     typeof metadata === "object" && !Array.isArray(metadata)
       ? (metadata as Record<string, unknown>)
       : { value: metadata };
+
+  /*
+   * Une commande tapée sur la socket, que Wings rapporte en clair : même
+   * règle que pour celles qui passent par le panel — premier mot et longueur
+   * du reste, jamais les arguments, où passent les mots de passe.
+   */
+  if (event === CONSOLE_COMMAND_EVENT && typeof properties.command === "string") {
+    return { ...properties, ...consoleCommandTrace(properties.command) };
+  }
 
   // Bornées : une valeur démesurée ferait échouer l'insertion du lot entier,
   // et le daemon le renverrait indéfiniment.

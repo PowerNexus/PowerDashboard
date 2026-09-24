@@ -1,5 +1,6 @@
 import {
   ChmodRequest,
+  consoleCommandTrace,
   PowerSignal,
   RenameRequest,
   WINGS_RENAME_COLLISION,
@@ -136,9 +137,10 @@ export class ServerRuntimeController {
     await this.access.require(principalOf(request), id, "console.send");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.sendCommand(id, command));
-    // La commande est consignée telle quelle : sur un serveur de jeu, « op »
-    // ou « ban » sont précisément ce quon veut retrouver dans un journal.
-    await this.log(request, id, "server.command", { command });
+    // Le premier mot seulement, et la longueur du reste : « op » ou « ban »
+    // sont ce qu'on veut retrouver dans un journal, mais c'est dans les
+    // arguments que passent les mots de passe (`consoleCommandTrace`).
+    await this.log(request, id, "server.command", { ...consoleCommandTrace(command) });
     return { data: { sent: true } };
   }
 
