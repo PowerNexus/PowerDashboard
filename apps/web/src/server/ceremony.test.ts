@@ -112,6 +112,15 @@ describe("vérification de state au retour d'une cérémonie", () => {
     expect(destination(reponse)).toBe("/login?sso=expired");
   });
 
+  it("efface le cookie de la cérémonie qui aboutit", async () => {
+    const reponse = await finishCeremony(
+      "sso",
+      retour("/auth/sso/callback?code=code&state=etat-de-la-ceremonie"),
+    );
+
+    expect(efface(reponse, "gd_sso", "/auth/sso")).toBe(true);
+  });
+
   it("ne termine pas chez Google une cérémonie ouverte chez l'annuaire", async () => {
     // Chaque cérémonie a son cookie : un état valable pour l'une ne vaut rien
     // pour l'autre.
@@ -122,5 +131,72 @@ describe("vérification de state au retour d'une cérémonie", () => {
 
     expect(echange).not.toHaveBeenCalled();
     expect(destination(reponse)).toBe("/login?sso=expired");
+  });
+});
+
+/** La réponse efface-t-elle ce cookie, sur son chemin ? */
+function efface(reponse: Response, nom: string, chemin: string): boolean {
+  return reponse.headers
+    .getSetCookie()
+    .some(
+      (ligne) =>
+        ligne.startsWith(`${nom}=;`) &&
+        ligne.includes(`Path=${chemin}`) &&
+        ligne.includes("Expires=Thu, 01 Jan 1970"),
+    );
+}
+
+/**
+ * Une cérémonie qui échoue ne laisse pas son état derrière elle (NC-26).
+ *
+ * Le cookie vivait ses dix minutes après un retour refusé : quiconque
+ * apprenait l'état — il passe dans l'URL d'autorisation, donc dans
+ * l'historique et les journaux du fournisseur — pouvait encore faire terminer
+ * au navigateur de la victime une cérémonie portant **son** code, et la
+ * connecter à son compte. Seul le succès l'effaçait.
+ */
+describe("cookie de la cérémonie après un échec", () => {
+  const cas: [string, string, Record<string, unknown> | undefined, () => void][] = [
+    ["refus du fournisseur", "/auth/sso/callback?error=access_denied&state=x", undefined, () => {}],
+    ["retour sans code", "/auth/sso/callback?state=etat-de-la-ceremonie", undefined, () => {}],
+    ["état différent", "/auth/sso/callback?code=c&state=autre", undefined, () => {}],
+    ["cookie illisible", "/auth/sso/callback?code=c&state=x", { gd_sso: "{pas du json" }, () => {}],
+    [
+      "échange refusé par l'API",
+      "/auth/sso/callback?code=c&state=etat-de-la-ceremonie",
+      undefined,
+      () => echange.mockResolvedValue(Response.json({ message: "refus" }, { status: 409 })),
+    ],
+    [
+      "API injoignable",
+      "/auth/sso/callback?code=c&state=etat-de-la-ceremonie",
+      undefined,
+      () => echange.mockRejectedValue(new TypeError("fetch failed")),
+    ],
+  ];
+
+  beforeEach(() => {
+    echange.mockReset();
+  });
+
+  for (const [nom, chemin, cookies, preparer] of cas) {
+    it(`l'efface sur ${nom}`, async () => {
+      preparer();
+      const reponse = await finishCeremony("sso", retour(chemin, cookies));
+
+      expect(destination(reponse)).toMatch(/^\/login\?sso=/);
+      expect(efface(reponse, "gd_sso", "/auth/sso")).toBe(true);
+    });
+  }
+
+  it("efface celui de Google quand c'est la cérémonie de Google qui échoue", async () => {
+    const reponse = await finishCeremony(
+      "google",
+      retour("/auth/google/callback?code=c&state=autre", {
+        gd_google: { state: "etat", codeVerifier: "v" },
+      }),
+    );
+
+    expect(efface(reponse, "gd_google", "/auth/google")).toBe(true);
   });
 });

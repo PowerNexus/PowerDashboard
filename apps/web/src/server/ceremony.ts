@@ -66,7 +66,21 @@ export async function finishCeremony(
   request: NextRequest,
 ): Promise<NextResponse> {
   const origin = request.nextUrl.origin;
-  const fail = (reason: string) => NextResponse.redirect(new URL(`/login?sso=${reason}`, origin));
+  /*
+   * Toute sortie en échec efface la cérémonie, comme le succès.
+   *
+   * L'état passe dans l'URL d'autorisation, donc dans l'historique et les
+   * journaux du fournisseur. Laissé dix minutes après un retour refusé, il
+   * suffisait à qui l'avait appris pour faire terminer au navigateur une
+   * cérémonie portant **son** code, et connecter la victime à son compte.
+   * Une cérémonie refusée ne se reprend pas : on repart de la page de
+   * connexion, qui en ouvre une neuve.
+   */
+  const fail = (reason: string) => {
+    const refus = NextResponse.redirect(new URL(`/login?sso=${reason}`, origin));
+    refus.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
+    return refus;
+  };
 
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
