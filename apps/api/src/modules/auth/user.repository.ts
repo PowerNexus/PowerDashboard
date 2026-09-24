@@ -8,6 +8,8 @@ export interface AuthenticatableUser {
   id: string;
   email: string;
   passwordHash: string | null;
+  /** Échéance d'un mot de passe provisoire, nulle sinon. */
+  passwordExpiresAt: string | null;
 }
 
 @Injectable()
@@ -21,7 +23,12 @@ export class UserRepository {
    */
   async findByEmail(email: string): Promise<AuthenticatableUser | null> {
     const [row] = await this.db
-      .select({ id: users.id, email: users.email, passwordHash: users.passwordHash })
+      .select({
+        id: users.id,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        passwordExpiresAt: users.passwordExpiresAt,
+      })
       .from(users)
       .where(sql`lower(${users.email}) = lower(${email})`)
       .limit(1);
@@ -51,6 +58,7 @@ export class UserRepository {
         id: users.id,
         email: users.email,
         passwordHash: users.passwordHash,
+        passwordExpiresAt: users.passwordExpiresAt,
         nameFirst: users.nameFirst,
         nameLast: users.nameLast,
         emailVerifiedAt: users.emailVerifiedAt,
@@ -169,8 +177,29 @@ export class UserRepository {
     return row;
   }
 
-  /** Remplace le condensat du mot de passe. */
+  /**
+   * Remplace le mot de passe par celui que le titulaire vient de choisir.
+   *
+   * L'échéance d'un mot de passe provisoire tombe avec lui : c'est
+   * précisément ce qu'elle attendait.
+   */
   async updatePassword(id: string, passwordHash: string): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ passwordHash, passwordExpiresAt: null, updatedAt: new Date().toISOString() })
+      .where(eq(users.id, id));
+  }
+
+  /**
+   * Réécrit le condensat du **même** mot de passe, sous des paramètres plus
+   * récents.
+   *
+   * Distinct de `updatePassword` : le rehachage à la connexion ne change pas
+   * de secret, et lever l'échéance d'un mot de passe provisoire parce que ses
+   * paramètres Argon2 ont vieilli le rendrait durable sans que personne l'ait
+   * choisi.
+   */
+  async rehashPassword(id: string, passwordHash: string): Promise<void> {
     await this.db
       .update(users)
       .set({ passwordHash, updatedAt: new Date().toISOString() })

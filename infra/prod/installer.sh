@@ -451,7 +451,7 @@ printf '%s%s══════════════════════�
 if [ -n "$MOT_DE_PASSE" ]; then
   printf '  Identifiant          %s\n' "$EMAIL"
   printf '  Mot de passe         %s%s%s\n' "$G" "$MOT_DE_PASSE" "$Z"
-  printf "  %sIl n'est affiché qu'une fois.%s Notez-le, puis changez-le à la première connexion.\n\n" "$J" "$Z"
+  printf "  %sIl n'est affiché qu'une fois, et ne vaut que 24 heures.%s Changez-le à la première connexion.\n\n" "$J" "$Z"
 fi
 cat <<EOF
   À faire maintenant (détails dans docs/installation.md) :

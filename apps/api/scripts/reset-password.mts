@@ -12,15 +12,19 @@
  * Le mot de passe est **tiré au sort et affiché une fois**, comme à la
  * création : un mot de passe passé en argument reste dans l'historique du
  * shell, et un mot de passe choisi pour un compte de secours est presque
- * toujours un mot de passe déjà employé ailleurs.
+ * toujours un mot de passe déjà employé ailleurs. Comme à la création, il est
+ * provisoire : valable vingt-quatre heures, et à changer à la connexion.
  *
  * Ce script ne touche qu'à `password_hash`. Les sessions ouvertes, la double
  * authentification et les clés d'API **survivent** — c'est une reprise de mot
  * de passe, pas une mise à la porte. Qui veut fermer les accès a besoin d'un
  * geste distinct, et le fait exprès.
  */
-import { randomBytes } from "node:crypto";
-import { hashPassword } from "@gamedashboard/auth";
+import {
+  hashPassword,
+  PROVISIONAL_PASSWORD_TTL_MS,
+  provisionalPassword,
+} from "@gamedashboard/auth";
 import { createClient, users } from "@gamedashboard/db";
 import { eq } from "drizzle-orm";
 
@@ -65,23 +69,37 @@ if (!compte) {
  * dont elle connaît le mot de passe pour jouer le parcours de connexion. Un
  * exploitant qui dépanne un compte n'a aucune raison de s'en servir — le tirage
  * au sort lui évite de réemployer un mot de passe qu'il connaît déjà.
+ *
+ * Un mot de passe imposé n'expire pas : ce n'est pas un secret initial tiré
+ * par le panel, et la CI joue la connexion avec — le forcer au changement
+ * casserait sa suite. Seul le mot de passe tiré au sort est provisoire.
  */
-const impose = process.env.GD_PASSWORD?.trim();
-// base64url : pas de caractère qu'un terminal ou un copier-coller abîme.
-const password = impose && impose.length >= 12 ? impose : randomBytes(24).toString("base64url");
+const impose = process.env.GD_PASSWORD;
+const { password, expiresAt, imposed } = provisionalPassword(impose);
 
-if (impose && impose.length < 12) {
+if (impose?.trim() && !imposed) {
   console.error("GD_PASSWORD fait moins de douze caractères : ignorée, tirage au sort.");
 }
 
 await db
   .update(users)
-  .set({ passwordHash: await hashPassword(password), updatedAt: new Date().toISOString() })
+  .set({
+    passwordHash: await hashPassword(password),
+    // Posée ou levée : un mot de passe imposé remplace aussi un provisoire.
+    passwordExpiresAt: expiresAt?.toISOString() ?? null,
+    updatedAt: new Date().toISOString(),
+  })
   .where(eq(users.id, compte.id));
 
 console.log(`Mot de passe repris pour ${email} (rôle ${compte.role}).`);
-console.log(`Mot de passe provisoire : ${password}`);
-console.log("À changer à la première connexion.");
+if (imposed) {
+  console.log("Mot de passe imposé par GD_PASSWORD : sans échéance.");
+} else {
+  console.log(`Mot de passe provisoire : ${password}`);
+  console.log(
+    `Valable ${PROVISIONAL_PASSWORD_TTL_MS / 3_600_000} heures : à changer à la première connexion.`,
+  );
+}
 
 if (compte.is2fa) {
   console.log(

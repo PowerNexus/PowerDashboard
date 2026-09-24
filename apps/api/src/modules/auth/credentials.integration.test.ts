@@ -560,6 +560,78 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     });
   });
 
+  describe("mot de passe provisoire des scripts d'exploitation", () => {
+    async function withExpiry(expiresAt: Date): Promise<Account> {
+      const account = await seedAccount("admin");
+      await db
+        .update(users)
+        .set({ passwordExpiresAt: expiresAt.toISOString() })
+        .where(eq(users.id, account.id));
+      return account;
+    }
+
+    it("refuse un mot de passe provisoire expiré, sans ouvrir de session", async () => {
+      // Un secret tiré au sort par `create-admin` ou `reset-password`, affiché
+      // une fois dans un terminal, ne doit pas devenir le mot de passe durable.
+      const account = await withExpiry(new Date(Date.now() - 60_000));
+      const reply = await login(account.email, PASSWORD);
+
+      expect(reply.statusCode).toBe(403);
+      expect(reply.cookies.size).toBe(0);
+      expect(reply.body).toMatchObject({ passwordExpired: true });
+    });
+
+    it("ouvre la session d'un mot de passe provisoire encore valable, et demande de le changer", async () => {
+      const account = await withExpiry(new Date(Date.now() + 3600_000));
+      const reply = await login(account.email, PASSWORD);
+
+      expect(reply.statusCode).toBe(200);
+      expect(reply.cookies.size).toBe(1);
+      expect(reply.body).toMatchObject({ passwordChangeRequired: true });
+    });
+
+    it("le demande aussi après le second facteur", async () => {
+      const account = await withExpiry(new Date(Date.now() + 3600_000));
+      const secret = await enableTotp(account);
+      const step = await login(account.email, PASSWORD);
+      const reply = await secondFactor(
+        (step.body as { challenge: string }).challenge,
+        totpCodeAt(secret, totpStep()),
+        "203.0.113.7",
+      );
+
+      expect(reply.statusCode).toBe(200);
+      expect(reply.body).toMatchObject({ passwordChangeRequired: true });
+    });
+
+    it("lève l'échéance quand le titulaire choisit son mot de passe", async () => {
+      const account = await withExpiry(new Date(Date.now() + 3600_000));
+      const changed = fakeReply();
+      await controller.changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        signedIn(account),
+        changed as never,
+      );
+      expect(changed.statusCode).toBe(200);
+
+      const [row] = await db
+        .select({ passwordExpiresAt: users.passwordExpiresAt })
+        .from(users)
+        .where(eq(users.id, account.id));
+      expect(row?.passwordExpiresAt).toBeNull();
+      expect((await login(account.email, NEW_PASSWORD)).body).not.toHaveProperty(
+        "passwordChangeRequired",
+      );
+    });
+
+    it("ne demande rien à un mot de passe ordinaire", async () => {
+      const account = await seedAccount();
+      expect((await login(account.email, PASSWORD)).body).not.toHaveProperty(
+        "passwordChangeRequired",
+      );
+    });
+  });
+
   describe("verrou par compte", () => {
     const HOME = "203.0.113.7";
     const OUTSIDER = "198.51.100.66";

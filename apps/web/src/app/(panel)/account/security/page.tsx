@@ -7,14 +7,19 @@ import { fetchTwoFactorStatus } from "@/server/api/two-factor";
 
 export const generateMetadata = pageTitle("security", "title");
 
-export default async function SecurityPage() {
-  // Les quatre lectures sont indépendantes : les enchaîner ferait attendre la
-  // page quatre fois pour rien.
-  const [sessions, twoFactor, passkeys, sshKeys] = await Promise.all([
+export default async function SecurityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ password?: string }>;
+}) {
+  // Les lectures sont indépendantes : les enchaîner ferait attendre la page
+  // autant de fois pour rien.
+  const [sessions, twoFactor, passkeys, sshKeys, search] = await Promise.all([
     listSessions(),
     fetchTwoFactorStatus(),
     listPasskeys(),
     listSshKeys(),
+    searchParams,
   ]);
 
   return (
@@ -23,6 +28,8 @@ export default async function SecurityPage() {
       twoFactor={twoFactor}
       passkeys={passkeys}
       sshKeys={sshKeys}
+      // Posé par la connexion quand le mot de passe est provisoire.
+      provisionalPassword={search.password === "provisional"}
     />
   );
 }

@@ -10,6 +10,19 @@ import { forwardedIdentityHeaders } from "./forwarded";
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 
 /**
+ * Où mène une connexion faite avec un mot de passe provisoire : le formulaire
+ * de changement, avec l'avis qui dit pourquoi. Le mot de passe tiré par un
+ * script d'exploitation expire, et l'y conduire tout de suite évite de le
+ * découvrir le lendemain, porte fermée.
+ */
+const PROVISIONAL_PASSWORD_PAGE = "/account/security?password=provisional";
+
+/** Destination après une session ouverte. */
+function landing(body: { passwordChangeRequired?: boolean }): string {
+  return body.passwordChangeRequired ? PROVISIONAL_PASSWORD_PAGE : "/";
+}
+
+/**
  * Connexion. Le mot de passe ne traverse que le serveur : le composant client
  * soumet un formulaire, il n'appelle pas l'API lui-même.
  */
@@ -42,6 +55,7 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
     methods?: { totp: boolean; passkeys: boolean };
     remainingRecoveryCodes?: number;
     user?: { locale?: unknown };
+    passwordChangeRequired?: boolean;
   };
 
   /**
@@ -61,7 +75,7 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   }
 
   await adoptSession(response, body.user?.locale);
-  redirect("/");
+  redirect(landing(body));
 }
 
 /**
@@ -94,8 +108,9 @@ export async function submitSecondFactor(
     };
   }
 
-  await adoptSession(response, await localeOf(response));
-  redirect("/");
+  const body = await sessionBody(response);
+  await adoptSession(response, body.user?.locale);
+  redirect(landing(body));
 }
 
 /**
@@ -190,10 +205,19 @@ async function adoptSession(response: Response, locale?: unknown): Promise<void>
  * prochain changement de langue pour se mettre au diapason.
  */
 async function localeOf(response: Response): Promise<unknown> {
+  return (await sessionBody(response)).user?.locale;
+}
+
+/** Le corps d'une session ouverte, ou rien s'il a déjà été lu. */
+async function sessionBody(
+  response: Response,
+): Promise<{ user?: { locale?: unknown }; passwordChangeRequired?: boolean }> {
   try {
-    const body = (await response.json()) as { user?: { locale?: unknown } };
-    return body.user?.locale;
+    return (await response.json()) as {
+      user?: { locale?: unknown };
+      passwordChangeRequired?: boolean;
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }

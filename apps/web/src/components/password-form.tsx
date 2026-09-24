@@ -16,7 +16,7 @@ import { changePassword } from "@/server/api/password";
  * ne demande aucune connaissance de la règle et évite un aller-retour pour une
  * faute de frappe.
  */
-export function PasswordForm() {
+export function PasswordForm({ provisional = false }: { provisional?: boolean }) {
   const t = useTranslations("security");
   const tc = useTranslations("common");
   const [current, setCurrent] = useState("");
@@ -88,6 +88,14 @@ export function PasswordForm() {
       }
     >
       <div className="flex flex-col gap-4">
+        {/* Le mot de passe tiré par un script d'exploitation expire : le dire
+            ici, à l'endroit où l'on en choisit un autre. Il disparaît dès que
+            le changement a eu lieu. */}
+        {provisional && !notice ? (
+          <AlertBanner variant="warning" title={t("provisionalTitle")}>
+            {t("provisionalBody")}
+          </AlertBanner>
+        ) : null}
         {error ? (
           <AlertBanner variant="danger" title={tc("actionRefused")} dismissible>
             {error}

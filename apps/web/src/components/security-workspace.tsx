@@ -62,11 +62,14 @@ export function SecurityWorkspace({
   twoFactor,
   passkeys,
   sshKeys,
+  provisionalPassword = false,
 }: {
   initial: AccountSession[];
   twoFactor: TwoFactorStatus;
   passkeys: Passkey[];
   sshKeys: SshKey[];
+  /** Arrivé ici depuis la connexion, avec un mot de passe provisoire. */
+  provisionalPassword?: boolean;
 }) {
   const t = useTranslations("security");
   const tc = useTranslations("common");
@@ -220,7 +223,7 @@ export function SecurityWorkspace({
         </AlertBanner>
       ) : null}
 
-      <PasswordForm />
+      <PasswordForm provisional={provisionalPassword} />
 
       <TwoFactorSection initial={twoFactor} passkeys={passkeys} />
 

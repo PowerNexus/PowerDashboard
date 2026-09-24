@@ -28,6 +28,16 @@ export const users = pgTable(
      * ouvrirait la porte à une connexion sans secret.
      */
     passwordHash: text("password_hash"),
+    /**
+     * Échéance d'un mot de passe **provisoire**, tiré au sort par un script
+     * d'exploitation (`create-admin`, `reset-password`) ; nulle pour tout mot
+     * de passe choisi par son titulaire.
+     *
+     * Passé l'échéance, la connexion le refuse ; avant, elle demande d'en
+     * changer. Tout changement de mot de passe depuis le panel la lève. Voir
+     * `passwordStanding`.
+     */
+    passwordExpiresAt: moment("password_expires_at"),
     nameFirst: varchar("name_first", { length: 100 }).notNull(),
     nameLast: varchar("name_last", { length: 100 }).notNull(),
     locale: varchar("locale", { length: 10 }).notNull().default("fr"),

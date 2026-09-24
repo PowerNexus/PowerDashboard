@@ -235,12 +235,14 @@ Viennent ensuite, sans intervention :
 
   Identifiant          moi@mondomaine.fr
   Mot de passe         q3N0v…
-  Il n'est affiché qu'une fois. Notez-le, puis changez-le à la première connexion.
+  Il n'est affiché qu'une fois, et ne vaut que 24 heures. Changez-le à la première connexion.
 ```
 
 > ⚠ **Notez le mot de passe maintenant.** Il n'est enregistré nulle part en
-> clair. Perdu, il se réinitialise avec
-> `gamedashboard password moi@mondomaine.fr`, voir [§ 9](#9-en-cas-de-problème).
+> clair. Il est **provisoire** : la connexion demande d'en choisir un autre,
+> et passé vingt-quatre heures il est refusé. Perdu ou expiré, il se
+> réinitialise avec `gamedashboard password moi@mondomaine.fr`, qui en tire un
+> nouveau, lui aussi provisoire — voir [§ 9](#9-en-cas-de-problème).
 
 ### 4.3 Sauvegarder — tout de suite
 
@@ -506,7 +508,7 @@ De n'importe quel dossier :
 | `gamedashboard restart` | l'arrête puis le redémarre |
 | `gamedashboard logs` | journaux en direct (`logs api` ou `logs web` pour un seul) ; `Ctrl+C` pour sortir |
 | `gamedashboard admin <email> <prénom> <nom>` | crée un autre compte administrateur |
-| `gamedashboard password <email>` | tire un nouveau mot de passe pour un compte, affiché une fois |
+| `gamedashboard password <email>` | tire un nouveau mot de passe pour un compte, affiché une fois et valable 24 heures |
 | `gamedashboard help` | la liste complète |
 
 Ces commandes parlent à systemd, qui fait tourner le panel : il redémarre
@@ -588,7 +590,8 @@ régénèrent jamais un secret existant.
 | `nginx -t` échoue sur un autre fichier | Un autre site de la machine est mal configuré | Le message nomme le fichier fautif. Le panel n'y touche pas ; corriger ce site, puis relancer. |
 | Page « 502 Bad Gateway » | Un service est arrêté | `gamedashboard status`, puis `gamedashboard logs`. `gamedashboard start` le relance. |
 | L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre `env/` depuis une sauvegarde (§ 8, *Restaurer*). **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
-| Mot de passe administrateur perdu | — | `gamedashboard password moi@mondomaine.fr` : un nouveau mot de passe s'affiche une fois. La double authentification et les sessions ouvertes sont conservées. |
+| Mot de passe administrateur perdu | — | `gamedashboard password moi@mondomaine.fr` : un nouveau mot de passe s'affiche une fois. Il est provisoire — à changer à la connexion, refusé après 24 heures. La double authentification et les sessions ouvertes sont conservées. |
+| « Ce mot de passe provisoire a expiré » | Le mot de passe tiré par `admin` ou `password` a plus de 24 heures | `gamedashboard password moi@mondomaine.fr` en tire un nouveau. |
 | « Seconde preuve exigée » à l'entrée de l'administration | Le compte n'a pas encore de double authentification, exigée du personnel par défaut (y compris après une mise à jour d'un panel qui ne l'imposait pas) | *Compte › Sécurité › Double authentification › Activer*, puis revenir à l'administration. |
 | Le node reste « Injoignable » | Wings arrêté, port 8080 fermé, ou nom de domaine différent entre le node et le certificat | Sur le node : `journalctl -u wings -n 50`. Voir aussi le [runbook machine injoignable](./runbooks/machine-injoignable.md). |
 | `wings configure` répond 401 ou 403 | Clé expirée (trente minutes) ou déjà utilisée | *Configurer le daemon › Émettre une nouvelle clé*. |

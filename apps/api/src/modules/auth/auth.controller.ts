@@ -5,6 +5,7 @@ import {
   needsRehash,
   otpauthUri,
   type PasswordProblem,
+  passwordStanding,
   publicFailureMessage,
   verifyPassword,
 } from "@gamedashboard/auth";
@@ -326,7 +327,26 @@ export class AuthController {
     // clair. Une hausse des paramètres Argon2 se propage ainsi compte par
     // compte, à la connexion suivante, sans réinitialisation générale.
     if (needsRehash(digest)) {
-      await this.users.updatePassword(user.id, await hashPassword(parsed.data.password));
+      await this.users.rehashPassword(user.id, await hashPassword(parsed.data.password));
+    }
+
+    /*
+     * Un mot de passe provisoire expiré ne vaut plus rien (ASVS 2.3.1).
+     *
+     * Tiré au sort par un script et affiché une fois dans un terminal, il ne
+     * doit pas devenir le mot de passe durable du compte. Le refus ne vient
+     * qu'après la preuve : seul qui tient déjà le bon mot de passe apprend
+     * qu'il a expiré, et ce n'est pas compté comme un échec — le secret était
+     * juste.
+     */
+    const standing = passwordStanding(user.passwordExpiresAt);
+    if (standing === "expired") {
+      reply.status(403).send({
+        message:
+          "Ce mot de passe provisoire a expiré. Demandez-en un nouveau à l'exploitant du panel.",
+        passwordExpired: true,
+      });
+      return;
     }
 
     /**
@@ -363,7 +383,7 @@ export class AuthController {
      * précis où il lui reste six chiffres à deviner.
      */
     await this.users.recordAttempt(parsed.data.email, request.ip ?? null, true);
-    await this.issueSession(user.id, request, reply, "password");
+    await this.issueSession(user.id, request, reply, "password", standing === "provisional");
   }
 
   /**
@@ -449,7 +469,14 @@ export class AuthController {
     }
     // Toutes les preuves sont données : l'adresse devient connue du compte.
     await this.users.recordAttempt(user.email, request.ip ?? null, true);
-    await this.issueSession(user.id, request, reply, sealed.method ?? "password");
+    await this.issueSession(
+      user.id,
+      request,
+      reply,
+      sealed.method ?? "password",
+      (sealed.method ?? "password") === "password" &&
+        passwordStanding(user.passwordExpiresAt) === "provisional",
+    );
   }
 
   /**
@@ -507,6 +534,12 @@ export class AuthController {
     request: ClientRequest,
     reply: Reply,
     authMethod: string,
+    /**
+     * Entré avec un mot de passe provisoire : l'écran doit mener au
+     * changement. Le dire dans la réponse, et non dans la session, laisse la
+     * session telle que toutes les autres.
+     */
+    passwordChangeRequired = false,
   ): Promise<void> {
     const payload = await this.issuer.issue(
       userId,
@@ -525,7 +558,7 @@ export class AuthController {
       reply,
       authMethod,
     );
-    reply.send(payload);
+    reply.send(passwordChangeRequired ? { ...payload, passwordChangeRequired } : payload);
   }
 
   /**

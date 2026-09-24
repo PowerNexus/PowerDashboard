@@ -1523,6 +1523,8 @@
     "disable": "Désactiver",
     "setupTitle": "Activer la double authentification",
     "enableConfirmBody": "Votre mot de passe d'abord : un second facteur posé sur votre compte ne doit pouvoir l'être que par vous.",
+    "provisionalTitle": "Mot de passe provisoire",
+    "provisionalBody": "Ce mot de passe a été tiré au sort pour une première connexion. Choisissez-en un vôtre : passé vingt-quatre heures, il sera refusé.",
     "setupStep1": "1. Scannez ce code avec votre application",
     "setupStep1Hint": "Google Authenticator, Aegis, 1Password, Bitwarden — toutes lisent le même format.",
     "setupManual": "Ou saisissez cette clé à la main",
