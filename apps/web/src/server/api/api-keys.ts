@@ -26,18 +26,22 @@ export async function listApiKeys(): Promise<ApiKey[]> {
  *
  * C'est la seule fois où il est disponible : l'API n'en conserve qu'un
  * condensat. L'écran doit donc le montrer maintenant, ou jamais.
+ *
+ * Le mot de passe du compte est exigé : une clé survit à la session qui l'a
+ * créée. Vide pour un compte sans mot de passe local.
  */
 export async function createApiKey(
   name: string,
   scopes: string[],
   allowedIps: string[],
   /** Jours de validité ; `null` pour la durée maximale (un an), posée par l'API. */
-  expiresInDays: number | null = null,
+  expiresInDays: number | null,
+  password: string,
 ): Promise<{ plaintext: string | null; error: string | null }> {
   try {
     const { data } = await apiSendFor<{ data: { plaintext: string } }>(
       "/api/v1/client/account/api-keys",
-      { name, scopes, allowedIps, expiresInDays },
+      { name, scopes, allowedIps, expiresInDays, password },
     );
     revalidatePath("/account/api-keys");
     return { plaintext: data.plaintext, error: null };

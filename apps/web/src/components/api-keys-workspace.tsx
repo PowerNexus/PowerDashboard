@@ -16,10 +16,11 @@ import {
   Input,
   PageHeader,
   PageTemplate,
+  PasswordInput,
   PermissionMatrix,
   RelativeTime,
 } from "@gamedashboard/ui";
-import { Key, Plus, Trash2 } from "lucide-react";
+import { Key, Lock, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState, useTransition } from "react";
@@ -33,8 +34,16 @@ import { type ApiKey, createApiKey, revokeApiKey } from "@/server/api/api-keys";
  * faire, pas le compte auquel il appartient. Une clé pour un bot Discord qui ne
  * fait que redémarrer n'a aucune raison de pouvoir effacer les fichiers.
  */
-export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
+export function ApiKeysWorkspace({
+  initial,
+  localPassword,
+}: {
+  initial: ApiKey[];
+  /** Le compte a un mot de passe à redonner avant de créer une clé. */
+  localPassword: boolean;
+}) {
   const t = useTranslations("apiKeys");
+  const ts = useTranslations("security");
   const tc = useTranslations("common");
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +55,7 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
   // d'elle-même : sans fin, elle survivait à l'oubli (NC-36).
   const [days, setDays] = useState("");
   const [scopes, setScopes] = useState<string[]>(["console.read", "power.start", "power.restart"]);
+  const [password, setPassword] = useState("");
   const [created, setCreated] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -189,7 +199,12 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
                 {tc("cancel")}
               </Button>
               <Button
-                disabled={name.trim() === "" || scopes.length === 0 || pending}
+                disabled={
+                  name.trim() === "" ||
+                  scopes.length === 0 ||
+                  (localPassword && password === "") ||
+                  pending
+                }
                 onClick={() =>
                   startTransition(async () => {
                     const result = await createApiKey(
@@ -200,6 +215,7 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
                         .map((ip) => ip.trim())
                         .filter((ip) => ip !== ""),
                       days.trim() === "" ? null : Number(days),
+                      password,
                     );
                     setError(result.error);
                     if (result.plaintext) {
@@ -208,6 +224,7 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
                       setName("");
                       setIps("");
                       setDays("");
+                      setPassword("");
                       router.refresh();
                     }
                   })
@@ -257,6 +274,22 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
               </FormField>
             </div>
             <PermissionMatrix groups={PERMISSION_GROUPS} value={scopes} onChange={setScopes} />
+            {/* Une clé survit à la session qui l'a créée : elle ne se crée que
+                contre le mot de passe, sans quoi une session volée se
+                changerait en accès sans fin. */}
+            {localPassword ? (
+              <FormField label={ts("confirmPassword")} description={ts("confirmPasswordHint")}>
+                {(id) => (
+                  <PasswordInput
+                    id={id}
+                    leadingIcon={<Lock />}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                )}
+              </FormField>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

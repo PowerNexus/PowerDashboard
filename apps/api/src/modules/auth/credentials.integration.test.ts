@@ -7,7 +7,7 @@ import {
   userPasskeys,
   users,
 } from "@gamedashboard/db";
-import { Logger } from "@nestjs/common";
+import { HttpException, Logger } from "@nestjs/common";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../../test/throwaway-database";
 import { ActivityService } from "../activity/activity.service";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
+import { AccountController } from "../client/account.controller";
 import type { MailerService } from "../mail/mailer.service";
 import { NotificationPreferencesRepository } from "../notifications/notification-preferences.repository";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -27,6 +28,7 @@ import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { issueChallenge } from "./login-challenge";
 import { PasskeyRepository } from "./passkey.repository";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import { SecurityAlertRepository } from "./security-alert.repository";
 import { CREDENTIAL_CHANGE_ALERT, SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
@@ -91,6 +93,10 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
   let alerts: SecurityAlertService;
   let twoFactor: TwoFactorRepository;
   let controller: AuthController;
+  let account_: AccountController;
+  /** Doublures de ce qui n'est pas en jeu : on vérifie seulement qu'on n'y arrive pas. */
+  let sshKeys: { add: ReturnType<typeof vi.fn> };
+  let apiKeys: { create: ReturnType<typeof vi.fn> };
   /** Réglages booléens de la plateforme ; absents, ils valent faux. */
   let settings: Record<string, boolean>;
 
@@ -153,6 +159,10 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       platform,
     );
 
+    const confirmation = new PasswordConfirmationService(userRepository, alerts);
+    sshKeys = { add: vi.fn(async () => ({ id: "cle", fingerprint: "SHA256:empreinte" })) };
+    apiKeys = { create: vi.fn(async () => ({ plaintext: "gd_secret" })) };
+
     controller = new AuthController(
       userRepository,
       sessions,
@@ -160,21 +170,29 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       twoFactor,
       new PasskeyRepository(db),
       // La cérémonie WebAuthn a ses propres tests : ici, seule compte la suite.
-      { verifyRegistration: async () => true } as never,
+      {
+        verifyRegistration: async () => true,
+        registrationOptions: async () => ({ challenge: "défi" }),
+      } as never,
       { configuration: async () => null } as never,
       {} as never,
       new SessionIssuerService(sessions, userRepository, alerts),
       tokens,
       mailer,
       platform,
-      {} as never,
+      sshKeys as never,
       { accepts: async () => true } as never,
       alerts,
       {} as never,
+      confirmation,
     );
+    account_ = new AccountController(apiKeys as never, {} as never, confirmation);
   });
 
-  async function seedAccount(role: "user" | "admin" | "reseller" = "user"): Promise<Account> {
+  async function seedAccount(
+    role: "user" | "admin" | "reseller" = "user",
+    passwordHash: string | null = digest,
+  ): Promise<Account> {
     const email = `titulaire-${Math.random().toString(16).slice(2, 8)}@gamedashboard.test`;
     const [row] = await db
       .insert(users)
@@ -182,7 +200,7 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
         email,
         nameFirst: "Alex",
         nameLast: "Titulaire",
-        passwordHash: digest,
+        passwordHash,
         role,
         locale: "fr",
         timezone: "Europe/Paris",
@@ -456,6 +474,89 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
 
       expect(mail.send).toHaveBeenCalledTimes(1);
       expect(await bellOf(account.id)).toEqual(["Mot de passe modifié"]);
+    });
+  });
+
+  describe("ré-authentification avant d'enrôler une preuve ou de créer une clé", () => {
+    /** Rejoue une route avec trois corps : sans mot de passe, faux, juste. */
+    async function threeTries(
+      call: (body: Record<string, unknown>, reply: ReturnType<typeof fakeReply>) => Promise<void>,
+      body: Record<string, unknown> = {},
+    ): Promise<number[]> {
+      const statuses: number[] = [];
+      for (const password of [undefined, "pas-le-bon", PASSWORD]) {
+        const reply = fakeReply();
+        await call(password === undefined ? body : { ...body, password }, reply);
+        statuses.push(reply.statusCode);
+      }
+      return statuses;
+    }
+
+    it("ne prépare un secret TOTP que contre le mot de passe", async () => {
+      // Une session volée enrôlait son propre TOTP : le titulaire, lui, se
+      // retrouvait devant un code qu'il n'a jamais eu.
+      const account = await seedAccount();
+      const statuses = await threeTries((body, reply) =>
+        controller.twoFactorSetup(body, signedIn(account), reply as never),
+      );
+      expect(statuses).toEqual([422, 403, 201]);
+    });
+
+    it("ne rend les options d'une clé d'accès que contre le mot de passe", async () => {
+      const account = await seedAccount();
+      const statuses = await threeTries((body, reply) =>
+        controller.passkeyRegistrationOptions(body, signedIn(account), reply as never),
+      );
+      expect(statuses).toEqual([422, 403, 200]);
+    });
+
+    it("n'ajoute une clé SSH que contre le mot de passe", async () => {
+      const account = await seedAccount();
+      const statuses = await threeTries(
+        (body, reply) => controller.addSshKey(body, signedIn(account), reply as never),
+        { name: "portable", publicKey: "ssh-ed25519 AAAA vous@machine" },
+      );
+      expect(statuses).toEqual([422, 403, 201]);
+      expect(sshKeys.add).toHaveBeenCalledTimes(1);
+    });
+
+    it("ne crée une clé d'API que contre le mot de passe", async () => {
+      // Une clé d'API survit à la session qui l'a créée : c'est le moyen le
+      // plus simple de transformer une session volée en accès sans fin.
+      const account = await seedAccount();
+      const body = { name: "bot", scopes: ["power.start"] };
+      const request = { ...(signedIn(account) as object), scopes: null } as never;
+      const header = vi.fn();
+
+      const statuses: number[] = [];
+      for (const password of [undefined, "pas-le-bon", PASSWORD]) {
+        try {
+          await account_.create(request, password ? { ...body, password } : body, {
+            header,
+          } as never);
+          statuses.push(200);
+        } catch (error) {
+          statuses.push(error instanceof HttpException ? error.getStatus() : 500);
+        }
+      }
+      expect(statuses).toEqual([422, 403, 200]);
+      expect(apiKeys.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("laisse enrôler un compte sans mot de passe local, qui n'a rien à redonner", async () => {
+      // Client venu de la facturation : il n'a jamais eu de mot de passe ici.
+      // Le lui demander lui fermerait la double authentification et le SFTP
+      // par clé, sans rien protéger de plus.
+      const account = await seedAccount("user", null);
+      const reply = fakeReply();
+      await controller.twoFactorSetup({}, signedIn(account), reply as never);
+      expect(reply.statusCode).toBe(201);
+
+      // L'écran l'apprend de l'état du second facteur, et ne lui présente pas
+      // de champ qu'il ne saurait remplir.
+      expect((await controller.twoFactorStatus(signedIn(account))).data.localPassword).toBe(false);
+      const other = await seedAccount();
+      expect((await controller.twoFactorStatus(signedIn(other))).data.localPassword).toBe(true);
     });
   });
 

@@ -5,13 +5,16 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpException,
   Inject,
   Param,
   Post,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
+import { attemptOrigin, PasswordConfirmationService } from "../auth/password-confirmation.service";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { AccountPreferencesService } from "./account-preferences.service";
@@ -31,6 +34,8 @@ export class AccountController {
     @Inject(ApiKeysService) private readonly keys: ApiKeysService,
     @Inject(AccountPreferencesService)
     private readonly preferences: AccountPreferencesService,
+    @Inject(PasswordConfirmationService)
+    private readonly confirmation: PasswordConfirmationService,
   ) {}
 
   /**
@@ -67,9 +72,19 @@ export class AccountController {
    *
    * Le secret figure dans cette réponse et **nulle part ailleurs** : seul son
    * condensat est écrit en base.
+   *
+   * Le mot de passe est redemandé (ASVS 3.7.1), après la validation des champs
+   * pour qu'une faute de saisie ne coûte pas une tentative : une clé survit à
+   * la session qui l'a créée, et c'était le moyen le plus simple de changer
+   * une session volée en accès sans fin. Un compte sans mot de passe local
+   * passe, faute de secret à redonner (voir `WithoutLocalPassword`).
    */
   @Post("api-keys")
-  async create(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+  async create(
+    @Req() request: AccountRequest,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: { header(name: string, value: string): unknown },
+  ) {
     sessionOnly(request);
     const { name, scopes, allowedIps, expiresInDays } = (body ?? {}) as {
       name?: unknown;
@@ -91,6 +106,19 @@ export class AccountController {
       throw new BadRequestException("Validité invalide.");
     }
 
+    const confirmation = await this.confirmation.confirm(
+      request.user.id,
+      body,
+      attemptOrigin(request),
+      "allow",
+    );
+    if (!confirmation.ok) {
+      if (confirmation.retryAfterSeconds !== undefined) {
+        reply.header("Retry-After", String(confirmation.retryAfterSeconds));
+      }
+      throw new HttpException(confirmation.message, confirmation.status);
+    }
+
     return {
       data: await this.keys.create(
         request.user.id,
@@ -109,6 +137,12 @@ export class AccountController {
     return { data: { revoked: keyId } };
   }
 }
+
+/** `AuthenticatedRequest` ne porte ni l'adresse ni les en-têtes : Fastify les pose à part. */
+type AccountRequest = AuthenticatedRequest & {
+  ip?: string;
+  headers?: Record<string, string | string[] | undefined>;
+};
 
 /**
  * Refuse une requête authentifiée par clé d'API.

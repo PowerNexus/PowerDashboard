@@ -1522,6 +1522,7 @@
     "enable": "Enable",
     "disable": "Disable",
     "setupTitle": "Enable two-factor authentication",
+    "enableConfirmBody": "Your password first: a second factor on your account must only ever be set by you.",
     "setupStep1": "1. Scan this code with your app",
     "setupStep1Hint": "Google Authenticator, Aegis, 1Password, Bitwarden — they all read the same format.",
     "setupManual": "Or type this key by hand",

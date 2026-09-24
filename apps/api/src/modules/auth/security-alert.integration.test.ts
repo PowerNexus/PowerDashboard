@@ -17,6 +17,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import type { BrandingService } from "../reseller/branding.service";
 import type { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
 import { AuthController } from "./auth.controller";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import { SecurityAlertRepository } from "./security-alert.repository";
 import { FAILURE_ALERT, NEW_DEVICE_ALERT, SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
@@ -149,6 +150,8 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       // Les consoles de Wings non plus.
       {} as never,
       {} as never,
+      // Le verrou et la trace des échecs, que la connexion emploie.
+      new PasswordConfirmationService(users, alerts),
     );
   });
 

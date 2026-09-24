@@ -228,7 +228,7 @@ export function SecurityWorkspace({
           vaut pour tous les serveurs auxquels le compte a droit, présents et
           à venir. La poser sur l'écran d'un serveur ferait croire l'inverse. */}
       <SettingsSection title={t("sshSection")} description={t("sshSectionHint")}>
-        <SshKeyList initial={sshKeys} />
+        <SshKeyList initial={sshKeys} localPassword={twoFactor.localPassword} />
       </SettingsSection>
 
       <SettingsSection

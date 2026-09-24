@@ -49,7 +49,7 @@ export function TwoFactorSection({
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  const [confirming, setConfirming] = useState<"disable" | "regenerate" | null>(null);
+  const [confirming, setConfirming] = useState<"enable" | "disable" | "regenerate" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -61,12 +61,48 @@ export function TwoFactorSection({
     setError(null);
   };
 
-  const begin = () =>
+  /**
+   * Préparation du secret, contre le mot de passe du compte.
+   *
+   * Demandé avant le QR code et non après : sans lui, une session volée
+   * enrôlait son propre TOTP. Un compte sans mot de passe local passe
+   * directement, l'API ne lui redemande rien.
+   */
+  const begin = (secret: string) =>
     startTransition(async () => {
-      const result = await beginTwoFactorSetup();
+      const result = await beginTwoFactorSetup(secret);
       setError(result.error);
+      if (!result.setup) return;
+      setConfirming(null);
+      setPassword("");
       setSetup(result.setup);
     });
+
+  /** Les trois gestes confirmés par le mot de passe, et ce que chacun affiche. */
+  const confirmations = {
+    enable: {
+      title: t("setupTitle"),
+      description: t("enableConfirmBody"),
+      label: t("enable"),
+      variant: "primary",
+      run: () => begin(password),
+    },
+    disable: {
+      title: t("disableTitle"),
+      description: t("disableBody"),
+      label: t("disable"),
+      variant: "danger",
+      run: () => disable(),
+    },
+    regenerate: {
+      title: t("recoveryRegenerate"),
+      description: t("recoveryRegenerateHint"),
+      label: t("recoveryRegenerate"),
+      variant: "primary",
+      run: () => regenerate(),
+    },
+  } as const;
+  const confirmation = confirming ? confirmations[confirming] : null;
 
   const confirm = () =>
     startTransition(async () => {
@@ -148,7 +184,10 @@ export function TwoFactorSection({
               {t("disable")}
             </Button>
           ) : (
-            <Button disabled={pending} onClick={begin}>
+            <Button
+              disabled={pending}
+              onClick={() => (initial.localPassword ? setConfirming("enable") : begin(""))}
+            >
               <ShieldCheck /> {t("enable")}
             </Button>
           )}
@@ -181,7 +220,11 @@ export function TwoFactorSection({
           </div>
         ) : null}
 
-        <PasskeyList initial={passkeys} onRecoveryCodes={setRecoveryCodes} />
+        <PasskeyList
+          initial={passkeys}
+          localPassword={initial.localPassword}
+          onRecoveryCodes={setRecoveryCodes}
+        />
       </div>
 
       {/* --- Activation --- */}
@@ -272,21 +315,21 @@ export function TwoFactorSection({
       </Dialog>
 
       {/* --- Confirmation par mot de passe --- */}
-      <Dialog open={confirming !== null} onOpenChange={(open) => !open && close()}>
+      <Dialog open={confirmation !== null} onOpenChange={(open) => !open && close()}>
         <DialogContent
-          title={confirming === "disable" ? t("disableTitle") : t("recoveryRegenerate")}
-          description={confirming === "disable" ? t("disableBody") : t("recoveryRegenerateHint")}
+          title={confirmation?.title}
+          description={confirmation?.description}
           footer={
             <>
               <Button variant="secondary" onClick={close}>
                 {tc("cancel")}
               </Button>
               <Button
-                variant={confirming === "disable" ? "danger" : "primary"}
+                variant={confirmation?.variant}
                 disabled={password === "" || pending}
-                onClick={confirming === "disable" ? disable : regenerate}
+                onClick={confirmation?.run}
               >
-                {confirming === "disable" ? t("disable") : t("recoveryRegenerate")}
+                {confirmation?.label}
               </Button>
             </>
           }

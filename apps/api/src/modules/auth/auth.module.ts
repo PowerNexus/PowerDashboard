@@ -14,6 +14,7 @@ import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
 import { PasskeyRepository } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import { SecurityAlertRepository } from "./security-alert.repository";
 import { SecurityAlertService } from "./security-alert.service";
 import { SessionGuard } from "./session.guard";
@@ -55,6 +56,9 @@ import { UserRepository } from "./user.repository";
     // par le fabricant de sessions et par le contrôleur, jamais attendues.
     SecurityAlertService,
     SecurityAlertRepository,
+    // Le mot de passe redemandé avant un geste sensible, et le verrou qu'il
+    // partage avec la connexion.
+    PasswordConfirmationService,
     // Le lien de connexion remis au plugin de facturation. Ici et non dans le
     // module applicatif : il émet et consomme un jeton d'authentification, et
     // l'y loger aurait formé un cycle, `ApplicationModule` important déjà
@@ -97,6 +101,9 @@ import { UserRepository } from "./user.repository";
     // Sort pour l'administration, qui change l'adresse d'un compte : l'avis à
     // l'ancienne boîte part du même service que les autres alertes.
     SecurityAlertService,
+    // Sort pour le module client : la création d'une clé d'API redemande le
+    // mot de passe, avec le même verrou que la connexion.
+    PasswordConfirmationService,
     databaseProvider,
   ],
 })

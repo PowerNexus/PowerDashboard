@@ -24,6 +24,14 @@ export interface TwoFactorStatus {
    * cherche à expliquer.
    */
   required: boolean;
+  /**
+   * Le compte a-t-il un mot de passe local ?
+   *
+   * Les gestes sensibles le redemandent. Un compte venu d'un fournisseur
+   * d'identité ou de la facturation n'en a pas : l'écran ne lui présente pas
+   * de champ qu'il ne saurait remplir, et l'API ne le lui demande pas.
+   */
+  localPassword: boolean;
 }
 
 export interface TwoFactorSetup {
@@ -47,14 +55,20 @@ export async function fetchTwoFactorStatus(): Promise<TwoFactorStatus> {
   return data;
 }
 
-export async function beginTwoFactorSetup(): Promise<{
+/**
+ * Prépare un secret, contre le mot de passe du compte.
+ *
+ * Sans lui, une session volée enrôlait son propre TOTP. Vide pour un compte
+ * sans mot de passe local, que l'API ne lui redemande pas.
+ */
+export async function beginTwoFactorSetup(password: string): Promise<{
   setup: TwoFactorSetup | null;
   error: string | null;
 }> {
   try {
     const { data } = await apiSendFor<{ data: { secret: string; uri: string } }>(
       "/api/v1/auth/2fa/setup",
-      undefined,
+      { password },
     );
     return { setup: { ...data, qrSvg: await renderQr(data.uri) }, error: null };
   } catch (error) {

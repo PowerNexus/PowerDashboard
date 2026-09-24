@@ -370,7 +370,7 @@ export const SESSION_ROUTES: ApiRoute[] = [
   {
     method: "POST",
     path: "/auth/2fa/setup",
-    summary: "Prépare un secret TOTP et rend son URI otpauth.",
+    summary: "Prépare un secret TOTP et rend son URI otpauth. Mot de passe exigé.",
     scope: null,
     group: "Double authentification",
   },
@@ -405,7 +405,7 @@ export const SESSION_ROUTES: ApiRoute[] = [
   {
     method: "POST",
     path: "/auth/2fa/passkeys/options",
-    summary: "Options d'enregistrement WebAuthn et défi scellé.",
+    summary: "Options d'enregistrement WebAuthn et défi scellé. Mot de passe exigé.",
     scope: null,
     group: "Clés d'accès",
   },

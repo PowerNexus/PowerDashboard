@@ -6,7 +6,6 @@ import {
   otpauthUri,
   type PasswordProblem,
   publicFailureMessage,
-  throttleDecision,
   verifyPassword,
 } from "@gamedashboard/auth";
 import {
@@ -41,6 +40,13 @@ import { ImpersonationReadOnlyGuard } from "./impersonation.guard";
 import { issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
+import {
+  attemptOrigin,
+  type ConfirmedUser,
+  PasswordConfirmationService,
+  pause,
+  type WithoutLocalPassword,
+} from "./password-confirmation.service";
 import { relyingPartyFromEnv } from "./relying-party";
 import type { CredentialChange } from "./security-alert.messages";
 import { type FailureStage, SecurityAlertService } from "./security-alert.service";
@@ -123,8 +129,6 @@ const PasskeyAssertion = z.object({
   challenge: z.string().min(1),
   response: z.unknown(),
 });
-
-const PasswordConfirmation = z.object({ password: z.string().min(1) });
 
 /**
  * Ajout d'une clé publique SSH.
@@ -234,6 +238,8 @@ export class AuthController {
     // Les consoles ouvertes par une session se ferment avec elle (NC-43).
     @Inject(WingsTokenService) private readonly wingsTokens: WingsTokenService,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
+    @Inject(PasswordConfirmationService)
+    private readonly confirmation: PasswordConfirmationService,
   ) {}
 
   /**
@@ -448,14 +454,7 @@ export class AuthController {
 
   /**
    * Consigne un échec, et prévient le titulaire au cinquième d'affilée (§5.1).
-   *
-   * `account` est nul pour une adresse inconnue : il n'y a alors personne à
-   * prévenir, et rien n'entre au journal d'audit — l'identifiant saisi n'y
-   * serait qu'une chaîne quelconque, parfois un mot de passe tapé dans le
-   * mauvais champ. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
-   * l'alerte part en tâche détachée, sans rien attendre ni rien renvoyer, si
-   * bien qu'un compte existant et une adresse inventée répondent pareil et
-   * dans le même temps.
+   * La règle vit dans `PasswordConfirmationService.recordFailure`.
    */
   private async recordFailure(
     email: string,
@@ -463,16 +462,7 @@ export class AuthController {
     account: { id: string; email: string } | null,
     stage: FailureStage,
   ): Promise<void> {
-    await this.users.recordAttempt(email, request.ip ?? null, false);
-    if (!account) return;
-    this.alerts.afterFailure({
-      userId: account.id,
-      email: account.email,
-      ip: request.ip ?? null,
-      userAgent: headerValue(request.headers["user-agent"]),
-      host: arrivalHost(request),
-      stage,
-    });
+    await this.confirmation.recordFailure(email, attemptOrigin(request), account, stage);
   }
 
   /**
@@ -494,7 +484,7 @@ export class AuthController {
     ip: string | null,
     reply: Reply,
   ): Promise<{ delayMs: number } | null> {
-    const decision = throttleDecision(await this.users.recentFailures(email, ip));
+    const decision = await this.confirmation.throttle(email, ip);
     if (decision.action === "allow") return { delayMs: decision.delayMs };
 
     reply
@@ -1160,9 +1150,12 @@ export class AuthController {
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
   async twoFactorStatus(
     @Req() request: ClientRequest,
-  ): Promise<{ data: TwoFactorStatus & { required: boolean } }> {
+  ): Promise<{ data: TwoFactorStatus & { required: boolean; localPassword: boolean } }> {
     const user = requireUser(request);
-    const status = await this.twoFactor.status(user.id);
+    const [status, account] = await Promise.all([
+      this.twoFactor.status(user.id),
+      this.users.findById(user.id),
+    ]);
 
     /*
      * La plateforme exige-t-elle une seconde preuve de **ce** compte ?
@@ -1180,7 +1173,16 @@ export class AuthController {
       requiresStaffSecondFactor(user.role) &&
       (await this.platform.boolean("security.staffRequires2fa"));
 
-    return { data: { ...status, required } };
+    /*
+     * Le compte a-t-il un mot de passe local à redonner ?
+     *
+     * Les gestes sensibles le redemandent ; un compte venu d'un fournisseur
+     * d'identité ou de la facturation n'en a pas, et l'écran ne doit pas lui
+     * présenter un champ qu'il ne saurait pas remplir.
+     */
+    const localPassword = Boolean(account?.passwordHash);
+
+    return { data: { ...status, required, localPassword } };
   }
 
   /**
@@ -1190,11 +1192,22 @@ export class AuthController {
    * fourni : une préparation abandonnée à mi-chemin — onglet fermé, téléphone à
    * plat — ne doit pas laisser un compte protégé par un secret que personne
    * n'a.
+   *
+   * Le mot de passe est redemandé (ASVS 3.7.1) : sans lui, une session volée
+   * enrôlait son propre TOTP, et le titulaire se retrouvait devant un code
+   * qu'il n'a jamais eu. Un compte sans mot de passe local passe, faute de
+   * secret à redonner (voir `WithoutLocalPassword`).
    */
   @Post("2fa/setup")
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
-  async twoFactorSetup(@Req() request: ClientRequest, @Res() reply: Reply): Promise<void> {
-    const user = requireUser(request);
+  async twoFactorSetup(
+    @Body() body: unknown,
+    @Req() request: ClientRequest,
+    @Res() reply: Reply,
+  ): Promise<void> {
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const status = await this.twoFactor.status(user.id);
     if (status.enabled) {
       // Repartir d'un secret neuf effacerait celui qui fonctionne, sur une
@@ -1619,7 +1632,11 @@ export class AuthController {
       return;
     }
 
-    const user = requireUser(request);
+    // Une clé SSH ouvre les fichiers de tous les serveurs du compte, et survit
+    // à la session qui l'a posée : le mot de passe est redemandé.
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const key = await this.sshKeys.add(user.id, parsed.data.name, parsed.data.publicKey);
 
     await this.activity.record({
@@ -1673,13 +1690,22 @@ export class AuthController {
    * Le défi aléatoire ne part pas seul : il revient dans un jeton chiffré que
    * l'API pourra relire. Le garder en mémoire côté serveur supposerait une
    * seule instance d'API, ce que la première mise à l'échelle démentirait.
+   *
+   * Le mot de passe est redemandé ici, au début de la cérémonie : c'est le
+   * seul moment où l'écran peut encore le demander, avant que la boîte de
+   * dialogue du navigateur ne prenne la main. Le défi scellé qui en sort vaut
+   * ensuite confirmation pour l'enregistrement.
    */
   @Post("2fa/passkeys/options")
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
   async passkeyRegistrationOptions(
+    @Body() body: unknown,
     @Req() request: ClientRequest,
-  ): Promise<{ data: { options: unknown; challenge: string } }> {
-    const user = requireUser(request);
+    @Res() reply: Reply,
+  ): Promise<void> {
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const rp = relyingPartyFromEnv();
     const options = await this.passkeyService.registrationOptions(rp, {
       id: user.id,
@@ -1687,12 +1713,12 @@ export class AuthController {
       name: `${user.nameFirst} ${user.nameLast}`.trim(),
     });
 
-    return {
+    reply.status(200).send({
       data: {
         options,
         challenge: issueChallenge("passkey-register", user.id, { webauthn: options.challenge }),
       },
-    };
+    });
   }
 
   /** Vérifie l'enregistrement et range la clé. */
@@ -1925,42 +1951,31 @@ export class AuthController {
   /**
    * Relit le compte appelant après confirmation de son mot de passe.
    *
-   * Répond elle-même en cas de refus et rend `null` : les deux routes qui
-   * l'emploient ont le même contrôle à faire, et le dupliquer ferait qu'un jour
-   * l'une des deux l'oublierait.
+   * Répond elle-même en cas de refus et rend `null` : toutes les routes qui
+   * l'emploient ont le même contrôle à faire, et le dupliquer ferait qu'un
+   * jour l'une d'elles l'oublierait. Le contrôle lui-même vit dans
+   * `PasswordConfirmationService`, que la création d'une clé d'API emploie
+   * aussi.
    */
   private async confirmedUser(
     body: unknown,
     request: ClientRequest,
     reply: Reply,
-  ): Promise<{ id: string; email: string } | null> {
-    const parsed = PasswordConfirmation.safeParse(body);
-    if (!parsed.success) {
-      reply.status(422).send({ message: "Mot de passe attendu." });
-      return null;
+    withoutLocalPassword: WithoutLocalPassword = "refuse",
+  ): Promise<ConfirmedUser | null> {
+    const outcome = await this.confirmation.confirm(
+      requireUser(request).id,
+      body,
+      attemptOrigin(request),
+      withoutLocalPassword,
+    );
+    if (outcome.ok) return outcome.user;
+
+    if (outcome.retryAfterSeconds !== undefined) {
+      reply.header("Retry-After", String(outcome.retryAfterSeconds));
     }
-
-    const session = requireUser(request);
-    const user = await this.users.findById(session.id);
-    if (!user?.passwordHash) {
-      reply.status(409).send({ message: "Ce compte n'a pas de mot de passe local." });
-      return null;
-    }
-
-    // Même verrou qu'à la connexion : ces routes retirent le second facteur ou
-    // une passkey, une session volée ne doit pas pouvoir y deviner le mot de
-    // passe sans limite.
-    const throttle = await this.throttle(user.email, request.ip ?? null, reply);
-    if (throttle === null) return null;
-
-    if (!(await verifyPassword(user.passwordHash, parsed.data.password))) {
-      await this.recordFailure(user.email, request, user, "reauthentication");
-      await pause(throttle.delayMs);
-      reply.status(403).send({ message: "Mot de passe incorrect." });
-      return null;
-    }
-
-    return user;
+    reply.status(outcome.status).send({ message: outcome.message });
+    return null;
   }
 
   /**
@@ -2060,10 +2075,6 @@ function isPanelRedirect(redirectUri: string): boolean {
   } catch {
     return false;
   }
-}
-
-function pause(ms: number): Promise<void> {
-  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 /**
