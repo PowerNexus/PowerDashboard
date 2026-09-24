@@ -26,8 +26,8 @@ Les empreintes ci-dessous sont celles de cette branche.
 
 **Vérification finale** (24 septembre 2026) : `pnpm lint`, `pnpm typecheck`,
 `pnpm db:check` (migrations 0042 à 0044), `pnpm openapi` sans différence,
-`pnpm build` ; `pnpm test` avec PostgreSQL entièrement vert (API 1 051 tests,
-contracts 472, auth 142, web 44, et le reste) ; e2e : 50 parcours verts
+`pnpm build` ; `pnpm test` avec PostgreSQL entièrement vert (API 1 055 tests
+en 111 fichiers, contracts 472, auth 142, web 44, et le reste) ; e2e : 50 parcours verts
 (authentification, CSP, accessibilité, installation, bureau et mobile),
 Lighthouse 100 / 98 / 96 / 100 ; `nginx -t` sur `panel.conf` et
 `gamedashboard.local.conf`. Sondes rejouées sur l'application compilée : écriture
@@ -137,6 +137,7 @@ par cookie refusée depuis une autre origine (`Origin`, `Sec-Fetch-Site`,
 | `1cb0d55` | **Le lien de la facturation ne connectait personne** : la page posait le cookie pendant son rendu, ce que Next interdit ; chaque arrivée sans second facteur finissait en 500, session ouverte côté API et jamais remise au navigateur. Reproduit sur une instance jetable | `billing-link.test.ts` |
 | `9835769` | Quota de ports compté hors transaction : cinq demandes simultanées passaient toutes (même défaut que NC-08) | `allocations.integration.test.ts` |
 | `8be4083` | Rétention : décompte lu sous `rowCount`, que postgres-js n'expose pas — l'écran annonçait toujours « 0 ligne », et une seule tranche par heure | `retention.integration.test.ts` |
+| `efdeafa` | Nettoyage des bases de test : il coupait aussi l'autovacuum, superutilisateur, et le fichier échouait au nettoyage, tous ses tests verts | `throwaway-database.integration.test.ts` |
 | `0239c39` | Le « piège connu » de la consigne (`security-alert` › panne de courrier) n'était pas Argon2 : le test libérait l'envoi avant son départ et attendait pour toujours. La connexion, elle, répondait en 78 ms | le test lui-même, trois exécutions vertes |
 
 ### 0.5 Ce qui reste, et pourquoi
