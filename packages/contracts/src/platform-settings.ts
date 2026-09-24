@@ -36,8 +36,12 @@ export interface SettingDescriptor {
    *   des revendeurs. Ces valeurs finissent dans un `src` ou un `href`.
    * - `hex` : couleur hexadécimale (`normalizeHex`). Elle finit dans une
    *   variable CSS, où une chaîne libre injecterait des déclarations.
+   * - `outbound` : adresse que **le panel appelle lui-même** — `https://`, et
+   *   jamais une destination interne (boucle locale, réseau privé, service
+   *   de métadonnées). L'API le vérifie en résolvant le nom
+   *   (`assertPublicDestination`, rapport ASVS NC-56).
    */
-  format?: "url" | "hex";
+  format?: "url" | "hex" | "outbound";
 }
 
 export interface SettingGroup {
@@ -416,6 +420,10 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         description:
           "La page publique. Le panel y lit « summary.json », qui ne demande aucune clé — la lecture reste donc possible même si la clé d'API expire.",
         placeholder: "https://status.gamedashboard.fr",
+        // Le panel lit cette page lui-même, et publie ce qu'il lit dans la
+        // bannière de chaque page : une adresse interne en ferait une fenêtre
+        // sur son propre réseau.
+        format: "outbound",
       },
       {
         key: "instatus.showBanner",

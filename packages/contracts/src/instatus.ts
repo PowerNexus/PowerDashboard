@@ -144,10 +144,13 @@ function readState(
 /**
  * Compose l'adresse du résumé à partir de celle de la page.
  *
- * Rend `null` pour toute adresse qui n'est pas une URL http(s) : la valeur
+ * Rend `null` pour toute adresse qui n'est pas une URL **https** : la valeur
  * vient d'un champ de formulaire, et une adresse en `file:` ou une adresse
  * interne feraient de ce réglage un moyen de faire émettre au serveur des
- * requêtes qu'on choisit à sa place.
+ * requêtes qu'on choisit à sa place. `http:` est refusé aussi (rapport ASVS,
+ * NC-56) : une page de statut publique est servie en https, et le résumé lu
+ * est publié dans chaque page du panel. La destination interne, elle, se
+ * juge côté API (`assertPublicDestination`), qui sait résoudre un nom.
  */
 export function instatusSummaryUrl(pageUrl: string): string | null {
   let parsed: URL;
@@ -157,7 +160,7 @@ export function instatusSummaryUrl(pageUrl: string): string | null {
     return null;
   }
 
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  if (parsed.protocol !== "https:") return null;
 
   parsed.pathname = "/summary.json";
   parsed.search = "";

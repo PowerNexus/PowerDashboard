@@ -89,6 +89,14 @@ export class DatabaseHostsService {
    * Sert au bouton « tester » du formulaire, et au contrôle fait avant toute
    * écriture. Le mot de passe arrive en clair de l'écran d'administration, ne
    * traverse que cette requête, et n'est écrit nulle part quand le test échoue.
+   *
+   * **Aucun filtre de destination, à dessein** (rapport ASVS, NC-56). Un hôte
+   * MySQL vit presque toujours sur le réseau privé de l'hébergeur, à côté des
+   * nodes : refuser les adresses internes, comme on le fait pour un rappel
+   * sortant, interdirait le cas normal. Ce qui borne la sonde : elle est
+   * réservée à l'administrateur (`AdminWriteGuard`), consignée avec l'hôte et
+   * le port (`admin.database_host_tested`), ne parle que le protocole MySQL,
+   * et ne rend que la version du serveur ou le message de refus du pilote.
    */
   async probe(input: {
     name: string;

@@ -51,6 +51,28 @@ describe("écriture des réglages", () => {
     expect(String(written[0]?.value)).not.toContain("mon-mot-de-passe");
   });
 
+  it.each([
+    "http://status.gamedashboard.fr",
+    "https://127.0.0.1",
+    "https://192.168.1.10",
+    "https://status.internal",
+    "file:///etc/passwd",
+  ])("refuse la page Instatus « %s » : le panel l'appellerait lui-même", async (adresse) => {
+    // NC-56 : la réponse est publiée dans la bannière de chaque page.
+    const { svc, written } = service();
+    await expect(svc.save({ "instatus.pageUrl": adresse })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(written).toEqual([]);
+  });
+
+  it("accepte une page Instatus publique en https, et l'effacement", async () => {
+    const { svc, written } = service();
+    await svc.save({ "instatus.pageUrl": "https://93.184.216.34" });
+    await svc.save({ "instatus.pageUrl": "" });
+    expect(written.map((row) => row.value)).toEqual(["https://93.184.216.34", ""]);
+  });
+
   it("ignore un secret reçu vide plutôt que d'effacer", async () => {
     // Le champ est toujours vide à l'écran, puisqu'on ne relit jamais un
     // secret. Sans cette règle, enregistrer la marque effacerait le SMTP.

@@ -16,6 +16,7 @@ import { type Database, featureFlags, settings } from "@gamedashboard/db";
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { eq, inArray } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { assertPublicDestination, PrivateDestinationError } from "../../common/public-url";
 import { decryptRowSecret, encryptRowSecret } from "../../common/row-secrets";
 
 /**
@@ -436,6 +437,9 @@ export class PlatformSettingsService {
           `« ${descriptor.label} » doit être une couleur hexadécimale, comme #0ea5e9.`,
         );
       }
+      if (descriptor.format === "outbound" && text !== "") {
+        await assertOutboundSetting(text, descriptor.label);
+      }
 
       await this.upsert(
         key,
@@ -526,6 +530,36 @@ export class PlatformSettingsService {
         target: settings.key,
         set: { value, isSecret, updatedAt: new Date().toISOString() },
       });
+  }
+}
+
+/**
+ * Une adresse que le panel appellera lui-même : `https://`, et publique.
+ *
+ * Contrôlée à l'enregistrement pour que l'administrateur l'apprenne tout de
+ * suite ; le service qui appelle la juge encore à chaque lecture, puisque le
+ * nom peut résoudre ailleurs ensuite (rapport ASVS, NC-56).
+ */
+async function assertOutboundSetting(value: string, label: string): Promise<void> {
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
+  }
+  if (url?.protocol !== "https:") {
+    throw new BadRequestException(`« ${label} » doit commencer par « https:// ».`);
+  }
+
+  try {
+    await assertPublicDestination(url);
+  } catch (error) {
+    if (error instanceof PrivateDestinationError) {
+      throw new BadRequestException(
+        `« ${label} » : ${error.message} Le panel appellerait lui-même cette adresse.`,
+      );
+    }
+    throw error;
   }
 }
 

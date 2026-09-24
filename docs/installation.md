@@ -401,7 +401,7 @@ parler.
    |---|---|
    | Nom | ce que vous voulez, ex. `Node 1` |
    | Nom de domaine | `node1.mondomaine.fr` — **le même que dans le script** |
-   | Schéma | `https` |
+   | Schéma | `https` — `http` n'existe que pour un poste de développement : le jeton du node et les commandes du panel circuleraient en clair |
    | Port du daemon | `8080` |
    | Port SFTP | `2022` |
    | Localisation | celle créée juste avant |

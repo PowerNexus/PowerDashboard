@@ -284,6 +284,17 @@ export class InfrastructureService {
       );
     }
 
+    /*
+     * `http` reste admis, et c'est un choix écrit (rapport ASVS, NC-56).
+     *
+     * Le jeton du node et chaque commande du panel voyagent alors en clair :
+     * ce n'est acceptable que sur un poste de développement, où Wings tourne
+     * sans certificat. Le refuser obligerait à monter une autorité de
+     * certification pour le moindre essai ; le garder coûte un geste de
+     * l'administrateur, seul à pouvoir le choisir, et le guide d'installation
+     * le dit. Aucun filtre de destination non plus : un node vit par nature
+     * sur le réseau de l'hébergeur, souvent en adresse privée.
+     */
     if (input.scheme !== "http" && input.scheme !== "https") {
       throw new BadRequestException("Le schéma est « http » ou « https ».");
     }
