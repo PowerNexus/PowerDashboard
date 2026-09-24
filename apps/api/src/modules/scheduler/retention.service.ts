@@ -397,8 +397,11 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
       const result = (await this.db.transaction(async (tx) => {
         await tx.execute(sql`select set_config('gamedashboard.retention', 'on', true)`);
         return await tx.execute(statement);
-      })) as unknown as { rowCount?: number };
-      const removed = result.rowCount ?? 0;
+      })) as unknown as { count?: number };
+      // `count` et non `rowCount` : c'est le nom que lui donne postgres-js. Lu
+      // sous l'autre nom, chaque tranche valait zéro — l'écran annonçait
+      // « 0 ligne » quoi qu'il arrive, et la boucle s'arrêtait à la première.
+      const removed = result.count ?? 0;
       total += removed;
 
       // Moins qu'une tranche pleine : il ne reste rien à retirer pour cette

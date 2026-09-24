@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { applicationKeys, type Database, idempotencyRecords } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createThrowawayDatabase,
@@ -62,4 +63,30 @@ describe.skipIf(!HAS_DATABASE)("rétention (intégration)", () => {
       .from(idempotencyRecords);
     expect(restantes.map((row) => row.key)).toEqual(["hostbill-service-recent"]);
   });
+
+  /**
+   * Le décompte des lignes retirées se lisait dans `rowCount`, qui n'existe
+   * pas avec postgres-js (le client rend `count`). Chaque tranche valait donc
+   * zéro : l'écran annonçait « 0 ligne » quoi qu'il arrive, et la boucle
+   * s'arrêtait après la première tranche, faute de la croire pleine — une
+   * table en retard ne se rattrapait que de 20 000 lignes par heure.
+   */
+  it("compte les lignes retirées et enchaîne les tranches pleines", async () => {
+    const TRANCHE = 20_000;
+    await db.execute(sql`
+      insert into login_attempts (email, ip, success, at)
+      select 'ancien@gamedashboard.test', '203.0.113.7', false, now() - interval '31 days'
+      from generate_series(1, ${TRANCHE + 5})
+    `);
+
+    const retention = new RetentionService(db);
+    await retention.tick();
+
+    const ligne = retention.report().tables.find((table) => table.table === "login_attempts");
+    expect(ligne?.rows).toBe(TRANCHE + 5);
+    const [reste] = (await db.execute(
+      sql`select count(*)::int as n from login_attempts`,
+    )) as unknown as Array<{ n: number }>;
+    expect(reste?.n).toBe(0);
+  }, 60_000);
 });
