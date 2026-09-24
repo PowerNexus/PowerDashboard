@@ -11,7 +11,7 @@ Tout le projet — code, commentaires, documentation — est rédigé **en fran�
 - **Ne pas compiler après chaque retouche.** Un `pnpm typecheck && pnpm test` complet se justifie après un changement structurel.
 - **Aucun secret dans le dépôt.** Les `.env` sont ignorés à tous les niveaux ; seuls les `.env.example` sont versionnés.
 - **Git** : ne commiter ou pousser que sur demande de Matheo. Branche principale `main`.
-- **Aucune mention de l'ancien hébergeur de la bêta distante**, résiliée. La seule installation est la production locale `https://gamedashboard.local`.
+- **Aucune mention de l'ancien hébergeur de la bêta distante**, résiliée. Deux installations : la production locale `https://gamedashboard.local` et l'hébergement cPanel `https://lema7787.odns.fr` (section plus bas).
 - Une page = template + hooks + organismes, moins de 80 lignes. Aucune couleur en dur : tokens de `packages/ui/src/styles/tokens.css`.
 - Chaque correction de défaut s'accompagne d'un test de non-régression.
 
@@ -33,6 +33,17 @@ L'environnement se prépare avec `.claude/cloud-setup.sh` (Node 24, pnpm épingl
 3. `cloudflared tunnel --no-autoupdate --url http://localhost:3000`, donner l'adresse `trycloudflare.com` et la reporter dans `PANEL_ORIGIN` (API et interface), sinon le contrôle d'origine refuse les requêtes.
 
 L'adresse est publique : données de démonstration seulement, tunnel arrêté en fin de session. Il faut une sortie TCP ou UDP sur le port 7844 (`*.v2.argotunnel.com`) : si la politique réseau de l'environnement la ferme, le tunnel échoue — le dire, ne pas contourner.
+
+### Hébergement cPanel (`lema7787.odns.fr`)
+
+Mutualisé, sans nginx, systemd ni Docker : deux applications « Setup Node.js App » (Passenger), l'interface sur `lema7787.odns.fr`, l'API sur `api.lema7787.odns.fr`. Pas à pas, vérifications et limites : [docs/hebergement-cpanel.md](./docs/hebergement-cpanel.md).
+
+- **Rien ne s'y construit.** Après chaque CI verte sur `main`, `.github/workflows/deploiement.yml` pousse la construction sur la branche `deploiement` par `infra/cpanel/publier-construction.sh` : un seul commit sans parent, remplacé à chaque publication, sans `.github` (un jeton de workflow ne peut pas en pousser). Cette branche ne se modifie qu'avec ce script. La publier depuis une session (`pnpm build && bash infra/cpanel/publier-construction.sh`) est un push : sur demande de Matheo.
+- **Sur l'hébergement, `~/gamedashboard/`** : `depot/` (clone de « Git Version Control », tenu sur `deploiement`), `env/api.env` et `env/web.env` (secrets, 0600, jamais dans l'écran de cPanel), `versions/<commit>/`, `actuelle` → la version en service, `passenger/api|interface/app.cjs`. Ces racines d'application ne font qu'une ligne : CloudLinux y pose son propre `node_modules`, incompatible avec pnpm. Jamais « Run NPM Install ».
+- **Cron** : `infra/cpanel/deployer.sh` toutes les cinq minutes (fetch, `git archive` dans un dossier neuf, `pnpm install --frozen-lockfile`, migrations, bascule atomique d'`actuelle`, `tmp/restart.txt`), et `curl …/api/health` chaque minute : sans lui, Passenger endort l'API et ses tâches de fond.
+- **Wings et la facturation** appellent `PANEL_ORIGIN`, qui ne sert que Next. `API_RELAY=1` (posé par `infra/cpanel/interface.cjs`) fait relayer à Next exactement les préfixes que `infra/prod/panel.conf` envoie à l'API (`apps/web/src/server/api-relay.ts`, sans cookie ; un test vérifie la concordance). Un préfixe ajouté au vhost l'est aussi au relais.
+- **En-têtes** : `infra/cpanel/entetes.cjs` refait l'hygiène de nginx à partir des `!~Passenger-*`, que Passenger seul peut écrire (adresse réelle dans `X-Forwarded-For`, `X-Forwarded-Host` = `Host`, `CF-IPCountry` effacé). `TRUSTED_PROXIES` de l'API y contient l'adresse IP du serveur.
+- **Limites acceptées** : API joignable sur son sous-domaine (toutes ses routes authentifiées), pas de `limit_req` en amont, un seul processus par application (les tâches de fond le supposent), HSTS à poser dans le `.htaccess`, sortie vers Wings à ouvrir chez l'hébergeur si elle est filtrée.
 
 ## Commandes
 
@@ -80,3 +91,4 @@ Fait, avec tests de non-régression :
 - **`infra/prod`** : modèle de production à adapter (la bêta distante est résiliée), `deploy.sh` corrigé (il cherchait le vhost sous le nom du domaine).
 - **Installation guidée** : `infra/prod/installer.sh` (panel) et `installer-wings.sh` (machine de jeu), guide pas à pas `docs/installation.md`. Le vhost démarre sur une machine neuve (map `$gd_connection`, `tls-intermediate.conf` livré, `http2` adapté à nginx < 1.25.1) — `infra-prod.test.ts`.
 - **Releases** : `release.yml` (étiquette `v*`) rejoue `ci.yml`, compile, assemble (`infra/release/assembler.sh`) et publie l'archive compilée. Côté serveur, une commande : `curl …/releases/latest/download/gamedashboard.sh | sudo bash -s -- install`. `infra/prod/app.sh` est la CLI complète et autonome (publiée `gamedashboard.sh`, installée `/usr/local/bin/gamedashboard`, appelée par les scripts `app:`) : `install`, `setup`, `update` (sauvegarde puis nouvelle version), `backup` (base + `env/`, archive chiffrée, clé `backup.key` hors de `env/`, à garder ailleurs), `start|stop|restart|status|logs`, `admin`, `password`, `wings`, `release`, `help`. Jamais de script sans préfixe portant le nom d'une commande de pnpm (`setup`, `restart`…) : pnpm lance la sienne. Le contrôle de fin de `deploy.sh` cherche `>Une erreur est survenue<` : le texte seul est dans le catalogue embarqué de chaque page.
+- **Hébergement cPanel** : section du même nom plus haut. `assembler.sh` exclut aussi `.next/dev`, qu'un assemblage fait depuis un poste de travail embarquait (près de 300 Mo).
