@@ -36,6 +36,7 @@ process.env.APP_SECRET_KEY ??= "clé de test des défis de connexion, jamais emp
 function fakeReply() {
   const reply = {
     statusCode: 200,
+    body: undefined as unknown,
     cookies: new Map<string, string>(),
     status(code: number) {
       reply.statusCode = code;
@@ -47,7 +48,9 @@ function fakeReply() {
       return reply;
     },
     clearCookie: () => reply,
-    send() {},
+    send(body: unknown) {
+      reply.body = body;
+    },
   };
   return reply;
 }
@@ -77,7 +80,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
   });
 
   /** Un contrôleur tel qu'un processus de l'API le construit, sur la base partagée. */
-  async function processus(): Promise<AuthController> {
+  async function processus(passkeyService: unknown = {}): Promise<AuthController> {
     const { AuthController } = await import("./auth.controller");
     const usersRepo = new UserRepository(db);
     const sessionsRepo = new SessionRepository(db);
@@ -89,6 +92,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     args[1] = sessionsRepo;
     args[2] = new ActivityService(db);
     args[3] = new TwoFactorRepository(db);
+    args[5] = passkeyService;
     args[8] = issuer;
     args[9] = new AuthTokenRepository(db);
     args[14] = { afterFailure: () => undefined };
@@ -137,6 +141,96 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     expect(rejeu.cookies.size).toBe(0);
     const ouvertes = await db.select().from(sessions).where(eq(sessions.userId, compte.id));
     expect(ouvertes).toHaveLength(1);
+  });
+
+  /**
+   * NC-32 : le défi `login` survivait à une connexion par clé d'accès.
+   *
+   * Seul le défi `passkey-login`, dérivé du premier, était consommé : le défi
+   * `login` restait valable cinq minutes après la connexion, et rouvrait une
+   * session avec un code de secours ou une nouvelle cérémonie.
+   */
+  it("consomme le défi de connexion quand la clé d'accès a ouvert la session", async () => {
+    vi.stubEnv("PANEL_ORIGIN", "https://panel.gamedashboard.test");
+    try {
+      const compte = await compteAvecCodesDeSecours();
+      const challenge = issueChallenge("login", compte.id, { method: "password" });
+      // Seule la vérification cryptographique est simulée : elle n'est pas
+      // en cause, et le reste — défis, consommation, session — est réel.
+      const auth = await processus({
+        authenticationOptions: async () => ({ challenge: "defi-webauthn" }),
+        verifyAuthentication: async () => true,
+      });
+
+      const options = fakeReply();
+      await auth.passkeyAuthenticationOptions({ challenge }, options as never);
+      const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
+
+      const passkey = fakeReply();
+      await auth.loginWithPasskey(
+        { challenge: ceremonie, response: {} },
+        REQUEST as never,
+        passkey as never,
+      );
+      expect(passkey.statusCode).toBe(200);
+      expect(passkey.cookies.size).toBe(1);
+
+      // Le même défi de connexion ne rouvre plus rien : ni par un code de
+      // secours, ni par une nouvelle cérémonie.
+      const rejeu = fakeReply();
+      await auth.loginTwoFactor(
+        { challenge, recoveryCode: compte.codes[0] },
+        REQUEST as never,
+        rejeu as never,
+      );
+      expect(rejeu.statusCode).toBe(401);
+      expect(rejeu.cookies.size).toBe(0);
+
+      const autreCeremonie = fakeReply();
+      await auth.passkeyAuthenticationOptions({ challenge }, autreCeremonie as never);
+      expect(autreCeremonie.statusCode).toBe(401);
+
+      const ouvertes = await db.select().from(sessions).where(eq(sessions.userId, compte.id));
+      expect(ouvertes).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("refuse la clé d'accès quand le défi de connexion a déjà servi", async () => {
+    vi.stubEnv("PANEL_ORIGIN", "https://panel.gamedashboard.test");
+    try {
+      const compte = await compteAvecCodesDeSecours();
+      const challenge = issueChallenge("login", compte.id, { method: "password" });
+      const auth = await processus({
+        authenticationOptions: async () => ({ challenge: "defi-webauthn" }),
+        verifyAuthentication: async () => true,
+      });
+
+      // La cérémonie est ouverte, puis le défi sert au code de secours.
+      const options = fakeReply();
+      await auth.passkeyAuthenticationOptions({ challenge }, options as never);
+      const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
+
+      const code = fakeReply();
+      await auth.loginTwoFactor(
+        { challenge, recoveryCode: compte.codes[0] },
+        REQUEST as never,
+        code as never,
+      );
+      expect(code.statusCode).toBe(200);
+
+      const passkey = fakeReply();
+      await auth.loginWithPasskey(
+        { challenge: ceremonie, response: {} },
+        REQUEST as never,
+        passkey as never,
+      );
+      expect(passkey.statusCode).toBe(401);
+      expect(passkey.cookies.size).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("ne consomme le défi qu'une fois, même sous des demandes simultanées", async () => {

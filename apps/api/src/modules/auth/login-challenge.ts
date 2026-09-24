@@ -59,13 +59,27 @@ interface ChallengePayload {
    * est impossible — les deux chemins aboutissent à la même route.
    */
   method?: string;
+  /**
+   * Défi de connexion dont celui-ci dérive : une cérémonie `passkey-login`
+   * naît d'un défi `login`, et doit le consommer en ouvrant la session.
+   *
+   * Scellé avec le reste : le navigateur ne renvoie que le défi de la
+   * cérémonie, et c'est par lui seul que l'API retrouve le premier.
+   */
+  parent?: ChallengeRef;
+  expiresAt: number;
+}
+
+/** Ce qu'il faut d'un défi pour le consommer en base. */
+export interface ChallengeRef {
+  jti: string;
   expiresAt: number;
 }
 
 export function issueChallenge(
   purpose: ChallengePurpose,
   userId: string,
-  options: { webauthn?: string; method?: string; now?: number } = {},
+  options: { webauthn?: string; method?: string; parent?: ChallengeRef; now?: number } = {},
 ): string {
   const now = options.now ?? Date.now();
   const payload: ChallengePayload = {
@@ -74,6 +88,9 @@ export function issueChallenge(
     jti: randomUUID(),
     webauthn: options.webauthn,
     method: options.method,
+    parent: options.parent
+      ? { jti: options.parent.jti, expiresAt: options.parent.expiresAt }
+      : undefined,
     expiresAt: now + CHALLENGE_TTL_MS,
   };
   return encryptSecret(JSON.stringify(payload));
@@ -89,6 +106,8 @@ export interface SealedChallenge {
   jti: string;
   /** Échéance, en millisecondes : la trace de consommation vit jusque-là. */
   expiresAt: number;
+  /** Défi de connexion d'où dérive cette cérémonie, ou `null`. */
+  parent: ChallengeRef | null;
 }
 
 /**
@@ -132,5 +151,9 @@ export function readChallenge(
     method: payload.method ?? null,
     jti: payload.jti,
     expiresAt: payload.expiresAt,
+    parent:
+      typeof payload.parent?.jti === "string" && typeof payload.parent.expiresAt === "number"
+        ? { jti: payload.parent.jti, expiresAt: payload.parent.expiresAt }
+        : null,
   };
 }

@@ -1790,8 +1790,11 @@ export class AuthController {
         options,
         // Nouveau jeton, de nature « passkey-login » : celui de la connexion ne
         // porte pas le défi aléatoire, et l'un ne doit pas valoir pour l'autre.
+        // Il emporte l'identité du défi de connexion, consommé avec lui quand
+        // la clé ouvre la session (NC-32).
         challenge: issueChallenge("passkey-login", sealed.userId, {
           webauthn: options.challenge,
+          parent: { jti: sealed.jti, expiresAt: sealed.expiresAt },
         }),
       },
     });
@@ -1838,6 +1841,25 @@ export class AuthController {
       // un risque qui n'existe pas ici.
       await this.recordFailure(user.email, request, user);
       reply.status(401).send({ message: publicFailureMessage() });
+      return;
+    }
+
+    /*
+     * Le défi de connexion d'où vient la cérémonie a servi lui aussi (NC-32).
+     *
+     * Seul le défi `passkey-login` était consommé : le défi `login` restait
+     * valable cinq minutes après la connexion, et rouvrait une session avec un
+     * code de secours ou une nouvelle cérémonie. Consommé **après** la
+     * signature vérifiée, pas avant : une clé qui échoue laisse l'utilisateur
+     * réessayer, ou passer au code, sans retaper son mot de passe. Déjà servi
+     * — par un code, dans un autre onglet —, la session n'est pas ouverte une
+     * seconde fois.
+     */
+    if (
+      !sealed.parent ||
+      !(await this.tokens.claimChallenge({ ...sealed.parent, userId: sealed.userId }))
+    ) {
+      reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
 
