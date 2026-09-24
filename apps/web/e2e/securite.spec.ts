@@ -45,6 +45,8 @@ test.describe("CSP à nonce", () => {
       expect(scripts).toContain("'strict-dynamic'");
       expect(scripts).not.toContain("'unsafe-inline'");
       expect(scripts).not.toContain("'unsafe-eval'");
+      // Monaco est servi par le panel (NC-22) : plus aucun CDN dans la politique.
+      expect(politique).not.toContain("jsdelivr");
       return /'nonce-([A-Za-z0-9+/=]{22,})'/.exec(scripts ?? "")?.[1];
     });
 
