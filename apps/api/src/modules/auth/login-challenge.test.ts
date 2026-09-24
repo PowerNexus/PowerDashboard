@@ -13,6 +13,9 @@ describe("défis scellés", () => {
       userId: USER,
       webauthn: null,
       method: null,
+      // L'identifiant à consommer en base, et l'échéance de sa trace.
+      jti: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      expiresAt: NOW + CHALLENGE_TTL_MS,
     });
   });
 

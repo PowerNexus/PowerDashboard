@@ -38,7 +38,7 @@ import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
 import { impersonationReturnCookie } from "./impersonation";
 import { ImpersonationReadOnlyGuard } from "./impersonation.guard";
-import { consumeChallenge, issueChallenge, readChallenge } from "./login-challenge";
+import { issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
@@ -372,9 +372,11 @@ export class AuthController {
     }
 
     const sealed = readChallenge("login", parsed.data.challenge);
-    if (!sealed) {
-      // Expiré, tronqué ou forgé : la distinction n'intéresse que celui qui
-      // cherche à deviner le format.
+    // Expiré, tronqué, forgé ou déjà servi : la distinction n'intéresse que
+    // celui qui cherche à deviner le format. Le défi rejoué est refusé ici,
+    // avant tout code : il ne doit ni brûler un code de secours ni compter
+    // comme un échec du titulaire.
+    if (!sealed || (await this.tokens.challengeClaimed(sealed.jti))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
@@ -423,8 +425,13 @@ export class AuthController {
     }
 
     // Le défi a servi : le même ne doit pas rouvrir une session cinq minutes
-    // durant, depuis un autre onglet ou un autre poste.
-    consumeChallenge(parsed.data.challenge);
+    // durant, depuis un autre onglet, un autre poste ou une autre instance de
+    // l'API. Consommé en base, atomiquement : de deux demandes simultanées,
+    // une seule ouvre la session.
+    if (!(await this.tokens.claimChallenge(sealed))) {
+      reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
+      return;
+    }
     await this.issueSession(user.id, request, reply, sealed.method ?? "password");
   }
 
@@ -1653,10 +1660,14 @@ export class AuthController {
 
     const user = requireUser(request);
     const sealed = readChallenge("passkey-register", parsed.data.challenge);
-    // Consommé à la lecture : une réponse WebAuthn est valide ou à refaire,
-    // et le défi qu'elle signe ne doit pas resservir.
-    consumeChallenge(parsed.data.challenge);
-    if (!sealed || sealed.userId !== user.id || !sealed.webauthn) {
+    // Consommé à la lecture, en base : une réponse WebAuthn est valide ou à
+    // refaire, et le défi qu'elle signe ne doit resservir nulle part.
+    if (
+      !sealed ||
+      sealed.userId !== user.id ||
+      !sealed.webauthn ||
+      !(await this.tokens.claimChallenge(sealed))
+    ) {
       reply.status(401).send({ message: "Demande expirée. Recommencez." });
       return;
     }
@@ -1765,7 +1776,8 @@ export class AuthController {
     }
 
     const sealed = readChallenge("login", parsed.data.challenge);
-    if (!sealed) {
+    // Un défi déjà servi n'ouvre pas non plus de cérémonie.
+    if (!sealed || (await this.tokens.challengeClaimed(sealed.jti))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
@@ -1799,14 +1811,16 @@ export class AuthController {
     }
 
     const sealed = readChallenge("passkey-login", parsed.data.challenge);
-    consumeChallenge(parsed.data.challenge);
     if (!sealed?.webauthn) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
 
     const user = await this.users.findById(sealed.userId);
-    if (!user) {
+    // Consommé à la lecture, en base, une fois le compte relu (la trace s'y
+    // rattache) : l'assertion est valide ou à refaire, et le défi qu'elle
+    // signe ne doit resservir sur aucune instance.
+    if (!user || !(await this.tokens.claimChallenge(sealed))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
