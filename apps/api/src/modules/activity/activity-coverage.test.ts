@@ -34,8 +34,11 @@ function eventsConsignes(directory: string): Set<string> {
 
     const source = readFileSync(full, "utf8");
     // `this.log(request, id, "files.delete", …)` — le nom est le troisième
-    // argument, toujours une chaîne littérale.
-    for (const m of source.matchAll(/\.log\([^,]+,[^,]+,\s*"([a-z][a-z0-9._-]+)"/g)) {
+    // argument, toujours une chaîne littérale. Un argument ne contient jamais
+    // de `;` : sans cette borne, le motif partait d'un `this.logger.log(…);`
+    // et prenait pour un événement la première chaîne venue quelques
+    // instructions plus bas (« telechargements », un nom de dossier).
+    for (const m of source.matchAll(/\.log\([^,;]+,[^,;]+,\s*"([a-z][a-z0-9._-]+)"/g)) {
       if (m[1]) found.add(m[1]);
     }
     // `record({ event: "account.password_reset_requested", … })`
@@ -52,7 +55,7 @@ function eventsConsignes(directory: string): Set<string> {
      * ne couvre pas tout est plus dangereux qu'aucun contrôle, puisqu'on le
      * croit exhaustif.
      */
-    for (const m of source.matchAll(/\.trace\([^,]+,\s*"([a-z][a-z0-9._-]+)"/g)) {
+    for (const m of source.matchAll(/\.trace\([^,;]+,\s*"([a-z][a-z0-9._-]+)"/g)) {
       if (m[1]) found.add(m[1]);
     }
     /*

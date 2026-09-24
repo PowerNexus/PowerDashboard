@@ -213,6 +213,18 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   "admin.incident_opened": { category: "settings", label: "Incident ouvert" },
   "admin.incident_updated": { category: "settings", label: "Incident mis à jour" },
 
+  /**
+   * Mise à jour autonome d'un hébergement cPanel (apps/api/src/modules/updates) :
+   * les gestes de l'administration, et ce que le panel fait de lui-même.
+   */
+  "admin.update_check_requested": {
+    category: "settings",
+    label: "Recherche de mise à jour demandée",
+  },
+  "admin.update_rolled_back": { category: "settings", label: "Retour à la version précédente" },
+  "admin.update_installed": { category: "settings", label: "Mise à jour installée" },
+  "admin.update_refused": { category: "settings", label: "Mise à jour mise de côté" },
+
   /*
    * Chaque route d'écriture de l'administration, consignée (rapport ASVS,
    * NC-11). Rôle, suppression de compte, réglages de la plateforme,

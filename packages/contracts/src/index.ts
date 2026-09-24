@@ -34,6 +34,7 @@ export * from "./realtime";
 export * from "./server";
 export * from "./sso";
 export * from "./status";
+export * from "./updates";
 export * from "./user";
 export * from "./user-agent";
 export * from "./version";

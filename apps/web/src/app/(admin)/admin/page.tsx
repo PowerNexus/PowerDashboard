@@ -15,6 +15,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { AdminRetention } from "@/components/admin-retention";
+import { AdminUpdates } from "@/components/admin-updates";
 import { toNodeRow } from "@/lib/admin-view";
 import { AutoRefresh } from "@/lib/use-auto-refresh";
 import {
@@ -23,6 +24,7 @@ import {
   fetchAdminUsers,
   fetchRetention,
 } from "@/server/api/admin";
+import { fetchUpdateStatus } from "@/server/api/updates";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations("adminOverview");
@@ -35,11 +37,12 @@ export default async function AdminOverviewPage() {
   // Les intitulés de capacité vivent avec l'écran des nodes : les dupliquer ici
   // les ferait diverger au premier ajustement.
   const tn = await getTranslations("adminNodes");
-  const [rawNodes, adminServers, adminUsers, retention] = await Promise.all([
+  const [rawNodes, adminServers, adminUsers, retention, updates] = await Promise.all([
     fetchAdminNodes(),
     fetchAdminServers(),
     fetchAdminUsers(),
     fetchRetention(),
+    fetchUpdateStatus(),
   ]);
   const allNodes = rawNodes.map(toNodeRow);
   const statuses = allNodes.map((n) => ({ node: n, status: nodeStatus(n) }));
@@ -192,6 +195,9 @@ export default async function AdminOverviewPage() {
       {/* L'état des nodes vieillit : sans ce rafraîchissement, la vue
           d'ensemble finit par déclarer injoignable un node qui bat. */}
       <AutoRefresh />
+
+      {/* Mise à jour autonome : seulement sur un hébergement cPanel. */}
+      <AdminUpdates status={updates} />
 
       {/* L'entretien de la base, en dernier : on ne l'ouvre pas tous les jours,
           mais quand on le cherche il doit être quelque part. */}

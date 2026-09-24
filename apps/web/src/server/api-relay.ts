@@ -24,9 +24,13 @@ import { WINGS_CONFIGURE_PREFIX, WINGS_REMOTE_PREFIX } from "@gamedashboard/cont
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 
-/** Les chemins que nginx envoie à l'API en production, et seulement eux. */
+/**
+ * Les chemins que nginx envoie à l'API en production, et seulement eux ;
+ * plus le signal de release, qui n'existe que sur un hébergement autonome
+ * (src/modules/updates dans l'API) et y reste inerte sans son secret.
+ */
 const PREFIXES = [`${WINGS_REMOTE_PREFIX}/`, `${WINGS_CONFIGURE_PREFIX}/`, "/api/v1/application/"];
-const EXACTS = ["/api/v1/openapi.json", "/api/v1/status"];
+const EXACTS = ["/api/v1/openapi.json", "/api/v1/status", "/api/v1/updates/signal"];
 
 export function relayablePath(pathname: string): boolean {
   // Un chemin qui remonte (`/api/remote/../v1/admin`) serait normalisé par
@@ -40,7 +44,8 @@ export function relayablePath(pathname: string): boolean {
  *
  * `authorization` porte le jeton du node ou la clé applicative ;
  * `idempotency-key` protège la facturation d'une création rejouée ;
- * `user-agent` donne la version de Wings au journal. La chaîne
+ * `user-agent` donne la version de Wings au journal ; `x-gamedashboard-*`
+ * porte l'horodatage, la version et la signature d'un signal de release. La chaîne
  * `x-forwarded-for` suit, pour que la limitation par adresse compte chaque
  * node et chaque intégrateur à part — l'API ne la croit qu'à travers
  * `TRUSTED_PROXIES`.
@@ -51,6 +56,9 @@ const FORWARDED_REQUEST_HEADERS = [
   "content-type",
   "idempotency-key",
   "user-agent",
+  "x-gamedashboard-signature",
+  "x-gamedashboard-timestamp",
+  "x-gamedashboard-version",
   "x-forwarded-for",
   "x-forwarded-proto",
 ];

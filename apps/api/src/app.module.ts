@@ -9,6 +9,7 @@ import { RemoteModule } from "./modules/remote/remote.module";
 import { ResellerModule } from "./modules/reseller/reseller.module";
 import { SchedulerModule } from "./modules/scheduler/scheduler.module";
 import { StatusModule } from "./modules/status/status.module";
+import { UpdatesModule } from "./modules/updates/updates.module";
 
 @Module({
   imports: [
@@ -27,6 +28,9 @@ import { StatusModule } from "./modules/status/status.module";
     SchedulerModule,
     // Page de statut : lecture publique sans compte, rédaction réservée.
     StatusModule,
+    // Mise à jour autonome depuis les releases GitHub (hébergement cPanel) ;
+    // inerte ailleurs.
+    UpdatesModule,
   ],
 })
 export class AppModule {}
