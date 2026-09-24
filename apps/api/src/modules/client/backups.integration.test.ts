@@ -67,6 +67,8 @@ describe.skipIf(!HAS_DATABASE)("BackupsService (intégration)", () => {
       ),
     );
     vi.clearAllMocks();
+    // Rétablie à chaque test : l'essai de concurrence la remplace.
+    s3.isConfigured.mockImplementation(async () => compartimentRegle);
     compartimentRegle = true;
     lienSigne = "https://s3.exemple.test/signe";
 
@@ -151,6 +153,48 @@ describe.skipIf(!HAS_DATABASE)("BackupsService (intégration)", () => {
 
     await service.remove(serverId, id);
     expect(await ligne(id)).toBeUndefined();
+  });
+
+  /*
+   * Une place restante, cinq demandes simultanées.
+   *
+   * Le quota était compté, puis la ligne insérée, sans rien entre les deux :
+   * cinq clics (ou cinq appels d'API) à `limite - 1` lisaient tous le même
+   * compte et passaient tous. Le disque du node se remplissait au-delà de ce
+   * que le quota promettait de contenir.
+   */
+  it("n'accorde la dernière place qu'une fois, même à des demandes simultanées", async () => {
+    await db.update(servers).set({ backupLimit: 3 }).where(eq(servers.id, serverId));
+    await terminee("local");
+    await terminee("local");
+
+    /*
+     * Le choix du lieu d'archive se fait entre le compte et l'insertion : on
+     * y retient chaque demande jusqu'à ce que les cinq y soient. Toutes ont
+     * alors lu le compte avant qu'aucune n'écrive — l'entrelacement exact du
+     * défaut, rendu certain au lieu d'être laissé au hasard des connexions.
+     */
+    let arrivees = 0;
+    let lacher: () => void = () => undefined;
+    const toutes = new Promise<void>((resolve) => {
+      lacher = resolve;
+    });
+    s3.isConfigured.mockImplementation(async () => {
+      arrivees += 1;
+      if (arrivees === 5) lacher();
+      await toutes;
+      return true;
+    });
+
+    const issues = await Promise.allSettled(
+      Array.from({ length: 5 }, (_, i) => service.create(serverId, `Rafale ${i}`, [])),
+    );
+
+    expect(issues.filter((issue) => issue.status === "fulfilled")).toHaveLength(1);
+    for (const issue of issues.filter((i) => i.status === "rejected")) {
+      expect((issue as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    }
+    expect((await service.quota(serverId)).used).toBe(3);
   });
 
   it("garde la ligne quand le node ne répond pas", async () => {

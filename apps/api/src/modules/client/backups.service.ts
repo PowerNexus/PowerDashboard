@@ -98,15 +98,6 @@ export class BackupsService {
    * pourrait jamais être supprimée puisqu'aucune archive ne lui correspond.
    */
   async create(serverId: string, name: string, ignore: string[]): Promise<ClientBackup> {
-    const { used, limit } = await this.quota(serverId);
-    if (used >= limit) {
-      throw new ConflictException(
-        limit === 0
-          ? "Ce serveur n'a pas de quota de sauvegardes."
-          : `Quota atteint (${used}/${limit}). Supprimez une sauvegarde avant d'en créer une autre.`,
-      );
-    }
-
     /*
      * Le lieu de l'archive se décide ici, une fois pour toutes : le
      * compartiment dès qu'il est réglé, le disque du node sinon. `disk` le
@@ -117,12 +108,48 @@ export class BackupsService {
      * Longtemps, l'adaptateur local partait même avec un compartiment réglé :
      * les sauvegardes mouraient avec la machine qu'elles protégeaient, alors
      * que l'écran des paramètres promettait le contraire.
+     *
+     * Lu avant la transaction : c'est un réglage, pas une donnée dont dépend
+     * le quota, et le lire sous verrou retiendrait les autres demandes pour
+     * rien.
      */
     const disk = (await this.s3.isConfigured()) ? "s3" : "local";
-    const [row] = await this.db
-      .insert(backups)
-      .values({ serverId, name: name.trim(), ignoredFiles: ignore, disk })
-      .returning();
+
+    const row = await this.db.transaction(async (tx) => {
+      /*
+       * Le quota est compté **sous verrou**, dans la transaction qui écrit.
+       *
+       * Compté puis écrit en deux temps, il laissait passer N demandes
+       * simultanées à `limite - 1` : toutes lisaient le même compte avant
+       * qu'aucune n'insère. La ligne du serveur est verrouillée le temps de
+       * compter et d'insérer, comme pour les bases de données ; la suivante
+       * attend, recompte, et se voit refuser.
+       */
+      const [server] = await tx
+        .select({ limit: servers.backupLimit })
+        .from(servers)
+        .where(eq(servers.id, serverId))
+        .for("update");
+      const [compte] = await tx
+        .select({ n: count() })
+        .from(backups)
+        .where(eq(backups.serverId, serverId));
+      const used = compte?.n ?? 0;
+      const limit = server?.limit ?? 0;
+      if (used >= limit) {
+        throw new ConflictException(
+          limit === 0
+            ? "Ce serveur n'a pas de quota de sauvegardes."
+            : `Quota atteint (${used}/${limit}). Supprimez une sauvegarde avant d'en créer une autre.`,
+        );
+      }
+
+      const [inserted] = await tx
+        .insert(backups)
+        .values({ serverId, name: name.trim(), ignoredFiles: ignore, disk })
+        .returning();
+      return inserted;
+    });
 
     if (!row) throw new BadRequestException("Sauvegarde non enregistrée.");
 

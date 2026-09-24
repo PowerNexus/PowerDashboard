@@ -11,6 +11,9 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import { eq, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
+/** Poignée de transaction Drizzle : même interface que la base, dans un seul bloc. */
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 /**
  * Âge au-delà duquel un relevé ne compte plus.
  *
@@ -128,9 +131,15 @@ export class ResellerQuotaService {
    * Deux requêtes finiraient par diverger sur la fenêtre de fraîcheur ou sur le
    * périmètre, et le jour où cela arrive, on refuse une commande à quelqu'un
    * qu'on ne coupe pas — ou l'inverse, ce qui est pire.
+   *
+   * `executor` : la transaction qui tient le verrou de l'enveloppe quand la
+   * lecture décide d'un refus (`lockedReport`), la base sinon.
    */
-  async usageDetailedOf(userId: string): Promise<QuotaUsageDetailed> {
-    const [row] = await this.db
+  async usageDetailedOf(
+    userId: string,
+    executor: Database | Transaction = this.db,
+  ): Promise<QuotaUsageDetailed> {
+    const [row] = await executor
       .select({
         /*
          * La consommation **relevée**, et la limite en repli.
@@ -213,12 +222,15 @@ export class ResellerQuotaService {
    * Refuser est plus honnête que de laisser passer en silence : relever le
    * plafond est à un clic, et c'est une décision qui doit être prise, pas
    * subie.
+   *
+   * `tx` est la transaction **qui écrira le serveur** : voir `lockedReport`.
    */
   async assertRoom(
     resellerId: string,
     requested: { memoryMb: number; diskMb: number },
+    tx: Transaction,
   ): Promise<void> {
-    const { quota, usage } = await this.report(resellerId);
+    const { quota, usage } = await this.lockedReport(resellerId, tx);
     this.refuse(checkQuota(quota, usage, requested));
   }
 
@@ -233,13 +245,52 @@ export class ResellerQuotaService {
    * Les écarts sont donnés tels quels, réductions comprises : rétrécir ne
    * demande rien, et se voir refuser une réduction parce qu'on est déjà au
    * plafond serait l'enfermement parfait.
+   *
+   * `tx` est la transaction **qui écrira les nouvelles limites** : voir
+   * `lockedReport`.
    */
   async assertGrowth(
     resellerId: string,
     growth: { memoryMb: number; diskMb: number },
+    tx: Transaction,
   ): Promise<void> {
-    const { quota, usage } = await this.report(resellerId);
+    const { quota, usage } = await this.lockedReport(resellerId, tx);
     this.refuse(checkQuotaGrowth(quota, usage, { ...growth, servers: 0 }));
+  }
+
+  /**
+   * L'enveloppe et sa consommation, lues **sous le verrou de l'enveloppe**.
+   *
+   * Compter puis écrire en deux temps laissait une fenêtre : N demandes
+   * simultanées à `plafond - 1` lisaient toutes la même consommation, la
+   * trouvaient toutes sous le plafond, et passaient toutes. Le `for update`
+   * sur la ligne de `reseller_quotas` fait attendre la suivante jusqu'à la
+   * validation de la précédente ; elle recompte alors, et voit ce qui vient
+   * d'être écrit (chaque requête relit ce qui est validé, en `read
+   * committed`). Même modèle que les bases de données et les ports d'un
+   * serveur, verrouillés sur la ligne du serveur.
+   *
+   * La ligne de l'enveloppe, et non celles des serveurs : c'est elle que
+   * toutes les demandes d'un même revendeur ont en commun, quel que soit le
+   * serveur visé. Sans ligne, rien à verrouiller, et rien à défendre non
+   * plus : l'enveloppe est illimitée.
+   */
+  private async lockedReport(
+    resellerId: string,
+    tx: Transaction,
+  ): Promise<{ quota: ResellerQuota; usage: QuotaUsage }> {
+    const [row] = await tx
+      .select({
+        memoryMb: resellerQuotas.memoryMb,
+        diskMb: resellerQuotas.diskMb,
+        serversMax: resellerQuotas.serversMax,
+      })
+      .from(resellerQuotas)
+      .where(eq(resellerQuotas.userId, resellerId))
+      .limit(1)
+      .for("update");
+
+    return { quota: row ?? UNLIMITED_QUOTA, usage: await this.usageDetailedOf(resellerId, tx) };
   }
 
   /** Le refus commun, pour que les deux portes disent exactement la même chose. */

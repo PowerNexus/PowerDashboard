@@ -56,6 +56,8 @@ describe.skipIf(!HAS_DATABASE)("ServerProvisioningService — enveloppe du reven
     priceLabel: "—",
   };
 
+  const platform = { boolean: vi.fn(async () => false) };
+
   const catalogue = {
     plans: vi.fn(async () => [OFFRE]),
     pickNode: vi.fn(async () => nodeId),
@@ -79,7 +81,7 @@ describe.skipIf(!HAS_DATABASE)("ServerProvisioningService — enveloppe du reven
       { createServer: async () => undefined } as unknown as WingsClientService,
       new ResellerQuotaService(db),
       { emit: async () => undefined } as unknown as WebhookEmitterService,
-      { boolean: async () => false } as unknown as PlatformSettingsService,
+      platform as unknown as PlatformSettingsService,
     );
   }, 60_000);
 
@@ -94,6 +96,8 @@ describe.skipIf(!HAS_DATABASE)("ServerProvisioningService — enveloppe du reven
       ),
     );
     vi.clearAllMocks();
+    // Rétablie à chaque test : l'essai de concurrence la remplace.
+    platform.boolean.mockImplementation(async () => false);
 
     revendeur = await seedUser(db);
     await db.update(users).set({ role: "reseller" }).where(eq(users.id, revendeur));
@@ -162,6 +166,67 @@ describe.skipIf(!HAS_DATABASE)("ServerProvisioningService — enveloppe du reven
       { eggId, name: "Commande", variables: {}, planId: OFFRE.id, locationId },
     );
 
+    expect(await serveursDuRevendeur()).toBe(2);
+  });
+
+  /*
+   * Place pour un seul serveur, cinq demandes simultanées.
+   *
+   * Sans verrou, chacune lisait la consommation avant que les autres aient
+   * écrit, trouvait la place libre, et les cinq passaient : l'enveloppe se
+   * contournait en tirant plus vite qu'elle ne comptait.
+   */
+  it("n'accorde la dernière place qu'une fois, même à des demandes simultanées", async () => {
+    await db
+      .update(resellerQuotas)
+      .set({ serversMax: 2 })
+      .where(eq(resellerQuotas.userId, revendeur));
+
+    /*
+     * La lecture du réglage « tueur de mémoire » tombe entre le contrôle de
+     * l'enveloppe et l'écriture : chaque demande y est retenue jusqu'à ce que
+     * les cinq y soient. Toutes ont alors compté avant qu'aucune n'écrive —
+     * l'entrelacement exact du défaut, rendu certain au lieu d'être laissé au
+     * hasard de l'ouverture des connexions.
+     */
+    let arrivees = 0;
+    let lacher: () => void = () => undefined;
+    const toutes = new Promise<void>((resolve) => {
+      lacher = resolve;
+    });
+    platform.boolean.mockImplementation(async () => {
+      arrivees += 1;
+      if (arrivees === 5) lacher();
+      await toutes;
+      return false;
+    });
+
+    const demande = () =>
+      service.create(
+        { id: revendeur, role: "reseller" },
+        {
+          eggId,
+          name: "Rafale",
+          variables: {},
+          nodeId,
+          resources: {
+            memoryMb: 1024,
+            diskMb: 2048,
+            cpuPct: 100,
+            swapMb: 0,
+            allocations: 1,
+            backups: 0,
+            databases: 0,
+          },
+        },
+      );
+
+    const issues = await Promise.allSettled(Array.from({ length: 5 }, demande));
+
+    expect(issues.filter((issue) => issue.status === "fulfilled")).toHaveLength(1);
+    for (const issue of issues.filter((i) => i.status === "rejected")) {
+      expect((issue as PromiseRejectedResult).reason).toBeInstanceOf(ConflictException);
+    }
     expect(await serveursDuRevendeur()).toBe(2);
   });
 });
