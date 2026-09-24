@@ -9,9 +9,10 @@ import {
   HAS_DATABASE,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import type { DenialLogService } from "../activity/denial-log.service";
 import { ApiKeyRepository } from "../auth/api-key.repository";
 import { IMPERSONATION_TTL_MS } from "../auth/impersonation";
-import { SESSION_COOKIE, SessionGuard } from "../auth/session.guard";
+import { SessionGuard, sessionCookie } from "../auth/session.guard";
 import { SessionRepository } from "../auth/session.repository";
 import { TwoFactorRepository } from "../auth/two-factor.repository";
 import type { S3Service } from "../storage/s3.service";
@@ -50,7 +51,8 @@ describe.skipIf(!HAS_DATABASE)("session empruntée d'un compte promu (intégrati
 
     const instances = new Map<unknown, CanActivate>([
       [SessionGuard, new SessionGuard(sessions, new ApiKeyRepository(db))],
-      [AdminGuard, new AdminGuard()],
+      // Le journal des refus se tait : le sujet est la réponse du garde.
+      [AdminGuard, new AdminGuard({ record: async () => {} } as unknown as DenialLogService)],
       [
         StaffTwoFactorGuard,
         new StaffTwoFactorGuard(new PlatformSettingsService(db), new TwoFactorRepository(db)),
@@ -98,7 +100,7 @@ describe.skipIf(!HAS_DATABASE)("session empruntée d'un compte promu (intégrati
   async function passes(token: string): Promise<void> {
     const request = {
       method: "POST",
-      cookies: { [SESSION_COOKIE]: token },
+      cookies: { [sessionCookie()]: token },
       headers: {},
       ip: "203.0.113.7",
     };
