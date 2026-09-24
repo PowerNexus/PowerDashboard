@@ -1,4 +1,4 @@
-import { generateApiKey } from "@gamedashboard/auth";
+import { generateApiKey, isAllowlistEntry } from "@gamedashboard/auth";
 import {
   APPLICATION_KEY_MAX_DAYS,
   isApplicationScope,
@@ -142,9 +142,17 @@ export class ApplicationKeysService {
     }
 
     const allowedIps = (input.allowedIps ?? []).map((ip) => ip.trim()).filter((ip) => ip !== "");
+    /*
+     * La règle des clés personnelles, et non une expression régulière à part
+     * (NC-37) : celle-ci refusait tout bloc CIDR, que la vérification à
+     * l'usage sait pourtant comparer, et laissait passer `999.1.1.1` ou `:::`
+     * — une clé alors inutilisable sans que rien ne dise pourquoi.
+     */
     for (const ip of allowedIps) {
-      if (!/^[0-9a-fA-F:.]{3,45}$/.test(ip)) {
-        throw new BadRequestException(`Adresse IP invalide : « ${ip} ».`);
+      if (!isAllowlistEntry(ip)) {
+        throw new BadRequestException(
+          `Adresse IP invalide : « ${ip} ». Une adresse, ou un bloc CIDR de préfixe non nul.`,
+        );
       }
     }
 

@@ -59,4 +59,23 @@ describe.skipIf(!HAS_DATABASE)("clés d'API personnelles (intégration)", () => 
       ).rejects.toThrow(/1 à 365 jours/);
     });
   });
+
+  describe("liste d'adresses", () => {
+    const creer = (allowedIps: string[]) =>
+      keys.create(userId, "Bot Discord", ["console.read"], allowedIps);
+
+    it("accepte une adresse et un bloc CIDR", async () => {
+      const { key } = await creer(["198.51.100.4", "203.0.113.0/24", "2001:db8::/32"]);
+      expect(key.allowedIps).toEqual(["198.51.100.4", "203.0.113.0/24", "2001:db8::/32"]);
+    });
+
+    /*
+     * Non-régression (audit ASVS, NC-37) : `0.0.0.0/0` passait. La clé
+     * s'affichait « restreinte » et s'ouvrait depuis n'importe où.
+     */
+    it("refuse un préfixe nul, qui ne restreindrait rien", async () => {
+      await expect(creer(["0.0.0.0/0"])).rejects.toThrow(/0\.0\.0\.0\/0/);
+      await expect(creer(["::/0"])).rejects.toThrow(/::\/0/);
+    });
+  });
 });

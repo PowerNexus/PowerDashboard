@@ -21,9 +21,6 @@ export interface ClientApiKey {
   createdAt: string;
 }
 
-/** Forme d'une entrée acceptable dans la liste d'autorisation : adresse, ou bloc CIDR. */
-const IP_PATTERN = /^[0-9a-fA-F:.]{3,45}(\/\d{1,3})?$/;
-
 /**
  * Durée maximale d'une clé, et durée posée quand aucune n'est demandée : un
  * an, comme les clés applicatives.
@@ -87,7 +84,9 @@ export class ApiKeysService {
       throw new BadRequestException("Choisissez au moins une portée.");
     }
 
-    const invalid = allowedIps.filter((ip) => !IP_PATTERN.test(ip) || !isAllowlistEntry(ip));
+    // Adresse, ou bloc CIDR de préfixe non nul : la règle est celle de
+    // `isAllowlistEntry`, commune aux clés applicatives.
+    const invalid = allowedIps.filter((ip) => !isAllowlistEntry(ip));
     if (invalid.length > 0) {
       throw new BadRequestException(`Adresse invalide : ${invalid.join(", ")}.`);
     }
