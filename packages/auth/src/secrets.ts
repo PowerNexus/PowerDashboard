@@ -12,6 +12,9 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:
  * C'est une distinction qui se paie cher quand on se trompe de sens : hacher ce
  * qu'il faudra relire oblige à tout réémettre, chiffrer ce qui aurait dû être
  * haché transforme une fuite de la base en fuite des mots de passe.
+ *
+ * La clé maître vient de l'environnement et se dérive dans le processus, sans
+ * coffre ni HSM ; les données personnelles, elles, restent en clair : ADR 0007.
  */
 
 const ALGORITHM = "aes-256-gcm";
