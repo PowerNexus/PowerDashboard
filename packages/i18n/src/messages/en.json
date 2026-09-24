@@ -2000,7 +2000,29 @@
     "deviceOn": "{browser} on {platform}",
     "unknownDevice": "unidentified device",
     "unknownIp": "unknown",
-    "footer": "This security message is sent regardless of your notification settings."
+    "footer": "This security message is sent regardless of your notification settings.",
+    "credentialSubject": "{change} on your {brand} account",
+    "credentialChange": {
+      "passwordChanged": "Password changed",
+      "passwordReset": "Password reset",
+      "twoFactorEnabled": "Two-factor authentication turned on",
+      "twoFactorDisabled": "Two-factor authentication turned off",
+      "passkeyAdded": "Passkey added",
+      "passkeyRemoved": "Passkey removed",
+      "emailChanged": "Email address changed"
+    },
+    "credentialBody": {
+      "passwordChanged": "The password of your account was just changed, and your other sessions were signed out.",
+      "passwordReset": "The password of your account was just reset through a link sent to this address, and every session was signed out.",
+      "twoFactorEnabled": "Two-factor authentication with an app was just turned on for your account.",
+      "twoFactorDisabled": "Two-factor authentication with an app was just turned off for your account.",
+      "passkeyAdded": "A new passkey was just registered on your account.",
+      "passkeyRemoved": "A passkey was just removed from your account.",
+      "emailChanged": "The email address of your account was just replaced. This message goes to the former address; the next ones will go to the new one."
+    },
+    "credentialAdvice": "If this was not you, someone may have taken over your account: change your password, sign out your other sessions and check your two-factor authentication:",
+    "credentialReassure": "If this was you, there is nothing to do.",
+    "emailChangedAdvice": "If you did not ask for this, contact your host's support right away: this account now signs in with the new address."
   },
   "subuserPresets": {
     "title": "Subuser presets",

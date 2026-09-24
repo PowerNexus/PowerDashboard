@@ -94,6 +94,9 @@ import { UserRepository } from "./user.repository";
     // Sort pour la suspension d'un compte : les liens déjà envoyés meurent
     // avec elle, et la règle vit avec les jetons.
     AuthTokenRepository,
+    // Sort pour l'administration, qui change l'adresse d'un compte : l'avis à
+    // l'ancienne boîte part du même service que les autres alertes.
+    SecurityAlertService,
     databaseProvider,
   ],
 })

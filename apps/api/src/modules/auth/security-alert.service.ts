@@ -13,6 +13,8 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { BrandingService } from "../reseller/branding.service";
 import {
   type AlertTexts,
+  type CredentialChange,
+  credentialChangeTexts,
   describeDevice,
   failureAlertTexts,
   formatWhen,
@@ -24,6 +26,19 @@ import { assessSignIn, deviceFamily, networkOf } from "./sign-in-origin";
 /** Types posés en base, dans `notifications.type`. */
 export const FAILURE_ALERT = "account.login_failures";
 export const NEW_DEVICE_ALERT = "account.new_device";
+export const CREDENTIAL_CHANGE_ALERT = "account.credential_changed";
+
+/**
+ * Changements qui affaiblissent la protection, ou la déplacent hors de portée
+ * du titulaire : la cloche les signale plus fort que ceux qu'on fait pour se
+ * protéger.
+ */
+const WEAKENING_CHANGES: ReadonlySet<CredentialChange> = new Set([
+  "passwordReset",
+  "twoFactorDisabled",
+  "passkeyRemoved",
+  "emailChanged",
+]);
 
 /**
  * Étape à laquelle une preuve a été refusée, telle que le journal la nomme.
@@ -47,6 +62,21 @@ export interface FailureContext {
   /** Domaine d'arrivée, pour la marque et le lien du courriel. */
   host: string | null;
   stage: FailureStage;
+}
+
+/** Ce qu'un geste sur les authentifiants sait de lui-même. */
+export interface CredentialChangeContext {
+  userId: string;
+  kind: CredentialChange;
+  /** Adresse d'où le geste a été fait ; nulle quand elle n'a pas à sortir. */
+  ip: string | null;
+  /** Domaine d'arrivée, pour la marque et le lien du courriel. */
+  host: string | null;
+  /**
+   * Pour un changement d'adresse : l'**ancienne**, seule à pouvoir alerter le
+   * titulaire, et si elle était confirmée.
+   */
+  previousEmail?: { address: string; verified: boolean };
 }
 
 /** Ce que la connexion sait d'elle-même, au moment où la session s'ouvre. */
@@ -123,6 +153,20 @@ export class SecurityAlertService {
   /** Après l'ouverture d'une session, quel que soit le chemin d'entrée. */
   afterSignIn(context: SignInContext): void {
     this.detach("alerte de nouvel appareil", () => this.checkSignIn(context));
+  }
+
+  /**
+   * Après un changement d'authentifiant : mot de passe, second facteur, clé
+   * d'accès, adresse (ASVS 2.2.3, 2.5.5).
+   *
+   * Même conduite que les deux autres alertes : détachée, elle ne retarde ni ne
+   * fait échouer le geste qu'elle décrit — le mot de passe est changé, que le
+   * serveur SMTP réponde ou non. C'est l'avis qui dit au titulaire qu'un autre
+   * a peut-être déjà la main : le premier geste de qui vole une session est de
+   * changer ce qui permettrait de l'en déloger.
+   */
+  afterCredentialChange(input: CredentialChangeContext): void {
+    this.detach("avis de changement d'authentifiant", () => this.noticeCredentialChange(input));
   }
 
   /** Attend les tâches en cours. Pour les tests ; la connexion ne l'appelle jamais. */
@@ -266,6 +310,49 @@ export class SecurityAlertService {
     await this.deliver(recipient, NEW_DEVICE_ALERT, "warning", texts);
   }
 
+  private async noticeCredentialChange(input: CredentialChangeContext): Promise<void> {
+    const recipient = await this.repository.recipient(input.userId);
+    if (!recipient) return;
+
+    const { brand, link } = await this.brandAndLink(input.host);
+    const texts = credentialChangeTexts({
+      locale: recipient.locale,
+      brand,
+      kind: input.kind,
+      ip: input.ip,
+      when: formatWhen(recipient.locale, recipient.timezone, new Date()),
+      link,
+    });
+    const level = WEAKENING_CHANGES.has(input.kind) ? "warning" : "info";
+
+    /*
+     * Le courriel ne part qu'à une adresse confirmée, la règle des autres
+     * alertes, avec deux exceptions qui n'ouvrent aucun envoi nouveau :
+     *
+     * - la réinitialisation, parce que le lien qui vient de servir est parti
+     *   vers cette même boîte — qui la lit l'a prouvé ;
+     * - le changement d'adresse, qui part vers l'**ancienne**, s'il avait été
+     *   confirmée : la nouvelle n'apprend rien à qui la contrôle déjà.
+     */
+    if (input.previousEmail) {
+      await this.deliver(
+        { ...recipient, email: input.previousEmail.address },
+        CREDENTIAL_CHANGE_ALERT,
+        level,
+        texts,
+        input.previousEmail.verified,
+      );
+      return;
+    }
+    await this.deliver(
+      recipient,
+      CREDENTIAL_CHANGE_ALERT,
+      level,
+      texts,
+      recipient.emailVerifiedAt !== null || input.kind === "passwordReset",
+    );
+  }
+
   /**
    * La cloche d'abord, le courriel ensuite.
    *
@@ -276,8 +363,9 @@ export class SecurityAlertService {
   private async deliver(
     recipient: AlertRecipient,
     type: string,
-    level: "warning" | "danger",
+    level: "info" | "warning" | "danger",
     texts: AlertTexts,
+    mailable = recipient.emailVerifiedAt !== null,
   ): Promise<void> {
     await this.notifications.notify({
       userId: recipient.id,
@@ -288,7 +376,7 @@ export class SecurityAlertService {
       href: SECURITY_PAGE,
     });
 
-    if (!recipient.emailVerifiedAt) return;
+    if (!mailable) return;
     await this.mail.send({ to: recipient.email, subject: texts.subject, text: texts.text });
   }
 

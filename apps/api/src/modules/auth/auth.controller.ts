@@ -42,6 +42,7 @@ import { issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
+import type { CredentialChange } from "./security-alert.messages";
 import { type FailureStage, SecurityAlertService } from "./security-alert.service";
 import { authCookieOptions, SessionGuard, sessionCookie } from "./session.guard";
 import {
@@ -745,8 +746,28 @@ export class AuthController {
       // d'audit se lit par des gens qui n'ont pas à en apprendre autant.
       properties: { revokedSessions: revoked, pwnedCheckFailed },
     });
+    this.noticeCredentialChange(user.id, "passwordChanged", request);
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
+  }
+
+  /**
+   * Prévient le titulaire d'un changement d'authentifiant (ASVS 2.2.3, 2.5.5).
+   *
+   * Sans rien attendre : l'avis part en tâche détachée, et une panne de
+   * courrier ne défait pas un geste déjà accompli.
+   */
+  private noticeCredentialChange(
+    userId: string,
+    kind: CredentialChange,
+    request: ClientRequest,
+  ): void {
+    this.alerts.afterCredentialChange({
+      userId,
+      kind,
+      ip: request.ip ?? null,
+      host: arrivalHost(request),
+    });
   }
 
   /* --- Mot de passe oublié ------------------------------------------------ */
@@ -899,6 +920,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { revokedSessions: revoked, pwnedCheckFailed },
     });
+    this.noticeCredentialChange(user.id, "passwordReset", request);
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
   }
@@ -1229,6 +1251,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: {},
     });
+    this.noticeCredentialChange(user.id, "twoFactorEnabled", request);
 
     reply.status(200).send({ data: { recoveryCodes } });
   }
@@ -1296,6 +1319,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { remainingPasskeys: remaining.length },
     });
+    this.noticeCredentialChange(user.id, "twoFactorDisabled", request);
 
     reply.status(204).send(null);
   }
@@ -1734,6 +1758,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { label: parsed.data.label.trim() || DEFAULT_PASSKEY_LABEL },
     });
+    this.noticeCredentialChange(user.id, "passkeyAdded", request);
 
     reply.status(201).send({ data: { recoveryCodes } });
   }
@@ -1784,6 +1809,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { remaining: status.passkeys },
     });
+    this.noticeCredentialChange(user.id, "passkeyRemoved", request);
 
     reply.status(204).send(null);
   }

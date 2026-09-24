@@ -1,8 +1,15 @@
 import { hashPassword, totpCodeAt, totpStep } from "@gamedashboard/auth";
-import { activityLogs, type Database, loginAttempts, users } from "@gamedashboard/db";
+import {
+  activityLogs,
+  type Database,
+  loginAttempts,
+  notifications,
+  userPasskeys,
+  users,
+} from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createThrowawayDatabase,
   HAS_DATABASE,
@@ -18,8 +25,10 @@ import type { BrandingService } from "../reseller/branding.service";
 import type { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
 import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
+import { issueChallenge } from "./login-challenge";
+import { PasskeyRepository } from "./passkey.repository";
 import { SecurityAlertRepository } from "./security-alert.repository";
-import { SecurityAlertService } from "./security-alert.service";
+import { CREDENTIAL_CHANGE_ALERT, SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
 import { TwoFactorRepository } from "./two-factor.repository";
@@ -87,14 +96,25 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
 
   beforeAll(async () => {
     Logger.overrideLogger(false);
-    // Le secret TOTP est chiffré en base.
+    // Le secret TOTP est chiffré en base, et les clés d'accès sont liées à
+    // l'origine du panel.
     process.env.APP_SECRET_KEY ??= "clé-de-test-uniquement-pour-vitest";
+    process.env.PANEL_ORIGIN ||= "https://gamedashboard.local";
     throwaway = await createThrowawayDatabase();
     db = throwaway.db;
     digest = await hashPassword(PASSWORD);
     // HaveIBeenPwned : aucune fuite connue, et surtout aucun appel réseau.
     vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, text: async () => "" }));
   }, 60_000);
+
+  /*
+   * Les avis et le journal partent en tâches détachées : une tâche encore en
+   * vol écrirait pendant le `truncate` du test suivant, qui finirait en
+   * interblocage.
+   */
+  afterEach(async () => {
+    await alerts.settled();
+  });
 
   afterAll(async () => {
     vi.unstubAllGlobals();
@@ -138,8 +158,9 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       sessions,
       activity,
       twoFactor,
-      {} as never,
-      {} as never,
+      new PasskeyRepository(db),
+      // La cérémonie WebAuthn a ses propres tests : ici, seule compte la suite.
+      { verifyRegistration: async () => true } as never,
       { configuration: async () => null } as never,
       {} as never,
       new SessionIssuerService(sessions, userRepository, alerts),
@@ -265,6 +286,22 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       .orderBy(asc(activityLogs.at));
   }
 
+  /** Courriels partis vers cette adresse. */
+  function mailsTo(address: string): { subject: string; text: string }[] {
+    return mail.send.mock.calls
+      .map((call) => call[0] as { to: string; subject: string; text: string })
+      .filter((sent) => sent.to === address);
+  }
+
+  /** Titres des avis de changement déposés dans la cloche du compte. */
+  async function bellOf(userId: string): Promise<string[]> {
+    const rows = await db
+      .select({ title: notifications.title, type: notifications.type })
+      .from(notifications)
+      .where(eq(notifications.userId, userId));
+    return rows.filter((row) => row.type === CREDENTIAL_CHANGE_ALERT).map((row) => row.title);
+  }
+
   describe("changement de mot de passe", () => {
     it("éteint les liens de réinitialisation encore valables", async () => {
       const account = await seedAccount();
@@ -300,6 +337,125 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
 
       const client = await seedAccount("user");
       expect((await controller.twoFactorStatus(signedIn(client))).data.required).toBe(false);
+    });
+  });
+
+  describe("avis au titulaire d'un changement d'authentifiant", () => {
+    it("prévient d'un mot de passe changé, par courriel et par la cloche", async () => {
+      const account = await seedAccount();
+      const reply = fakeReply();
+      await controller.changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        signedIn(account, "198.51.100.23"),
+        reply as never,
+      );
+      expect(reply.statusCode).toBe(200);
+      await alerts.settled();
+
+      const [sent] = mailsTo(account.email);
+      expect(sent?.subject).toBe("Mot de passe modifié sur votre compte GameDashboard");
+      expect(sent?.text).toContain("198.51.100.23");
+      expect(sent?.text).toContain("https://gamedashboard.local/account/security");
+      expect(await bellOf(account.id)).toEqual(["Mot de passe modifié"]);
+    });
+
+    it("prévient d'une réinitialisation aboutie", async () => {
+      const account = await seedAccount();
+      const issued = await tokens.issue(account.id, "password_reset", null);
+      if (!issued) throw new Error("jeton non émis");
+
+      const reply = fakeReply();
+      await controller.resetPassword(
+        { token: issued.token, password: NEW_PASSWORD },
+        { ip: "198.51.100.23", headers: {} } as never,
+        reply as never,
+      );
+      expect(reply.statusCode).toBe(200);
+      await alerts.settled();
+
+      expect(mailsTo(account.email).map((sent) => sent.subject)).toEqual([
+        "Mot de passe réinitialisé sur votre compte GameDashboard",
+      ]);
+    });
+
+    it("prévient de l'activation puis de la désactivation du second facteur", async () => {
+      const account = await seedAccount();
+      const secret = await twoFactor.beginSetup(account.id);
+
+      const enabled = fakeReply();
+      await controller.twoFactorEnable(
+        { code: totpCodeAt(secret, totpStep()) },
+        signedIn(account),
+        enabled as never,
+      );
+      expect(enabled.statusCode).toBe(200);
+
+      const disabled = fakeReply();
+      await controller.twoFactorDisable(
+        { password: PASSWORD },
+        signedIn(account),
+        disabled as never,
+      );
+      expect(disabled.statusCode).toBe(204);
+      await alerts.settled();
+
+      expect(mailsTo(account.email).map((sent) => sent.subject)).toEqual([
+        "Double authentification activée sur votre compte GameDashboard",
+        "Double authentification désactivée sur votre compte GameDashboard",
+      ]);
+    });
+
+    it("prévient de l'ajout puis du retrait d'une clé d'accès", async () => {
+      const account = await seedAccount();
+
+      const added = fakeReply();
+      await controller.registerPasskey(
+        {
+          challenge: issueChallenge("passkey-register", account.id, { webauthn: "défi" }),
+          label: "Clé USB",
+          response: {},
+        },
+        signedIn(account),
+        added as never,
+      );
+      expect(added.statusCode).toBe(201);
+
+      const [key] = await db
+        .insert(userPasskeys)
+        .values({ userId: account.id, credentialId: "cle-1", publicKey: "x", label: "Clé USB" })
+        .returning({ id: userPasskeys.id });
+      if (!key) throw new Error("clé non posée");
+      const removed = fakeReply();
+      await controller.removePasskey(
+        key.id,
+        { password: PASSWORD },
+        signedIn(account),
+        removed as never,
+      );
+      expect(removed.statusCode).toBe(204);
+      await alerts.settled();
+
+      expect(mailsTo(account.email).map((sent) => sent.subject)).toEqual([
+        "Clé d'accès ajoutée sur votre compte GameDashboard",
+        "Clé d'accès supprimée sur votre compte GameDashboard",
+      ]);
+    });
+
+    it("n'échoue pas quand le courrier tombe en panne, et laisse la cloche", async () => {
+      const account = await seedAccount();
+      mail.send.mockRejectedValue(new Error("535 authentification refusée"));
+
+      const reply = fakeReply();
+      await controller.changePassword(
+        { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+        signedIn(account),
+        reply as never,
+      );
+      expect(reply.statusCode).toBe(200);
+      await alerts.settled();
+
+      expect(mail.send).toHaveBeenCalledTimes(1);
+      expect(await bellOf(account.id)).toEqual(["Mot de passe modifié"]);
     });
   });
 

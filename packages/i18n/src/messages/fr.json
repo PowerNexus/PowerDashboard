@@ -2000,7 +2000,29 @@
     "deviceOn": "{browser} sur {platform}",
     "unknownDevice": "appareil non identifié",
     "unknownIp": "inconnue",
-    "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification."
+    "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification.",
+    "credentialSubject": "{change} sur votre compte {brand}",
+    "credentialChange": {
+      "passwordChanged": "Mot de passe modifié",
+      "passwordReset": "Mot de passe réinitialisé",
+      "twoFactorEnabled": "Double authentification activée",
+      "twoFactorDisabled": "Double authentification désactivée",
+      "passkeyAdded": "Clé d'accès ajoutée",
+      "passkeyRemoved": "Clé d'accès supprimée",
+      "emailChanged": "Adresse e-mail modifiée"
+    },
+    "credentialBody": {
+      "passwordChanged": "Le mot de passe de votre compte vient d'être changé, et les autres sessions ont été fermées.",
+      "passwordReset": "Le mot de passe de votre compte vient d'être réinitialisé par un lien envoyé à cette adresse, et toutes les sessions ont été fermées.",
+      "twoFactorEnabled": "La double authentification par application vient d'être activée sur votre compte.",
+      "twoFactorDisabled": "La double authentification par application vient d'être désactivée sur votre compte.",
+      "passkeyAdded": "Une nouvelle clé d'accès vient d'être enregistrée sur votre compte.",
+      "passkeyRemoved": "Une clé d'accès vient d'être retirée de votre compte.",
+      "emailChanged": "L'adresse e-mail de votre compte vient d'être remplacée. Ce message part vers l'ancienne adresse ; les suivants iront à la nouvelle."
+    },
+    "credentialAdvice": "Si ce n'était pas vous, quelqu'un a peut-être pris la main sur votre compte : changez votre mot de passe, fermez les autres sessions et vérifiez votre double authentification :",
+    "credentialReassure": "Si c'était vous, il n'y a rien à faire.",
+    "emailChangedAdvice": "Si vous n'avez rien demandé, contactez sans attendre le support de votre hébergeur : c'est désormais avec la nouvelle adresse qu'on se connecte à ce compte."
   },
   "subuserPresets": {
     "title": "Préréglages des sous-utilisateurs",

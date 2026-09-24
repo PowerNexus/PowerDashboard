@@ -5,32 +5,39 @@ import {
   applicationKeys,
   authTokens,
   type Database,
+  notifications,
   servers,
   sessions,
   users,
 } from "@gamedashboard/db";
 import { ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { and, eq, sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedLocation, seedNode, seedServer } from "../../test/fixtures";
 import {
   createThrowawayDatabase,
   HAS_DATABASE,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import { ActivityService } from "../activity/activity.service";
 import { ApplicationKeyRepository } from "../application/application-key.repository";
 import { AccountMailService } from "../auth/account-mail.service";
 import { ApiKeyRepository } from "../auth/api-key.repository";
 import { AuthTokenRepository } from "../auth/auth-token.repository";
 import { BillingSsoService } from "../auth/billing-sso.service";
+import { SecurityAlertRepository } from "../auth/security-alert.repository";
+import { CREDENTIAL_CHANGE_ALERT, SecurityAlertService } from "../auth/security-alert.service";
 import { SessionRepository } from "../auth/session.repository";
 import { SessionIssuerService } from "../auth/session-issuer.service";
 import { SshKeyRepository } from "../auth/ssh-key.repository";
 import { UserRepository } from "../auth/user.repository";
 import type { MailerService } from "../mail/mailer.service";
+import { NotificationPreferencesRepository } from "../notifications/notification-preferences.repository";
+import { NotificationsService } from "../notifications/notifications.service";
 import { SftpAuthService } from "../remote/sftp-auth.service";
 import type { BrandingService } from "../reseller/branding.service";
 import type { S3Service } from "../storage/s3.service";
+import type { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
 import type { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 import type { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
@@ -54,6 +61,7 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
   let sessionsRepo: SessionRepository;
   let tokens: AuthTokenRepository;
   let accounts: AdminUsersService;
+  let alerts: SecurityAlertService;
   let issuer: SessionIssuerService;
   const wings = { denyWebsocketTokens: vi.fn(async () => undefined) };
   const mailer = { isConfigured: vi.fn(async () => true), send: vi.fn(async () => true) };
@@ -71,6 +79,23 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
       { text: async () => "panel.test" } as unknown as PlatformSettingsService,
       { forHost: async () => ({ name: "Panel", resellerId: null }) } as unknown as BrandingService,
     );
+    const platform = { text: async () => "panel.test" } as unknown as PlatformSettingsService;
+    const branding = {
+      forHost: async () => ({ name: "Panel", resellerId: null }),
+    } as unknown as BrandingService;
+    alerts = new SecurityAlertService(
+      new SecurityAlertRepository(db),
+      new NotificationsService(
+        db,
+        new NotificationPreferencesRepository(db),
+        mailer as unknown as MailerService,
+        { emit: async () => {} } as unknown as ClientWebhookEmitterService,
+      ),
+      mailer as unknown as MailerService,
+      new ActivityService(db),
+      branding,
+      platform,
+    );
     accounts = new AdminUsersService(
       db,
       sessionsRepo,
@@ -78,6 +103,7 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
       accountMail,
       new WingsTokenService(db),
       wings as unknown as WingsClientService,
+      alerts,
     );
     // Les alertes de connexion ont leur propre test : ici, seule compte la
     // porte refermée sur un compte suspendu.
@@ -85,6 +111,12 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
       afterSignIn: () => undefined,
     } as never);
   }, 60_000);
+
+  // L'avis d'un changement d'adresse part en tâche détachée : il ne doit pas
+  // écrire pendant le `truncate` du test suivant.
+  afterEach(async () => {
+    await alerts.settled();
+  });
 
   afterAll(async () => {
     await throwaway?.drop();
@@ -398,6 +430,39 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
     expect(mailer.send).toHaveBeenCalledWith(
       expect.objectContaining({ to: "nouvelle@gamedashboard.test" }),
     );
+  });
+
+  it("prévient l'ancienne adresse que le compte en a changé", async () => {
+    const client = await account({ password: "phrase-de-passe-solide-42" });
+
+    await accounts.update(
+      client.id,
+      {
+        email: "remplacante@gamedashboard.test",
+        nameFirst: "Camille",
+        nameLast: "Martin",
+        locale: "fr",
+      },
+      "198.51.100.23",
+    );
+    await alerts.settled();
+
+    // L'ancienne boîte est la seule où le titulaire lira qu'on lui a pris son
+    // adresse : la nouvelle n'apprend rien à qui la contrôle déjà.
+    const notice = mailer.send.mock.calls
+      .map((call) => (call as unknown[])[0] as { to: string; subject: string; text: string })
+      .find((sent) => sent.to === client.email);
+    expect(notice?.subject).toBe("Adresse e-mail modifiée sur votre compte Panel");
+    // L'adresse IP est celle de l'administrateur : elle n'a pas à sortir.
+    expect(notice?.text).not.toContain("198.51.100.23");
+
+    const bell = await db
+      .select({ title: notifications.title })
+      .from(notifications)
+      .where(
+        and(eq(notifications.userId, client.id), eq(notifications.type, CREDENTIAL_CHANGE_ALERT)),
+      );
+    expect(bell).toEqual([{ title: "Adresse e-mail modifiée" }]);
   });
 
   it("garde la vérification quand l'adresse ne change pas", async () => {

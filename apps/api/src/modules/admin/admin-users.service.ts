@@ -12,6 +12,7 @@ import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { type AccountMailOutcome, AccountMailService } from "../auth/account-mail.service";
 import { AuthTokenRepository } from "../auth/auth-token.repository";
+import { SecurityAlertService } from "../auth/security-alert.service";
 import { SessionRepository } from "../auth/session.repository";
 import { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
@@ -45,6 +46,7 @@ export class AdminUsersService {
     @Inject(AccountMailService) private readonly accountMail: AccountMailService,
     @Inject(WingsTokenService) private readonly wingsTokens: WingsTokenService,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
   ) {}
 
   /**
@@ -61,6 +63,10 @@ export class AdminUsersService {
    * moment : un lien de réinitialisation qui dort dans une boîte qu'on vient
    * de retirer au compte resterait une clé de ce compte.
    *
+   * Et l'ancienne boîte est prévenue (ASVS 2.2.3) : c'est la seule que le
+   * titulaire lise encore si le changement n'était pas de son fait, et l'on se
+   * connecte désormais avec la nouvelle.
+   *
    * **L'adresse d'un autre membre du personnel ne se change pas d'ici.**
    * L'adresse, c'est là où part la réinitialisation : un administrateur qui
    * réécrit celle d'un confrère puis lui envoie un lien prend son compte en
@@ -74,7 +80,12 @@ export class AdminUsersService {
     ip: string | null,
   ): Promise<UserUpdateOutcome> {
     const [current] = await this.db
-      .select({ id: users.id, email: users.email, role: users.role })
+      .select({
+        id: users.id,
+        email: users.email,
+        role: users.role,
+        emailVerifiedAt: users.emailVerifiedAt,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
@@ -118,6 +129,14 @@ export class AdminUsersService {
     if (!emailChanged) return { emailChanged, verification: null };
 
     await this.tokens.revokePending(userId, ["password_reset", "email_verify"]);
+    this.alerts.afterCredentialChange({
+      userId,
+      kind: "emailChanged",
+      // L'adresse est celle de l'administrateur : elle ne regarde pas le client.
+      ip: null,
+      host: null,
+      previousEmail: { address: current.email, verified: current.emailVerifiedAt !== null },
+    });
     // Le domaine de la plateforme, comme pour la réinitialisation ci-dessous.
     const verification = await this.accountMail.sendEmailVerification(
       { id: userId, email: patch.email },
