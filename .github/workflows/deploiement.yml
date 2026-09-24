@@ -1,13 +1,11 @@
 name: Construction continue
 
-# Construit le panel après chaque CI verte sur main, et publie l'archive dans
-# la préversion « continu » : c'est là que infra/cpanel/deployer.sh vient la
-# chercher (docs/hebergement-cpanel.md).
+# Construit le panel après chaque CI verte sur main, et pousse la construction
+# sur la branche `deploiement` : c'est elle que suit un hébergement cPanel,
+# par infra/cpanel/deployer.sh (docs/hebergement-cpanel.md).
 #
 # Un hébergement mutualisé n'a ni la mémoire ni le temps que demande
-# `next build` : l'interface est construite ici, une fois. La préversion n'est
-# jamais « la dernière » de la page Releases : `releases/latest`, celle
-# qu'installe `gamedashboard.sh`, reste la dernière version étiquetée.
+# `next build` : l'interface est construite ici, une fois.
 
 on:
   workflow_run:
@@ -17,8 +15,7 @@ on:
   # Republier la construction de main, après une panne du runner par exemple.
   workflow_dispatch:
 
-# Une publication à la fois, jamais annulée en route : une archive à moitié
-# téléversée ferait échouer chaque passage du cron jusqu'à la suivante.
+# Une publication à la fois, dans l'ordre : la plus récente arrive en dernier.
 concurrency:
   group: construction-continue
   cancel-in-progress: false
@@ -41,7 +38,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
     timeout-minutes: 20
     permissions:
-      # Déplacer l'étiquette « continu » et remplacer les fichiers publiés.
+      # Pousser la branche `deploiement`.
       contents: write
 
     env:
@@ -67,41 +64,10 @@ jobs:
       - name: Compiler
         run: pnpm build
 
-      # Même archive qu'une version publiée, sous un nom fixe : le script du
-      # serveur n'a qu'une adresse à connaître.
-      - name: Assembler l'archive
-        run: |
-          bash infra/release/assembler.sh "v0.0.0-continu.${COMMIT::12}" dist
-          mkdir -p publication
-          cp dist/gamedashboard-v0.0.0-continu.*.tar.gz publication/gamedashboard.tar.gz
-          ( cd publication && sha256sum gamedashboard.tar.gz > gamedashboard.tar.gz.sha256 )
-          install -m 755 infra/cpanel/deployer.sh publication/deployer.sh
-
-      - name: Publier
+      - name: Publier sur la branche deploiement
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > notes.md <<EOF
-          Construction de \`main\` au commit ${COMMIT}, remplacée à chaque CI verte.
-
-          Ce n'est pas une version : elle alimente un hébergement cPanel, par
-          \`infra/cpanel/deployer.sh\` ([guide](https://github.com/${{ github.repository }}/blob/main/docs/hebergement-cpanel.md)).
-          Pour installer une version sur un serveur à soi : la dernière release étiquetée.
-          EOF
-
-          git tag -f continu "$COMMIT"
-          git push -f origin refs/tags/continu
-
-          if ! gh release view continu >/dev/null 2>&1; then
-            gh release create continu --verify-tag --prerelease --latest=false \
-              --title "Construction continue" --notes-file notes.md
-          fi
-          gh release edit continu --notes-file notes.md
-
-          # L'archive d'abord, son empreinte ensuite. Un serveur qui passe
-          # entre les deux compare la nouvelle archive à l'ancienne empreinte :
-          # il refuse, et réessaie au passage suivant. Rien de mélangé ne
-          # s'installe.
-          gh release upload continu publication/gamedashboard.tar.gz --clobber
-          gh release upload continu publication/deployer.sh --clobber
-          gh release upload continu publication/gamedashboard.tar.gz.sha256 --clobber
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: bash infra/cpanel/publier-construction.sh origin deploiement

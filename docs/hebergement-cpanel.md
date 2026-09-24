@@ -7,9 +7,15 @@ nginx et systemd y font mieux ce que ce guide contourne (voir *Limites*).
 
 Rien ne se construit sur l'hébergement : il n'a ni la mémoire ni le temps que
 demande `next build`. Le runner construit le panel après chaque CI verte sur
-`main` et le publie dans la préversion **« continu »** du dépôt
-(`.github/workflows/deploiement.yml`). Sur l'hébergement, une tâche cron
-vient la chercher (`infra/cpanel/deployer.sh`).
+`main` et pousse la construction sur la branche **`deploiement`** du dépôt
+(`.github/workflows/deploiement.yml`, `infra/cpanel/publier-construction.sh`).
+Sur l'hébergement, une tâche cron la récupère avec git
+(`infra/cpanel/deployer.sh`).
+
+La branche ne porte qu'un commit, sans parent, remplacé à chaque
+publication : le code suivi, l'interface compilée et un fichier `RELEASE`
+qui nomme le commit de `main` d'origine. Elle ne s'empile pas : le dépôt ne
+grossit pas d'une interface compilée à chaque publication.
 
 ```
 visiteurs, Wings, facturation
@@ -30,8 +36,9 @@ Sur l'hébergement, tout vit hors de `public_html` :
 
 ```
 ~/gamedashboard/
+  depot/                     le clone de la branche deploiement
   env/api.env, env/web.env   réglages et secrets (0600)
-  versions/<id>/             les constructions téléchargées
+  versions/<id>/             les constructions extraites
   actuelle -> versions/<id>  la version en service
   passenger/api/             racine d'application de l'API
   passenger/interface/       racine d'application de l'interface
@@ -92,17 +99,30 @@ variable posée dans l'écran l'emporte sur le fichier.
 
 ## 4. Première installation
 
-Dans le **Terminal** de cPanel (Avancé › Terminal) :
+**Le clone, dans « Git Version Control »** (facultatif : sans lui, le script
+clone lui-même) : *Create*, avec
+
+| | |
+|---|---|
+| Clone a Repository | activé |
+| Clone URL | `https://github.com/PowerNexus/PowerDashboard.git` |
+| Repository Path | `gamedashboard/depot` |
+| Repository Name | `GameDashboard` |
+
+cPanel clone `main` ; le script passe le clone sur `deploiement` et l'y
+tient. Ne pas le cloner dans `public_html`.
+
+**L'installation**, dans le **Terminal** de cPanel (Avancé › Terminal) :
 
 ```bash
-curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/download/continu/deployer.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PowerNexus/PowerDashboard/deploiement/infra/cpanel/deployer.sh | bash
 ```
 
-Il télécharge la construction, en vérifie l'empreinte, installe les
-dépendances aux versions du lockfile (quelques minutes), joue les migrations,
-puis pose `actuelle` et les deux racines d'application. Sans Terminal : la
-même commande en tâche cron « une fois par minute », le temps d'un passage,
-puis retirer la tâche.
+Il récupère la branche, en extrait la construction dans un dossier neuf,
+installe les dépendances aux versions du lockfile (quelques minutes), joue
+les migrations, puis pose `actuelle` et les deux racines d'application. Sans
+Terminal : la même commande en tâche cron « une fois par minute », le temps
+d'un passage, puis retirer la tâche.
 
 Node 24 est cherché sous `/opt/alt/alt-nodejs24` ; ailleurs, le désigner par
 `GAMEDASHBOARD_NODE=/chemin/vers/bin`.

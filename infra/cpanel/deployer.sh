@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# Met à jour GameDashboard sur un hébergement cPanel, à partir de la
-# construction publiée par .github/workflows/deploiement.yml.
+# Met à jour GameDashboard sur un hébergement cPanel, depuis la branche
+# `deploiement` du dépôt : la construction qu'y pousse le runner
+# (infra/cpanel/publier-construction.sh).
 #
 # Première fois (voir docs/hebergement-cpanel.md) :
 #
-#   curl -fsSL https://github.com/PowerNexus/PowerDashboard/releases/download/continu/deployer.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/PowerNexus/PowerDashboard/deploiement/infra/cpanel/deployer.sh | bash
 #
 # Ensuite, par cron, toutes les cinq minutes :
 #
@@ -13,11 +14,13 @@
 #
 # Rien n'est construit ici. L'interface l'est par le runner, une fois, pour
 # tous : un hébergement mutualisé n'a ni la mémoire ni le temps que demande
-# `next build`. Ce script télécharge l'archive, en vérifie l'empreinte,
-# installe les dépendances aux versions du lockfile, joue les migrations,
-# puis bascule le lien `actuelle` et redémarre les deux applications
-# Passenger. Tant que la bascule n'a pas eu lieu, la version en service n'est
-# pas touchée : un échec en cours de route la laisse tourner.
+# `next build`. Ce script récupère la branche dans `<racine>/depot` (le clone
+# de « Git Version Control », ou le sien s'il n'y en a pas), en extrait la
+# construction dans un dossier neuf, y installe les dépendances aux versions
+# du lockfile, joue les migrations, puis bascule le lien `actuelle` et
+# redémarre les deux applications Passenger. Tant que la bascule n'a pas eu
+# lieu, la version en service n'est pas touchée : un échec en cours de route
+# la laisse tourner.
 #
 # Sans nouveauté, il sort sans rien écrire : une ligne par passage de cron
 # noierait le journal.
@@ -32,23 +35,18 @@ principal() {
   exec </dev/null
 
   local racine=${GAMEDASHBOARD_RACINE:-$HOME/gamedashboard}
-  local source=${GAMEDASHBOARD_SOURCE:-https://github.com/PowerNexus/PowerDashboard/releases/download/continu}
+  local url=${GAMEDASHBOARD_DEPOT:-https://github.com/PowerNexus/PowerDashboard.git}
+  local branche=${GAMEDASHBOARD_BRANCHE:-deploiement}
   # Versions gardées sur le disque en plus de celle en service : de quoi
   # revenir en arrière d'un `ln -sfn`, sans remplir l'espace de l'hébergement.
   local garder=${GAMEDASHBOARD_GARDER:-2}
+  local depot="$racine/depot"
 
   # La racine se traverse sans se lister : Apache doit pouvoir atteindre les
   # racines d'application Passenger. Réglages et journaux restent au compte.
   install -d -m 711 "$racine"
   install -d -m 700 "$racine/env" "$racine/journal"
   install -d -m 755 "$racine/versions" "$racine/bin"
-
-  # Un seul passage à la fois : une installation peut durer plus longtemps
-  # que l'intervalle du cron.
-  exec 9>"$racine/.deployer.verrou"
-  if command -v flock >/dev/null && ! flock -n 9; then
-    exit 0
-  fi
 
   local reglage
   for reglage in api.env web.env; do
@@ -58,44 +56,43 @@ principal() {
     }
   done
 
-  preparer_node "$racine"
-
-  local attendue
-  attendue=$(curl -fsSL --retry 3 --max-time 60 "$source/gamedashboard.tar.gz.sha256" | cut -d' ' -f1)
-  [[ $attendue =~ ^[0-9a-f]{64}$ ]] || {
-    dire "Empreinte illisible depuis $source"
-    exit 1
-  }
-
-  if [ -f "$racine/actuelle/.empreinte" ] && [ "$(cat "$racine/actuelle/.empreinte")" = "$attendue" ]; then
+  # Un seul passage à la fois : une installation peut durer plus longtemps
+  # que l'intervalle du cron.
+  exec 9>"$racine/.deployer.verrou"
+  if command -v flock >/dev/null && ! flock -n 9; then
     exit 0
   fi
 
-  local id=${attendue:0:12}
+  preparer_node "$racine"
+
+  if [ ! -d "$depot/.git" ]; then
+    dire "Clone du dépôt dans $depot"
+    git clone --quiet --no-checkout "$url" "$depot"
+  fi
+  # `+` : la branche est remplacée à chaque publication, jamais prolongée.
+  git -C "$depot" fetch --quiet origin "+refs/heads/$branche:refs/remotes/origin/$branche"
+  local commit
+  commit=$(git -C "$depot" rev-parse "refs/remotes/origin/$branche")
+
+  if [ -f "$racine/actuelle/.commit" ] && [ "$(cat "$racine/actuelle/.commit")" = "$commit" ]; then
+    exit 0
+  fi
+
+  local id=${commit:0:12}
   local version="$racine/versions/$id"
   dire "Nouvelle construction : $id"
 
   if [ ! -f "$version/.installee" ]; then
-    local archive="$racine/versions/.$id.tar.gz"
-    curl -fsSL --retry 3 --max-time 900 -o "$archive" "$source/gamedashboard.tar.gz"
-    # L'empreinte est celle publiée avec l'archive : elle ne protège pas d'un
-    # dépôt compromis, mais d'un téléchargement tronqué ou mélangé à une
-    # construction plus récente publiée entre les deux requêtes.
-    if [ "$(sha256sum "$archive" | cut -d' ' -f1)" != "$attendue" ]; then
-      rm -f "$archive"
-      dire "Empreinte différente : téléchargement abandonné, nouvel essai au prochain passage"
-      exit 1
-    fi
-
     rm -rf "$version"
     install -d -m 755 "$version"
-    tar -xzf "$archive" -C "$version" --strip-components=1 --no-same-owner
-    rm -f "$archive"
+    # git a vérifié chaque objet reçu : ce qui s'extrait est ce qui a été
+    # poussé, à l'octet près.
+    git -C "$depot" archive "$commit" | tar -x -C "$version" --no-same-owner
 
     dire "Dépendances"
     epingler_pnpm "$version"
     (cd "$version" && CI=1 pnpm install --frozen-lockfile)
-    echo "$attendue" >"$version/.empreinte"
+    echo "$commit" >"$version/.commit"
     touch "$version/.installee"
   fi
 
@@ -124,6 +121,13 @@ principal() {
   # requête suivante ; le cron de maintien en éveil la fait venir.
   touch "$racine/passenger/api/tmp/restart.txt" "$racine/passenger/interface/tmp/restart.txt"
   dire "En service : $id ($(sed -n 's/^commit=//p' "$version/RELEASE"))"
+
+  # L'écran « Git Version Control » de cPanel montre ce qui est en service,
+  # et les constructions remplacées quittent le disque : plus rien ne les
+  # désigne une fois la branche déplacée.
+  git -C "$depot" checkout --quiet --force -B "$branche" "$commit"
+  git -C "$depot" reflog expire --expire=now --all
+  git -C "$depot" gc --quiet --prune=now
 
   nettoyer "$racine" "$id" "$garder"
 }

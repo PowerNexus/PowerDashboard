@@ -1,5 +1,4 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -15,7 +14,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
@@ -69,19 +68,37 @@ describe("infra/cpanel/entetes.cjs", () => {
   });
 });
 
+/** Git sans configuration du poste : ni identité, ni réglage global. */
+const GIT_ESSAI = {
+  GIT_AUTHOR_NAME: "essai",
+  GIT_AUTHOR_EMAIL: "essai@example.invalid",
+  GIT_COMMITTER_NAME: "essai",
+  GIT_COMMITTER_EMAIL: "essai@example.invalid",
+  GIT_CONFIG_NOSYSTEM: "1",
+};
+
+function git(dossier: string, ...args: string[]): string {
+  return execFileSync("git", ["-c", "init.defaultBranch=main", "-C", dossier, ...args], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "", HOME: dossier, ...GIT_ESSAI },
+  }).trim();
+}
+
 describe("infra/cpanel/deployer.sh", () => {
   let travail: string;
   let racine: string;
-  let publication: string;
+  let github: string;
   let journalPnpm: string;
   let faux: string;
 
-  /** Publie une archive comme le fait deploiement.yml, sous un nom fixe. */
-  function publier(commit: string, { empreinteFausse = false } = {}): string {
-    const nom = `gamedashboard-v0.0.0-continu.${commit}`;
+  /**
+   * Pousse une construction sur `deploiement`, comme publier-construction.sh :
+   * un commit sans parent qui remplace le précédent.
+   */
+  function publier(nom: string): string {
     const source = join(travail, "sources", nom);
     mkdirSync(join(source, "infra", "cpanel"), { recursive: true });
-    writeFileSync(join(source, "RELEASE"), `version=v0.0.0-continu.${commit}\ncommit=${commit}\n`);
+    writeFileSync(join(source, "RELEASE"), `version=v0.0.0-continu.${nom}\ncommit=${nom}\n`);
     writeFileSync(join(source, "package.json"), '{ "packageManager": "pnpm@11.20.0" }\n');
     copyFileSync(
       join(CPANEL, "emplacements.cjs"),
@@ -93,13 +110,11 @@ describe("infra/cpanel/deployer.sh", () => {
     writeFileSync(join(source, "infra", "cpanel", "api.cjs"), sonde);
     writeFileSync(join(source, "infra", "cpanel", "interface.cjs"), sonde);
 
-    const archive = join(publication, "gamedashboard.tar.gz");
-    execFileSync("tar", ["-czf", archive, "-C", join(travail, "sources"), nom]);
-    const empreinte = empreinteFausse
-      ? "0".repeat(64)
-      : createHash("sha256").update(readFileSync(archive)).digest("hex");
-    writeFileSync(`${archive}.sha256`, `${empreinte}  gamedashboard.tar.gz\n`);
-    return empreinte;
+    git(source, "init", "-q");
+    git(source, "add", "-A");
+    git(source, "commit", "-q", "-m", `Construction ${nom}`);
+    git(source, "push", "-q", "--force", github, "HEAD:refs/heads/deploiement");
+    return git(source, "rev-parse", "HEAD");
   }
 
   function deployer() {
@@ -110,8 +125,9 @@ describe("infra/cpanel/deployer.sh", () => {
       env: {
         HOME: travail,
         PATH: `${faux}:${process.env.PATH ?? ""}`,
+        GIT_CONFIG_NOSYSTEM: "1",
         GAMEDASHBOARD_RACINE: racine,
-        GAMEDASHBOARD_SOURCE: `file://${publication}`,
+        GAMEDASHBOARD_DEPOT: github,
         GAMEDASHBOARD_NODE: join(faux, "node"),
         GAMEDASHBOARD_PNPM: "faux",
       },
@@ -121,10 +137,21 @@ describe("infra/cpanel/deployer.sh", () => {
   beforeEach(() => {
     travail = mkdtempSync(join(tmpdir(), "gd-cpanel-"));
     racine = join(travail, "gamedashboard");
-    publication = join(travail, "publication");
+    github = join(travail, "github.git");
     faux = join(travail, "faux");
     journalPnpm = join(travail, "pnpm.log");
-    mkdirSync(publication);
+
+    // GitHub : main porte le code, `deploiement` les constructions.
+    mkdirSync(github);
+    git(github, "init", "-q", "--bare");
+    const code = join(travail, "code");
+    mkdirSync(code);
+    writeFileSync(join(code, "README.md"), "code source\n");
+    git(code, "init", "-q");
+    git(code, "add", "-A");
+    git(code, "commit", "-q", "-m", "main");
+    git(code, "push", "-q", github, "HEAD:refs/heads/main");
+
     mkdirSync(faux);
     // Un pnpm qui ne fait que noter ce qu'on lui demande, et ce qu'il voit.
     writeFileSync(
@@ -136,6 +163,7 @@ describe("infra/cpanel/deployer.sh", () => {
     // qui passerait devant le faux.
     mkdirSync(join(faux, "node"));
     symlinkSync(process.execPath, join(faux, "node", "node"));
+
     mkdirSync(join(racine, "env"), { recursive: true });
     writeFileSync(join(racine, "env", "web.env"), "API_URL=https://api.example.fr\n");
     writeFileSync(
@@ -149,14 +177,14 @@ describe("infra/cpanel/deployer.sh", () => {
   });
 
   it("installe, migre, bascule et prépare les deux applications Passenger", () => {
-    const empreinte = publier("abc123");
+    const commit = publier("abc123");
     const passage = deployer();
     expect(passage.stderr).toBe("");
     expect(passage.status).toBe(0);
 
-    const id = empreinte.slice(0, 12);
+    const id = commit.slice(0, 12);
     expect(readlinkSync(join(racine, "actuelle"))).toBe(`versions/${id}`);
-    expect(readFileSync(join(racine, "actuelle", ".empreinte"), "utf8").trim()).toBe(empreinte);
+    expect(readFileSync(join(racine, "actuelle", ".commit"), "utf8").trim()).toBe(commit);
 
     const appels = readFileSync(journalPnpm, "utf8").trim().split("\n");
     expect(appels[0]).toMatch(/^install --frozen-lockfile \| base= \| cle=$/);
@@ -180,6 +208,19 @@ describe("infra/cpanel/deployer.sh", () => {
     }
   });
 
+  it("reprend le clone de « Git Version Control » et le met sur la construction en service", () => {
+    // cPanel clone la branche par défaut : main.
+    git(travail, "clone", "-q", github, join(racine, "depot"));
+    const commit = publier("abc123");
+    expect(deployer().status).toBe(0);
+
+    const depot = join(racine, "depot");
+    expect(git(depot, "rev-parse", "--abbrev-ref", "HEAD")).toBe("deploiement");
+    expect(git(depot, "rev-parse", "HEAD")).toBe(commit);
+    expect(git(depot, "status", "--porcelain")).toBe("");
+    expect(existsSync(join(depot, "README.md"))).toBe(false);
+  });
+
   it("ne refait rien quand la construction publiée est déjà en service", () => {
     publier("abc123");
     deployer();
@@ -191,25 +232,24 @@ describe("infra/cpanel/deployer.sh", () => {
     expect(readFileSync(journalPnpm, "utf8")).toBe(avant);
   });
 
-  it("refuse une archive dont l'empreinte ne correspond pas, sans toucher à la version en service", () => {
-    const bonne = publier("abc123");
+  it("suit la branche remplacée, et efface du clone les constructions remplacées", () => {
+    const premiere = publier("abc123");
     deployer();
+    const seconde = publier("def456");
+    expect(deployer().status).toBe(0);
 
-    publier("def456", { empreinteFausse: true });
-    const passage = deployer();
-    expect(passage.status).toBe(1);
-    expect(passage.stdout).toContain("Empreinte différente");
-    expect(readlinkSync(join(racine, "actuelle"))).toBe(`versions/${bonne.slice(0, 12)}`);
+    expect(readlinkSync(join(racine, "actuelle"))).toBe(`versions/${seconde.slice(0, 12)}`);
+    const reste = spawnSync("git", ["-C", join(racine, "depot"), "cat-file", "-e", premiere]);
+    expect(reste.status).not.toBe(0);
   });
 
-  it("ne télécharge rien tant que les réglages manquent", () => {
+  it("ne clone ni ne télécharge rien tant que les réglages manquent", () => {
     rmSync(join(racine, "env", "web.env"));
     publier("abc123");
     const passage = deployer();
     expect(passage.status).toBe(1);
     expect(passage.stdout).toContain("Réglages absents");
-    expect(existsSync(join(racine, "versions"))).toBe(true);
-    expect(execFileSync("ls", ["-A", join(racine, "versions")], { encoding: "utf8" })).toBe("");
+    expect(existsSync(join(racine, "depot"))).toBe(false);
   });
 
   it("ne bascule pas quand la base n'est pas réglée", () => {
@@ -222,16 +262,109 @@ describe("infra/cpanel/deployer.sh", () => {
   });
 
   it("garde la version en service et les deux précédentes, pas plus", () => {
-    const empreintes = ["a1", "b2", "c3", "d4"].map((commit) => {
-      const empreinte = publier(commit);
+    const ids = ["a1", "b2", "c3", "d4"].map((nom) => {
+      const commit = publier(nom);
       expect(deployer().status).toBe(0);
-      return empreinte.slice(0, 12);
+      return commit.slice(0, 12);
     });
     const restantes = execFileSync("ls", [join(racine, "versions")], { encoding: "utf8" })
       .trim()
       .split("\n")
       .sort();
-    expect(restantes).toEqual(empreintes.slice(1).sort());
+    expect(restantes).toEqual(ids.slice(1).sort());
+  });
+});
+
+describe("infra/cpanel/publier-construction.sh", () => {
+  let travail: string;
+  let projet: string;
+  let github: string;
+
+  function publierConstruction() {
+    return spawnSync("bash", ["infra/cpanel/publier-construction.sh", "origin", "deploiement"], {
+      cwd: projet,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", HOME: travail, ...GIT_ESSAI },
+    });
+  }
+
+  beforeEach(() => {
+    travail = mkdtempSync(join(tmpdir(), "gd-publier-"));
+    projet = join(travail, "projet");
+    github = join(travail, "github.git");
+    mkdirSync(github);
+    git(github, "init", "-q", "--bare");
+
+    // Un dépôt réduit à ce que l'assemblage lit, workflows compris.
+    for (const [chemin, contenu] of [
+      [".gitignore", ".next/\n"],
+      ["package.json", '{ "packageManager": "pnpm@11.20.0" }\n'],
+      ["apps/web/package.json", '{ "name": "@gamedashboard/web" }\n'],
+      [".github/workflows/ci.yml", "name: CI\n"],
+      ["infra/prod/installer-wings.sh", "#!/bin/sh\n"],
+      ["infra/prod/app.sh", "#!/bin/sh\n"],
+    ] as const) {
+      mkdirSync(dirname(join(projet, chemin)), { recursive: true });
+      writeFileSync(join(projet, chemin), contenu);
+    }
+    for (const chemin of ["infra/release/assembler.sh", "infra/cpanel/publier-construction.sh"]) {
+      mkdirSync(dirname(join(projet, chemin)), { recursive: true });
+      copyFileSync(join(RACINE_DEPOT, chemin), join(projet, chemin));
+    }
+    git(projet, "init", "-q");
+    git(projet, "add", "-A");
+    git(projet, "commit", "-q", "-m", "code");
+    git(projet, "remote", "add", "origin", github);
+
+    // Une construction de production, cache et dossier de développement compris.
+    const next = join(projet, "apps", "web", ".next");
+    for (const chemin of [
+      "BUILD_ID",
+      "prerender-manifest.json",
+      "server/page.js",
+      "cache/lourd",
+      "dev/lourd",
+    ]) {
+      mkdirSync(dirname(join(next, chemin)), { recursive: true });
+      writeFileSync(join(next, chemin), chemin === "BUILD_ID" ? "construction-1" : "{}");
+    }
+  });
+
+  afterEach(() => {
+    rmSync(travail, { recursive: true, force: true });
+  });
+
+  it("pousse le code et l'interface construite, sans cache ni workflows", () => {
+    const passage = publierConstruction();
+    expect(passage.stderr).not.toContain("fatal");
+    expect(passage.status).toBe(0);
+
+    const fichiers = git(github, "ls-tree", "-r", "--name-only", "deploiement").split("\n");
+    expect(fichiers).toEqual(
+      expect.arrayContaining([
+        "RELEASE",
+        "package.json",
+        "infra/cpanel/publier-construction.sh",
+        "apps/web/.next/BUILD_ID",
+        "apps/web/.next/server/page.js",
+      ]),
+    );
+    expect(fichiers.filter((f) => /^\.github\/|\.next\/(cache|dev)\//.test(f))).toEqual([]);
+    expect(git(github, "show", "deploiement:RELEASE")).toContain(
+      `commit=${git(projet, "rev-parse", "HEAD")}`,
+    );
+  });
+
+  it("remplace la construction précédente au lieu de s'y ajouter, sans toucher au dépôt", () => {
+    publierConstruction();
+    writeFileSync(join(projet, "apps", "web", ".next", "BUILD_ID"), "construction-2");
+    expect(publierConstruction().status).toBe(0);
+
+    // Un seul commit, sans parent : la branche ne grossit pas.
+    expect(git(github, "rev-list", "--count", "deploiement")).toBe("1");
+    expect(git(github, "show", "deploiement:apps/web/.next/BUILD_ID")).toBe("construction-2");
+    expect(git(projet, "status", "--porcelain")).toBe("");
+    expect(git(projet, "rev-list", "--count", "HEAD")).toBe("1");
   });
 });
 
@@ -250,22 +383,10 @@ describe(".github/workflows/deploiement.yml", () => {
     expect(workflow).toContain(`COMMIT: \${{ github.event.workflow_run.head_sha || github.sha }}`);
   });
 
-  it("publie l'archive avant son empreinte, et jamais comme « la dernière » version", () => {
-    const archive = workflow.indexOf("upload continu publication/gamedashboard.tar.gz --clobber");
-    const empreinte = workflow.indexOf(
-      "upload continu publication/gamedashboard.tar.gz.sha256 --clobber",
-    );
-    expect(archive).toBeGreaterThan(0);
-    expect(empreinte).toBeGreaterThan(archive);
-    expect(workflow).toContain("--prerelease --latest=false");
-  });
-
-  it("publie sous les noms que deployer.sh vient chercher", () => {
+  it("publie sur la branche que deployer.sh suit", () => {
     const script = readFileSync(join(CPANEL, "deployer.sh"), "utf8");
-    expect(script).toContain("releases/download/continu");
-    for (const fichier of ["gamedashboard.tar.gz", "gamedashboard.tar.gz.sha256"]) {
-      expect(script).toContain(`$source/${fichier}`);
-      expect(workflow).toContain(`publication/${fichier}`);
-    }
+    expect(workflow).toContain("run: bash infra/cpanel/publier-construction.sh origin deploiement");
+    expect(script).toContain("GAMEDASHBOARD_BRANCHE:-deploiement}");
+    expect(script).toContain("raw.githubusercontent.com/PowerNexus/PowerDashboard/deploiement/");
   });
 });
