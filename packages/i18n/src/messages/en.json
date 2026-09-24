@@ -1984,6 +1984,19 @@
     "description": "This page does not exist or you do not have access to it.",
     "home": "Back to home"
   },
+  "passwordStrength": {
+    "tooShort": "Too short",
+    "tooLong": "Too long",
+    "containsIdentity": "Refused",
+    "acceptable": "Acceptable",
+    "good": "Good",
+    "strong": "Strong",
+    "missing": "{count, plural, one {# more character} other {# more characters}}",
+    "tooLongHint": "{maximum} characters at most",
+    "identityHint": "it contains your name or email address",
+    "longerHint": "a longer one would be safer",
+    "breachHint": "it will also be checked against known breaches"
+  },
   "securityAlerts": {
     "failureSubject": "Failed sign-in attempts on your {brand} account",
     "failureTitle": "Failed sign-in attempts",

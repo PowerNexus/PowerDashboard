@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { PasswordProblem } from "@gamedashboard/contracts";
+import { checkPasswordShape, type PasswordProblem } from "@gamedashboard/contracts";
 
 /**
  * Politique de mot de passe (§5.1).
@@ -8,60 +8,21 @@ import type { PasswordProblem } from "@gamedashboard/contracts";
  * majuscule, un chiffre et un symbole produit surtout des « Motdepasse1! »,
  * prévisibles pour un attaquant et pénibles pour tout le monde. La longueur et
  * la vérification des fuites protègent davantage.
- */
-export const PASSWORD_MIN_LENGTH = 12;
-/** Argon2 accepte davantage, mais une entrée démesurée est un vecteur de déni de service. */
-export const PASSWORD_MAX_LENGTH = 256;
-
-// Le type circule sur le réseau : il vit donc dans `@gamedashboard/contracts`, que
-// le paquet web peut importer sans embarquer argon2. Réexporté ici pour que
-// les appelants côté serveur n'aient pas deux paquets à connaître.
-export type { PasswordProblem };
-
-/**
- * Contrôles réalisables sans appel réseau.
  *
- * `identity` reçoit l'e-mail et le nom : un mot de passe qui les contient est
- * la première chose qu'un attaquant essaie, et aucune règle de complexité ne
- * l'en empêche.
+ * Les contrôles réalisables sans réseau — longueur, identité — vivent dans
+ * `@gamedashboard/contracts` : la jauge de force de l'interface les applique
+ * aussi, et une seconde copie finirait par annoncer « acceptable » un mot de
+ * passe que l'API refuse. Ils sont réexportés ici pour que les appelants côté
+ * serveur n'aient pas deux paquets à connaître ; ne reste ici que ce qui
+ * demande le réseau ou argon2.
  */
-export function checkPasswordShape(
-  password: string,
-  identity: readonly string[] = [],
-): PasswordProblem[] {
-  const problems: PasswordProblem[] = [];
-
-  // La longueur se mesure en points de code : « é » ou un emoji comptent pour
-  // un caractère aux yeux de l'utilisateur, alors que `.length` compterait
-  // deux unités et laisserait passer un mot de passe plus court qu'annoncé.
-  const length = [...password].length;
-  if (length < PASSWORD_MIN_LENGTH) {
-    problems.push({ kind: "too-short", minimum: PASSWORD_MIN_LENGTH });
-  }
-  if (length > PASSWORD_MAX_LENGTH) {
-    problems.push({ kind: "too-long", maximum: PASSWORD_MAX_LENGTH });
-  }
-
-  const lowered = password.toLowerCase();
-  const found = identity.some((raw) => {
-    const part = raw.toLowerCase().trim();
-    // Les fragments très courts produiraient des refus incompréhensibles.
-    return part.length >= 4 && lowered.includes(part);
-  });
-  if (found) problems.push({ kind: "contains-identity" });
-
-  return problems;
-}
-
-/** Séparateur du nom d'utilisateur et du domaine, pour éclater une adresse. */
-const IDENTITY_SPLIT = /[@._\-\s]+/;
-
-/** Fragments d'identité exploitables, tirés de l'e-mail et du nom. */
-export function identityFragments(email: string, ...names: string[]): string[] {
-  return [...email.split(IDENTITY_SPLIT), ...names]
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
+export {
+  checkPasswordShape,
+  identityFragments,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  type PasswordProblem,
+} from "@gamedashboard/contracts";
 
 export type FetchLike = (
   url: string,

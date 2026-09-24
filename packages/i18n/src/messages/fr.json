@@ -1984,6 +1984,19 @@
     "description": "Cette page n'existe pas ou vous n'y avez pas accès.",
     "home": "Retour à l'accueil"
   },
+  "passwordStrength": {
+    "tooShort": "Trop court",
+    "tooLong": "Trop long",
+    "containsIdentity": "Refusé",
+    "acceptable": "Acceptable",
+    "good": "Bon",
+    "strong": "Solide",
+    "missing": "{count, plural, one {encore # caractère} other {encore # caractères}}",
+    "tooLongHint": "{maximum} caractères au plus",
+    "identityHint": "il contient votre nom ou votre adresse e-mail",
+    "longerHint": "plus long, il serait plus sûr",
+    "breachHint": "il sera aussi comparé aux fuites connues"
+  },
   "securityAlerts": {
     "failureSubject": "Tentatives de connexion échouées sur votre compte {brand}",
     "failureTitle": "Tentatives de connexion échouées",

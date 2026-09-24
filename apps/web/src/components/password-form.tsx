@@ -5,16 +5,17 @@ import { AlertBanner, Button, FormField, PasswordInput, SettingsSection } from "
 import { Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
+import { NewPasswordStrength } from "@/components/new-password-strength";
 import { changePassword } from "@/server/api/password";
 
 /**
  * Changement de mot de passe.
  *
- * Le formulaire ne juge pas la solidité du mot de passe : c'est l'API qui
- * applique la politique, longueur comme présence dans les fuites connues. Le
- * seul contrôle fait ici est la correspondance des deux saisies, parce qu'il
- * ne demande aucune connaissance de la règle et évite un aller-retour pour une
- * faute de frappe.
+ * C'est l'API qui applique la politique, longueur comme présence dans les
+ * fuites connues. L'écran en montre une jauge, tirée de la même règle
+ * partagée, et contrôle lui-même la correspondance des deux saisies, parce
+ * qu'elle ne demande aucune connaissance de la règle et évite un aller-retour
+ * pour une faute de frappe.
  */
 export function PasswordForm({ provisional = false }: { provisional?: boolean }) {
   const t = useTranslations("security");
@@ -138,14 +139,17 @@ export function PasswordForm({ provisional = false }: { provisional?: boolean })
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField label={t("newPassword")}>
             {(id) => (
-              <PasswordInput
-                id={id}
-                leadingIcon={<Lock />}
-                autoComplete="new-password"
-                value={next}
-                disabled={pending}
-                onChange={(e) => setNext(e.target.value)}
-              />
+              <>
+                <PasswordInput
+                  id={id}
+                  leadingIcon={<Lock />}
+                  autoComplete="new-password"
+                  value={next}
+                  disabled={pending}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+                <NewPasswordStrength password={next} />
+              </>
             )}
           </FormField>
           <FormField label={t("confirmation")} error={mismatch ? t("mismatch") : undefined}>

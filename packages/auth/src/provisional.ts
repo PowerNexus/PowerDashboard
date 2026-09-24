@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { PASSWORD_MIN_LENGTH } from "./policy";
+import { PASSWORD_MIN_LENGTH } from "@gamedashboard/contracts";
 
 /**
  * Mots de passe provisoires des scripts d'exploitation (ASVS 2.3.1).
