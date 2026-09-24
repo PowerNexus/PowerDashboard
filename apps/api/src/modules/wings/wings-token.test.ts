@@ -110,7 +110,17 @@ describe("permissions du jeton de console", () => {
     chaine.innerJoin = () => chaine;
     chaine.where = () => chaine;
     chaine.limit = async () => [
-      { scheme: "https", fqdn: "node.exemple.fr", port: 8080, token: encryptSecret(SECRET) },
+      {
+        scheme: "https",
+        fqdn: "node.exemple.fr",
+        port: 8080,
+        nodeId: "55555555-5555-5555-5555-555555555555",
+        token: encryptRowSecret(
+          "nodes.daemon_token_enc",
+          "55555555-5555-5555-5555-555555555555",
+          SECRET,
+        ),
+      },
     ];
     return chaine as unknown as Database;
   }
