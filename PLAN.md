@@ -325,7 +325,7 @@ Cette couche n'est pas de notre ressort : elle est fournie par le daemon amont (
 - **Audit log immuable** : chaque action (qui, quoi, où, IP, UA, avant/après) dans une table append-only + export.
 - **Dépendances** : Renovate, `pnpm audit`, SBOM (CycloneDX) par release.
 - **Backups DB** : PITR PostgreSQL (WAL) + snapshot quotidien chiffré hors site.
-- **Tests sécurité** : ZAP baseline en CI, revue OWASP ASVS niveau 2, pentest avant la v1.
+- **Tests sécurité** : ZAP baseline en CI ; revue OWASP ASVS niveau 2 faite et corrigée pour la V1 ([rapport](docs/securite/rapport-asvs-l2.md), §0 pour l'état de chaque point ; [modèle de menace](docs/securite/modele-de-menace.md)). Pentest externe : non fait, recommandé avant une ouverture au public.
 
 ### 5.5 Modèle de confiance panel ↔ Wings
 

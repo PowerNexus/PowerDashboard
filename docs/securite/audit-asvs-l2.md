@@ -166,8 +166,9 @@ Pièges connus :
 - **Ne jamais tuer un processus avec `pkill -f`** : le motif trouve aussi le
   shell qui lance la commande, et la session s'interrompt.
 - Le test `security-alert.integration.test.ts › n'empêche ni ne retarde la
-  connexion` dépasse son délai de 5 s dans un conteneur lent (Argon2), avec
-  ou sans changement. Ce n'est pas une faille.
+  connexion` dépassait son délai, attribué ici à Argon2. C'était le test : il
+  libérait l'envoi de courrier avant son départ et l'attendait pour toujours.
+  Corrigé (rapport §0.4) ; la suite est désormais verte en entier.
 - La CI tourne sur le runner auto-hébergé de Matheo, **éteint quand son PC
   l'est** : ne pas attendre la CI, vérifier en local.
 
