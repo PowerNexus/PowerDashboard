@@ -103,9 +103,15 @@ Après une clôture :
 **Évacuer une machine morte.** C'est le node de départ qui fabrique l'archive :
 un node injoignable ne transfère rien. Il reste alors à remettre la machine
 sur pied ([machine injoignable](./machine-injoignable.md)). À défaut, il faut
-recréer le serveur ailleurs. Les sauvegardes du serveur ne sauvent pas la mise :
-seul l'adaptateur local est proposé aujourd'hui, et elles vivent sur la même
-machine.
+recréer le serveur ailleurs, et ses sauvegardes ne sauvent pas la mise : elles
+sont toutes écrites sur le disque du node, et meurent avec lui.
+
+C'est vrai **même quand un compartiment S3 est réglé** dans Administration ›
+Paramètres › Stockage des sauvegardes, malgré ce que l'écran annonce : le
+panel demande toujours l'adaptateur local à Wings. Le branchement du stockage
+distant est incomplet (PLAN §12.4, décision 3). Une fois corrigé, une
+sauvegarde distante restera téléchargeable pendant la panne : le lien est
+signé par le panel, sans passer par la machine.
 
 **Déplacer un parc entier d'un coup.** Chaque serveur se déplace à part, et
 chacun change d'adresse. Pour vider un node, déplacer ses serveurs un à un, en

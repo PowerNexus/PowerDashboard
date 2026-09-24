@@ -62,5 +62,19 @@ Concrètement :
 - Le projet dépend du rythme de maintenance amont. Si Wings cessait d'être
   maintenu, le repli serait le fork communautaire actif, pas une réécriture.
   À réévaluer chaque année.
-- Une montée de version de Wings passe d'abord les bancs, node par node,
-  jamais en masse.
+- ~~Une montée de version de Wings passe d'abord les bancs, node par node,
+  jamais en masse.~~ Remplacé par l'amendement ci-dessous.
+
+## Amendement — 2026-09
+
+Décision du PLAN §12.4 (6) : **les machines de jeu suivent la dernière version
+publiée de Wings.** `installer-wings.sh` l'installe et, relancé sur un node, le
+met à jour.
+
+La règle « les bancs d'abord » devient « les bancs à chaque nouvelle
+version » : on les rejoue quand l'amont publie, et une dérive de contrat se
+corrige côté panel, jamais dans Wings. Le compose de dev reste épinglé, pour
+que les bancs soient reproductibles, et monte avec eux.
+
+Risque accepté : un node mis à jour avant le passage des bancs tourne sur une
+version qu'aucun banc n'a vue.

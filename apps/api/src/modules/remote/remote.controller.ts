@@ -235,17 +235,12 @@ export class RemoteController {
   }
 
   /**
-   * Jetons d'envoi vers S3.
-   *
-   * Toujours 501 : seul l'adaptateur local est proposé aujourd'hui, et le
-   * daemon n'appelle cette route que pour une sauvegarde S3. Y répondre
-   * n'importe quoi ferait échouer l'envoi plus loin, sans dire pourquoi.
-   */
-  /**
    * Adresses signées pour déposer une sauvegarde sur le stockage distant.
    *
    * Wings appelle cette route **juste avant** d'envoyer l'archive qu'il vient
-   * de peser. Le panel ouvre le dépôt fractionné — lui seul a les identifiants
+   * de peser — et seulement pour une sauvegarde demandée avec l'adaptateur
+   * `s3`, ce que le panel ne fait pas encore (`BackupsService.create`, PLAN
+   * §12.4, décision 3). Le panel ouvre le dépôt fractionné — lui seul a les identifiants
    * du compartiment — et rend une adresse par partie.
    *
    * **404 quand le stockage distant n'est pas configuré**, et non 501 : Wings
@@ -290,8 +285,8 @@ export class RemoteController {
    * Fin d'une restauration.
    *
    * Accusé de réception seulement : la restauration réécrit le volume du
-   * serveur et ne laisse aucune trace à enregistrer côté panel. Le journal
-   * d'activité la retiendra quand le module d'audit existera.
+   * serveur et ne laisse rien à enregistrer côté panel. La demande, elle, est
+   * déjà au journal d'activité (`backup.restore`), avec son auteur.
    */
   @Post("backups/:uuid/restore")
   @HttpCode(204)
