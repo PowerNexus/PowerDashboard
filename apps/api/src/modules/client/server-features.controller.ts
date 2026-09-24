@@ -591,6 +591,15 @@ export class ServerFeaturesController {
     if (typeof active !== "boolean") throw new BadRequestException("État manquant.");
 
     await this.access.require(principalOf(request), id, "schedules.update");
+    /*
+     * Réactiver, c'est rendre au planificateur des étapes qu'il exécutera avec
+     * le jeton du panel : le droit de les faire soi-même est exigé, comme à la
+     * création. La pause, non — elle n'exécute rien, et le même invité peut
+     * déjà vider la tâche de ses étapes par une modification.
+     */
+    if (active) {
+      await this.requireTaskPermissions(request, id, await this.schedules.tasksOf(id, scheduleId));
+    }
     await this.schedules.setActive(id, scheduleId, active);
     await this.log(request, id, "schedule.active", { scheduleId, active });
     return { data: { active } };
@@ -602,6 +611,10 @@ export class ServerFeaturesController {
    * Rattachée à `schedules.update` : lancer une tâche revient à décider de son
    * moment d'exécution, ce qui est bien une modification. La lecture seule ne
    * doit pas permettre de déclencher un redémarrage.
+   *
+   * **Et au droit de faire chaque étape.** `schedules.update` seul laissait un
+   * invité sans `power.stop` arrêter le serveur en lançant une tâche écrite
+   * par le propriétaire : le planificateur l'exécute avec le jeton du panel.
    */
   @Post("schedules/:scheduleId/run")
   async runSchedule(
@@ -610,6 +623,7 @@ export class ServerFeaturesController {
     @Param("scheduleId") scheduleId: string,
   ) {
     await this.access.require(principalOf(request), id, "schedules.update");
+    await this.requireTaskPermissions(request, id, await this.schedules.tasksOf(id, scheduleId));
     await this.schedules.runNow(id, scheduleId);
     await this.log(request, id, "schedule.run", { scheduleId });
     return { data: { queued: scheduleId } };
