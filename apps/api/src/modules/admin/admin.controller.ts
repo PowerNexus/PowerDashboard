@@ -710,7 +710,8 @@ export class AdminController {
    * 2. **Jamais sur un compte du personnel.** Devenir un autre administrateur
    *    contournerait toute séparation des rôles, y compris la sienne propre.
    * 3. **Trente minutes.** Une prise en main est un geste de diagnostic, pas un
-   *    accès ; une session de sept jours ouverte chez un client serait un accès.
+   *    accès ; une session ordinaire de douze heures ouverte chez un client
+   *    serait un accès.
    * 4. **Consignée au départ et au retour**, des deux côtés — chez l'agent et
    *    chez le client, qui doit pouvoir le lire dans son propre journal.
    *

@@ -13,6 +13,17 @@
  * chargé après l'évaluation des modules).
  */
 
+/**
+ * Durée de vie maximale d'une session, quelle que soit l'activité : douze
+ * heures (ASVS 3.3.2, niveau 2).
+ *
+ * L'API refuse la session au-delà, et le cookie du navigateur meurt au même
+ * moment : un cookie qui survivrait à sa session ferait voir un refus à chaque
+ * page au lieu de l'écran de connexion. Elle durait sept jours ; l'expiration
+ * d'inactivité, elle, n'existe que côté API (`SESSION_IDLE_MS`).
+ */
+export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+
 /** Ce que la règle lit de l'environnement, et rien d'autre. */
 export interface CookieEnvironment {
   NODE_ENV?: string;

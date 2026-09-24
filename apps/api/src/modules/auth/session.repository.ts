@@ -1,4 +1,5 @@
 import { generateToken, hashToken, tokenValidity } from "@gamedashboard/auth";
+import { SESSION_MAX_AGE_MS } from "@gamedashboard/contracts";
 import { type Database, sessions, users } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
@@ -41,18 +42,68 @@ export interface SessionUser {
  */
 const staff = alias(users, "impersonator");
 
-/** Durée d'une session inactive. Au-delà, il faut se reconnecter. */
-export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Durée de vie maximale d'une session : douze heures, activité ou non.
+ *
+ * Au-delà, il faut se reconnecter (ASVS 3.3.2, niveau 2). Elle était de sept
+ * jours, sans expiration d'inactivité : une session volée ou oubliée sur un
+ * poste partagé valait une semaine. La valeur vit dans `contracts`, parce que
+ * l'interface pose le cookie pour la même durée.
+ */
+export const SESSION_TTL_MS = SESSION_MAX_AGE_MS;
 
 /**
- * Granularité de `last_seen_at`.
+ * Inactivité tolérée : trente minutes sans requête, et la session tombe.
+ *
+ * Décision de Matheo : les deux limites du niveau 2, et non l'une ou l'autre.
+ * Douze heures seules laisseraient une session ouverte toute la journée sur
+ * un poste quitté à midi ; trente minutes seules, une session active sans fin.
+ */
+export const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+/**
+ * Granularité de `last_seen_at` : une minute.
  *
  * Chaque requête servie pourrait rafraîchir la colonne, mais cela ferait une
- * écriture par requête sur une table lue à chaque requête — un coût permanent
- * pour une précision que personne ne regarde. En dessous de ce seuil, la
- * valeur en base est jugée assez fraîche et rien n'est écrit.
+ * écriture par requête sur une table lue à chaque requête. En dessous de ce
+ * seuil, la valeur en base est jugée assez fraîche et rien n'est écrit.
+ *
+ * Elle était de cinq minutes, quand la colonne ne servait qu'à l'affichage.
+ * Elle décide maintenant de l'expiration d'inactivité, et la dernière valeur
+ * écrite peut précéder la dernière requête d'une tranche entière : cinq
+ * minutes déconnectaient après vingt-cinq minutes d'inactivité réelle. Une
+ * minute tient la limite entre vingt-neuf et trente, pour au plus une
+ * écriture par minute et par session active.
  */
-export const LAST_SEEN_PRECISION_MS = 5 * 60 * 1000;
+export const LAST_SEEN_PRECISION_MS = 60 * 1000;
+
+/**
+ * La session a-t-elle dépassé l'une de ses deux limites ?
+ *
+ * Extrait du dépôt pour être vérifiable sans base, comme `shouldRecordLastSeen`.
+ *
+ * - **Douze heures depuis l'ouverture**, lue sur `created_at` et non sur
+ *   `expires_at` : les sessions ouvertes sous l'ancienne règle portent un
+ *   `expires_at` à sept jours, et doivent tomber elles aussi.
+ * - **Trente minutes sans requête**, lues sur `last_seen_at`, ou sur
+ *   l'ouverture pour une session jamais vue. Une valeur dans le futur
+ *   (horloge corrigée) ne compte pas comme inactivité : `touch` la réécrit, et
+ *   la refuser d'ici là déconnecterait quelqu'un en pleine activité.
+ */
+export function sessionTimedOut(
+  session: { createdAt: string; lastSeenAt: string | null },
+  now: number,
+): boolean {
+  const opened = Date.parse(session.createdAt);
+  // Ouverture illisible : refusée plutôt que crue éternelle. Toute
+  // comparaison avec NaN étant fausse, un test naïf l'aurait laissée passer.
+  if (Number.isNaN(opened)) return true;
+  if (now - opened >= SESSION_TTL_MS) return true;
+
+  const seen = session.lastSeenAt === null ? Number.NaN : Date.parse(session.lastSeenAt);
+  const lastActivity = Number.isNaN(seen) ? opened : Math.max(seen, opened);
+  return now - lastActivity >= SESSION_IDLE_MS;
+}
 
 /**
  * Faut-il réécrire `last_seen_at` ?
@@ -154,6 +205,7 @@ export class SessionRepository {
       .select({
         expiresAt: sessions.expiresAt,
         revokedAt: sessions.revokedAt,
+        openedAt: sessions.createdAt,
         lastSeenAt: sessions.lastSeenAt,
         id: users.id,
         email: users.email,
@@ -183,6 +235,16 @@ export class SessionRepository {
     // puisse constater la fermeture depuis /account/security.
     if (tokenValidity(row) !== "valid") return null;
     /*
+     * Inactive depuis trente minutes, ou ouverte depuis douze heures (NC-03).
+     *
+     * Lu **avant** `touch` : c'est la requête précédente qui dit depuis quand
+     * la session dort, et celle-ci ne doit pas la réveiller. La ligne n'est pas
+     * révoquée pour autant — elle reste lisible comme une session expirée.
+     */
+    if (sessionTimedOut({ createdAt: row.openedAt, lastSeenAt: row.lastSeenAt }, Date.now())) {
+      return null;
+    }
+    /*
      * Un compte suspendu ne passe plus, **même avec une session vivante**.
      *
      * La suspension révoque déjà les sessions ouvertes ; ce contrôle en est la
@@ -197,6 +259,7 @@ export class SessionRepository {
     const {
       expiresAt: _e,
       revokedAt: _r,
+      openedAt: _o,
       lastSeenAt: _l,
       suspendedAt: _s,
       impersonatorId,
@@ -241,6 +304,11 @@ export class SessionRepository {
    * Les sessions révoquées et expirées sont écartées : la page demande « où
    * suis-je connecté », et une liste qui mélange les deux ferait révoquer dans
    * le vide des lignes déjà fermées. La trace, elle, reste en base.
+   *
+   * « Expirée » a le sens de `resolve` : inactive depuis trente minutes ou
+   * ouverte depuis douze heures, même quand `expires_at` est encore devant.
+   * Le filtre est la même règle, appliquée ligne à ligne plutôt que redite en
+   * SQL, où elle finirait par diverger.
    */
   async listForUser(userId: string, currentToken?: string | null): Promise<SessionSummary[]> {
     const currentHash = currentToken ? hashToken(currentToken) : null;
@@ -269,10 +337,13 @@ export class SessionRepository {
       // plutôt qu'en bloc à la fin.
       .orderBy(desc(sql`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`));
 
-    return rows.map(({ tokenHash, ...row }) => ({
-      ...row,
-      isCurrent: currentHash !== null && tokenHash === currentHash,
-    }));
+    const now = Date.now();
+    return rows
+      .filter((row) => !sessionTimedOut(row, now))
+      .map(({ tokenHash, ...row }) => ({
+        ...row,
+        isCurrent: currentHash !== null && tokenHash === currentHash,
+      }));
   }
 
   /** Révoque une session sans la supprimer : la trace doit rester visible. */

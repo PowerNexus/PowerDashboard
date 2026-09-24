@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AUTH_COOKIE_OPTIONS, SESSION_COOKIE } from "@/lib/session-cookie";
+import { AUTH_COOKIE_OPTIONS, SESSION_COOKIE, SESSION_MAX_AGE_S } from "@/lib/session-cookie";
 import { forwardedIdentityHeaders } from "./forwarded";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
@@ -112,7 +112,7 @@ export async function register(
     const store = await cookies();
     store.set(SESSION_COOKIE, token, {
       ...AUTH_COOKIE_OPTIONS,
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: SESSION_MAX_AGE_S,
     });
   }
 

@@ -2,6 +2,7 @@ import {
   authCookieAttributes,
   cookiesRequireHttps,
   impersonationReturnCookieName,
+  SESSION_MAX_AGE_MS,
   sessionCookieName,
 } from "@gamedashboard/contracts";
 
@@ -19,6 +20,13 @@ import {
  * l'environnement avant d'évaluer le moindre module, ce que l'API ne fait pas.
  */
 export const SESSION_COOKIE = sessionCookieName(process.env);
+
+/**
+ * Durée du cookie de session, en secondes : douze heures, celle de la session
+ * elle-même côté API. Un cookie qui lui survivrait ferait voir un refus à
+ * chaque page plutôt que l'écran de connexion.
+ */
+export const SESSION_MAX_AGE_S = SESSION_MAX_AGE_MS / 1000;
 
 /**
  * Cookie où l'API met de côté le jeton de l'agent pendant une prise en main.

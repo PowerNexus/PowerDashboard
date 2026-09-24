@@ -1,6 +1,11 @@
 import "server-only";
 import { type NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE_OPTIONS, SECURE_COOKIES, SESSION_COOKIE } from "@/lib/session-cookie";
+import {
+  AUTH_COOKIE_OPTIONS,
+  SECURE_COOKIES,
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_S,
+} from "@/lib/session-cookie";
 import {
   CEREMONY_COOKIE,
   type Ceremony,
@@ -165,7 +170,7 @@ export async function finishCeremony(
   if (token) {
     redirect.cookies.set(SESSION_COOKIE, token, {
       ...AUTH_COOKIE_OPTIONS,
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: SESSION_MAX_AGE_S,
     });
   }
 

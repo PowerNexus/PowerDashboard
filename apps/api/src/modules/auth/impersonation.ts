@@ -30,8 +30,13 @@ export function impersonationReturnCookie(): string {
 /**
  * Trente minutes.
  *
- * Une prise en main est un geste de diagnostic, pas un accès. Sept jours —
- * la durée d'une session ordinaire — en feraient une porte ouverte chez un
- * client, oubliée sur un poste et vivante jusqu'à la semaine suivante.
+ * Une prise en main est un geste de diagnostic, pas un accès. Douze heures —
+ * la durée maximale d'une session ordinaire — en feraient une porte ouverte
+ * chez un client, oubliée sur un poste jusqu'au lendemain.
+ *
+ * La session de l'agent, mise de côté, dort pendant ce temps : son
+ * inactivité court (trente minutes, comme toute session). Une visite qui
+ * touche à sa fin le renvoie donc à l'écran de connexion au retour, et c'est
+ * la règle : personne ne s'est servi de cette session depuis une demi-heure.
  */
 export const IMPERSONATION_TTL_MS = 30 * 60_000;

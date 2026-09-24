@@ -227,8 +227,9 @@ export const sessions = pgTable(
      * apparaîtrait comme la plus récemment active de la liste — exactement
      * l'inverse de ce qui s'est passé.
      *
-     * L'écriture est volontairement grossière (cf. `LAST_SEEN_PRECISION_MS`) :
-     * la valeur sert à reconnaître une session oubliée, pas à chronométrer.
+     * L'écriture se fait au plus une fois par minute (cf.
+     * `LAST_SEEN_PRECISION_MS`) : la valeur décide de l'expiration
+     * d'inactivité (trente minutes), et une tranche plus large la déplacerait.
      */
     lastSeenAt: moment("last_seen_at"),
     /**

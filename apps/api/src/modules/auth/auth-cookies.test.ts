@@ -100,6 +100,17 @@ describe("cookies d'authentification de l'API", () => {
     expect(resolve).toHaveBeenCalledWith("jeton-de-session");
   });
 
+  /**
+   * Le cookie ne survit pas à la session (NC-03) : douze heures, et non plus
+   * sept jours. Un navigateur qui garderait un jeton que l'API refuse ferait
+   * voir un 401 à chaque page, sans passer par l'écran de connexion.
+   */
+  it("pose le cookie pour douze heures au plus", async () => {
+    const { set, sink } = capturedCookies();
+    await issuer().issue(USER.id, { ip: null, userAgent: null }, sink, "password");
+    expect(set[0]?.options.maxAge).toBe(12 * 3600);
+  });
+
   it("reste en clair sur une origine HTTP hors production", async () => {
     vi.stubEnv("PANEL_ORIGIN", "http://localhost:3000");
     const { set, sink } = capturedCookies();
@@ -139,6 +150,15 @@ function offenders(pattern: RegExp): string[] {
 describe("règle des cookies, partagée par l'API et l'interface", () => {
   it("ne décide jamais de Secure par NODE_ENV seul", () => {
     expect(offenders(/secure:\s*process\.env\.NODE_ENV/)).toEqual([]);
+  });
+
+  /**
+   * L'interface recopie le cookie de session vers le navigateur à trois
+   * endroits (connexion, inscription, retour des cérémonies OAuth) : chacun
+   * portait `7 * 24 * 60 * 60` en dur (NC-03). Ils lisent la durée commune.
+   */
+  it("ne pose jamais le cookie de session pour sept jours", () => {
+    expect(offenders(/maxAge:\s*7\s*\*\s*24\s*\*/)).toEqual([]);
   });
 
   it("ne nomme jamais le cookie de session hors de la règle commune", () => {
