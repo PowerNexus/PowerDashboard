@@ -319,7 +319,7 @@ Cette couche n'est pas de notre ressort : elle est fournie par le daemon amont (
 ### 5.4 Application
 
 - **Headers** : CSP stricte (nonce), HSTS, COOP/COEP, Permissions-Policy.
-- **CSRF** : double-submit token pour les cookies + vérification `Origin`.
+- **CSRF** : pas de jeton anti-CSRF, et c'est un choix. Le cookie de session est `SameSite=Lax` ; le navigateur ne parle qu'à Next, dont les actions serveur refusent une requête dont l'`Origin` n'est pas l'hôte ; les relais qui n'en sont pas (console, envoi par morceaux) font le même contrôle ; et l'API, en défense en profondeur, refuse toute écriture authentifiée par cookie que le navigateur dit venue d'un autre site (`Origin`/`Sec-Fetch-Site`, transmis par Next en `x-gd-origin`/`x-gd-fetch-site` ; règle unique dans `packages/contracts/src/browser-provenance.ts`). nginx ne publie pas l'API cliente.
 - **Validation** : Zod sur 100 % des entrées, sorties filtrées (pas de fuite de champs).
 - **Secrets** : jamais en base en clair (chiffrement AES-256-GCM via clé maître / SOPS), rotation.
 - **Audit log immuable** : chaque action (qui, quoi, où, IP, UA, avant/après) dans une table append-only + export.
@@ -414,8 +414,8 @@ Notation : `table (colonnes clés)`. Toutes les tables ont `id uuid`, `created_a
 **Domaine.** L'API est servie par le domaine du panel (`game.gamedashboard.fr`), sous le préfixe `/api`. Pas de sous-domaine séparé.
 
 Conséquences concrètes :
-- Le frontend et l'API partagent la même origine : l'interface s'authentifie par son cookie de session, aucun jeton ne transite par le JavaScript et il n'y a pas de préflight CORS sur les appels du panel.
-- Puisqu'un cookie suffit alors à authentifier, **le jeton anti-CSRF devient obligatoire** sur toute requête mutante (double-submit + vérification de `Origin`).
+- Le frontend et l'API partagent la même origine : l'interface s'authentifie par son cookie de session, aucun jeton ne transite par le JavaScript et il n'y a pas de préflight CORS sur les appels du panel. En pratique, le navigateur ne joint même pas l'API cliente : il parle à Next (actions serveur, deux relais), qui appelle l'API depuis la machine, et nginx ne publie que l'API applicative, `/api/remote`, la spécification et le statut.
+- Puisqu'un cookie suffit alors à authentifier, **toute requête mutante par cookie est contrôlée sur son origine**, sans jeton en double soumission : `SameSite=Lax`, contrôle d'origine des actions serveur de Next et des deux relais, puis `SessionGuard`, qui refuse une écriture par cookie que le navigateur dit venue d'un autre site (§5.4). Une clé `Bearer` n'est pas concernée : aucun navigateur ne la joint de lui-même.
 - CORS n'est ouvert qu'à l'origine du panel (`PANEL_ORIGIN`). Les systèmes tiers appellent l'API applicative de serveur à serveur, avec une clé : ils n'en ont pas besoin.
 
 **Routage Traefik.** Le préfixe `/api/` va au service API ; le chemin exact `/api` reste servi par Next et rend la page de documentation. Deux règles, la plus spécifique l'emportant :

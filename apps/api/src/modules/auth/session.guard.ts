@@ -1,6 +1,13 @@
 import { authCookieAttributes, sessionCookieName } from "@gamedashboard/contracts";
-import { type CanActivate, type ExecutionContext, Inject, Injectable } from "@nestjs/common";
+import {
+  type CanActivate,
+  type ExecutionContext,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from "@nestjs/common";
 import { ApiKeyRepository } from "./api-key.repository";
+import { crossSiteCookieWrite } from "./request-provenance";
 import { SessionRepository, type SessionUser } from "./session.repository";
 
 /**
@@ -60,6 +67,7 @@ export class SessionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
+      method?: string;
       cookies?: Record<string, string | undefined>;
       headers?: Record<string, string | string[] | undefined>;
       ip?: string;
@@ -70,6 +78,16 @@ export class SessionGuard implements CanActivate {
 
     const token = request.cookies?.[sessionCookie()];
     if (token) {
+      // Le cookie part tout seul avec une requête qu'un autre site fait
+      // envoyer : une écriture qui en vient est refusée avant même de lire la
+      // session (NC-02, `request-provenance.ts`). Une clé `Bearer`, elle, ne
+      // se joint jamais d'elle-même et n'est pas concernée.
+      if (crossSiteCookieWrite(request)) {
+        throw new ForbiddenException(
+          "Requête refusée : elle vient d'un autre site que le panel. Refaites le geste depuis le panel.",
+        );
+      }
+
       const user = await this.sessions.resolve(token);
       if (!user) return false;
 

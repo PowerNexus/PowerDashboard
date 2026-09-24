@@ -7,6 +7,7 @@ export * from "./application-api";
 export * from "./audit";
 export * from "./auth-cookies";
 export * from "./branding";
+export * from "./browser-provenance";
 export * from "./client-webhooks";
 export * from "./console-command";
 export * from "./cron";
