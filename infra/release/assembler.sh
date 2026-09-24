@@ -55,8 +55,11 @@ mkdir -p "$TRAVAIL/$NOM" "$SORTIE"
 git archive --format=tar HEAD | tar -x -C "$TRAVAIL/$NOM"
 
 # Le cache de Next ne sert qu'à accélérer une reconstruction : il pèse
-# souvent plus lourd que la construction elle-même.
-tar -C apps/web --exclude=.next/cache -cf - .next | tar -x -C "$TRAVAIL/$NOM/apps/web"
+# souvent plus lourd que la construction elle-même. `.next/dev` est celui du
+# serveur de développement : absent d'une copie neuve, mais un assemblage
+# local depuis un poste de travail l'emportait (près de 300 Mo).
+tar -C apps/web --exclude=.next/cache --exclude=.next/dev -cf - .next \
+  | tar -x -C "$TRAVAIL/$NOM/apps/web"
 
 # La carte d'identité de l'archive. deploy.sh s'y fie pour sauter la
 # construction ; un humain, pour savoir ce qui tourne.

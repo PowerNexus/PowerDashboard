@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | [Installer](./installation.md) | Du serveur vide au premier serveur de jeu, pas à pas, pour qui découvre le projet |
+| [Hébergement cPanel](./hebergement-cpanel.md) | Faire tourner le panel sur un hébergement mutualisé (Setup Node.js App, PostgreSQL, cron), construit par le runner |
 | [Contribuer](./contribuer.md) | Installer, les règles du dépôt, les gestes courants, ce que la CI refuse |
 | [Décisions d'architecture](./adr/README.md) | Pourquoi le projet est construit ainsi, une décision par fichier |
 | [Runbooks](./runbooks/README.md) | Procédures d'exploitation : jetons de node, machine injoignable, clé maître des secrets, déplacement de serveur, restauration de la base, incident de sécurité |

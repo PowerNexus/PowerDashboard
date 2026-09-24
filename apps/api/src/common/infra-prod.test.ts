@@ -468,7 +468,7 @@ describe("sauvegarde d'exploitation (app.sh backup)", () => {
  */
 describe("actions GitHub des workflows", () => {
   const dossier = join(RACINE, ".github", "workflows");
-  const workflows = ["ci.yml", "release.yml", "captures.yml"].map((nom) =>
+  const workflows = ["ci.yml", "release.yml", "captures.yml", "deploiement.yml"].map((nom) =>
     readFileSync(join(dossier, nom), "utf8"),
   );
   const actions = workflows.flatMap((texte) =>
@@ -487,7 +487,7 @@ describe("actions GitHub des workflows", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(cibles.length).toBe(5);
+    expect(cibles.length).toBe(6);
     for (const cible of cibles) {
       expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}`);
     }
@@ -497,7 +497,7 @@ describe("actions GitHub des workflows", () => {
     const caches = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*cache:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(caches.length).toBe(5);
+    expect(caches.length).toBe(6);
     for (const cache of caches) {
       expect(cache).toBe(`\${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}`);
     }
@@ -562,7 +562,7 @@ describe("actions GitHub des workflows", () => {
    * en tête ; un job qui a besoin de plus le déclare lui-même, avec sa raison.
    */
   it("ne donnent au jeton que la lecture du dépôt, en tête de chaque workflow", () => {
-    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml"].map(
+    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml", "deploiement.yml"].map(
       (fichier, rang) => [fichier, workflows[rang] ?? ""] as const,
     )) {
       expect(texte, nom).toMatch(/^permissions:\n {2}contents: read\n\n/m);
