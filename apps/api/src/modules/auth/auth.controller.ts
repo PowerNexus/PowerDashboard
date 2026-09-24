@@ -34,7 +34,7 @@ import { AccountMailService } from "./account-mail.service";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
-import { IMPERSONATION_RETURN_COOKIE } from "./impersonation";
+import { impersonationReturnCookie } from "./impersonation";
 import { ImpersonationReadOnlyGuard } from "./impersonation.guard";
 import { consumeChallenge, issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
@@ -556,10 +556,10 @@ export class AuthController {
      * ferait de ce cookie un moyen d'ouvrir la session de son choix : il
      * suffirait d'y écrire un jeton volé et de passer par ici.
      */
-    const returning = headerCookie(request, IMPERSONATION_RETURN_COOKIE);
+    const returning = headerCookie(request, impersonationReturnCookie());
     const staff = returning ? await this.sessions.resolve(returning) : null;
 
-    reply.clearCookie(IMPERSONATION_RETURN_COOKIE, authCookieOptions());
+    reply.clearCookie(impersonationReturnCookie(), authCookieOptions());
 
     if (!staff || staff.id !== user.impersonator.id) {
       // Session de l'agent expirée ou fermée entre-temps : on le déconnecte

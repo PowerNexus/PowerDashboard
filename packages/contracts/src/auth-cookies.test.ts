@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { authCookieAttributes, cookiesRequireHttps, sessionCookieName } from "./auth-cookies";
+import {
+  authCookieAttributes,
+  cookiesRequireHttps,
+  impersonationReturnCookieName,
+  sessionCookieName,
+} from "./auth-cookies";
 
 describe("cookies d'authentification", () => {
   it("exige HTTPS en production, quelle que soit l'origine déclarée", () => {
@@ -36,6 +41,20 @@ describe("cookies d'authentification", () => {
       expect(cookiesRequireHttps(env)).toBe(false);
       expect(sessionCookieName(env)).toBe("gd_session");
     }
+  });
+
+  /**
+   * Le cookie de retour d'une prise en main porte le jeton de session de
+   * l'agent : même préfixe que la session, sous la même condition (NC-25).
+   */
+  it("préfixe le cookie de retour comme celui de la session", () => {
+    expect(impersonationReturnCookieName({ NODE_ENV: "production" })).toBe("__Host-gd_return");
+    expect(impersonationReturnCookieName({ PANEL_ORIGIN: "https://panel.example" })).toBe(
+      "__Host-gd_return",
+    );
+    expect(impersonationReturnCookieName({ PANEL_ORIGIN: "http://localhost:3000" })).toBe(
+      "gd_return",
+    );
   });
 
   it("donne les mêmes attributs à la pose et à l'effacement", () => {

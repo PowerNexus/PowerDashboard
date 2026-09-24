@@ -18,7 +18,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { ActivityService } from "../activity/activity.service";
-import { IMPERSONATION_RETURN_COOKIE, IMPERSONATION_TTL_MS } from "../auth/impersonation";
+import { IMPERSONATION_TTL_MS, impersonationReturnCookie } from "../auth/impersonation";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { authCookieOptions, SessionGuard, sessionCookie } from "../auth/session.guard";
 import { SessionRepository } from "../auth/session.repository";
@@ -759,7 +759,7 @@ export class AdminController {
       // Le jeton de l'agent est mis de côté, pas jeté : c'est ce qui permet le
       // retour. Même protections que le cookie de session, et il meurt avec la
       // prise en main.
-      .setCookie(IMPERSONATION_RETURN_COOKIE, request.sessionToken ?? "", {
+      .setCookie(impersonationReturnCookie(), request.sessionToken ?? "", {
         ...authCookieOptions(),
         maxAge: IMPERSONATION_TTL_MS / 1000,
       })

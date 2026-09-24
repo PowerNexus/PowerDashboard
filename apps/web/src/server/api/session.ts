@@ -2,12 +2,9 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { AUTH_COOKIE_OPTIONS, SESSION_COOKIE } from "@/lib/session-cookie";
+import { AUTH_COOKIE_OPTIONS, RETURN_COOKIE, SESSION_COOKIE } from "@/lib/session-cookie";
 import { apiSend } from "./client";
 import { forwardedIdentityHeaders } from "./forwarded";
-
-/** Cookie où l'API met de côté le jeton de l'agent pendant une prise en main. */
-const RETURN_COOKIE = "gd_return";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 

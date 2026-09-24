@@ -1,6 +1,7 @@
 import {
   authCookieAttributes,
   cookiesRequireHttps,
+  impersonationReturnCookieName,
   sessionCookieName,
 } from "@gamedashboard/contracts";
 
@@ -18,6 +19,14 @@ import {
  * l'environnement avant d'évaluer le moindre module, ce que l'API ne fait pas.
  */
 export const SESSION_COOKIE = sessionCookieName(process.env);
+
+/**
+ * Cookie où l'API met de côté le jeton de l'agent pendant une prise en main.
+ *
+ * Il porte une session du personnel : même préfixe `__Host-` que la session,
+ * sous la même condition, et le même nom que celui que l'API pose et relit.
+ */
+export const RETURN_COOKIE = impersonationReturnCookieName(process.env);
 
 /**
  * `Secure` pour les cookies de ce panel qui n'ont pas les attributs communs

@@ -1,3 +1,5 @@
+import { impersonationReturnCookieName } from "@gamedashboard/contracts";
+
 /**
  * Constantes partagées par les deux bouts de la prise en main.
  *
@@ -15,8 +17,15 @@
  * propre session ouverte pendant qu'il regarde ailleurs, et rentre chez lui
  * d'un clic. Sans cela, chaque diagnostic coûterait une reconnexion complète —
  * et l'on finirait par ne plus s'en servir.
+ *
+ * `__Host-` sous la même condition que la session, puisqu'il en porte une :
+ * sans le préfixe, un sous-domaine pouvait poser un `gd_return` du même nom
+ * et choisir la session rouverte au retour. Relu à chaque appel, pour la même
+ * raison que `sessionCookie()` : `.env` arrive après l'évaluation des modules.
  */
-export const IMPERSONATION_RETURN_COOKIE = "gd_return";
+export function impersonationReturnCookie(): string {
+  return impersonationReturnCookieName(process.env);
+}
 
 /**
  * Trente minutes.

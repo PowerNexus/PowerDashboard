@@ -146,6 +146,15 @@ describe("règle des cookies, partagée par l'API et l'interface", () => {
   });
 
   /**
+   * Le cookie de retour d'une prise en main (NC-25) : l'interface le recopiait
+   * sous un nom écrit en dur, que le préfixe `__Host-` aurait fait diverger de
+   * celui de l'API.
+   */
+  it("ne nomme jamais le cookie de retour hors de la règle commune", () => {
+    expect(offenders(/["'](__Host-)?gd_return["']/)).toEqual([]);
+  });
+
+  /**
    * Un `Set-Cookie` d'effacement sans `Secure` est **ignoré** par le
    * navigateur pour un nom en `__Host-` : la déconnexion laissait le cookie en
    * place. Tout effacement passe donc les mêmes attributs que la pose.

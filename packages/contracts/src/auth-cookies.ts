@@ -51,6 +51,17 @@ export function sessionCookieName(env: CookieEnvironment): string {
 }
 
 /**
+ * Nom du cookie où dort le jeton de l'agent pendant une prise en main.
+ *
+ * Même préfixe que la session, sous la même condition : il porte **une
+ * session du personnel**, et un sous-domaine qui en poserait un du même nom
+ * choisirait la session rouverte au retour.
+ */
+export function impersonationReturnCookieName(env: CookieEnvironment): string {
+  return cookiesRequireHttps(env) ? "__Host-gd_return" : "gd_return";
+}
+
+/**
  * Attributs communs des cookies d'authentification, **à la pose comme à
  * l'effacement**.
  *
