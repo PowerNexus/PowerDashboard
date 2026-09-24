@@ -88,6 +88,66 @@ describe("infra/prod/panel.conf", () => {
 });
 
 /**
+ * Le jeton du lien de facturation n'entre dans aucun journal d'accès (NC-57).
+ *
+ * Il voyage dans le chemin (`/sso/<jeton>`) et ouvre une session : écrit dans
+ * le journal d'accès, il se lisait par quiconque lit les journaux, pendant les
+ * deux minutes où il vaut une session. Les trois vhosts qui servent
+ * l'interface sont concernés : celui de la plateforme, celui de la production
+ * locale, et celui des domaines de revendeurs, où atterrissent leurs clients.
+ *
+ * Un bloc `location` à expression régulière remplace `location /` pour ces
+ * chemins : il doit donc relayer les mêmes en-têtes d'identité, faute de quoi
+ * la page recevrait l'adresse de nginx et le mauvais domaine.
+ */
+describe("jeton du lien de facturation", () => {
+  const vhosts = {
+    "infra/prod/panel.conf": vhost,
+    "infra/local/gamedashboard.local.conf": readFileSync(
+      join(RACINE, "infra", "local", "gamedashboard.local.conf"),
+      "utf8",
+    ),
+    "infra/prod/certificates.sh (domaine de revendeur)": (() => {
+      const agent = readFileSync(join(PROD, "certificates.sh"), "utf8");
+      const debut = agent.indexOf("bloc_servi()");
+      return agent.slice(debut, agent.indexOf("\nEOF", debut)).replaceAll("\\$", "$");
+    })(),
+  };
+
+  /**
+   * Le corps d'un bloc `location`, sans commentaires ni imbrication.
+   *
+   * Le dernier du fichier : le serveur HTTPS vient après celui du port 80, dont
+   * le `location /` ne fait que rediriger.
+   */
+  function bloc(conf: string, entete: string): string | null {
+    const sansCommentaires = conf.replace(/#.*$/gm, "");
+    const debut = sansCommentaires.lastIndexOf(`location ${entete} {`);
+    if (debut < 0) return null;
+    return sansCommentaires.slice(debut, sansCommentaires.indexOf("}", debut));
+  }
+
+  const entetes = (corps: string) =>
+    [...corps.matchAll(/proxy_set_header\s+([\w-]+)\s+([^;]+);/g)]
+      .map((m) => `${m[1]} ${(m[2] ?? "").trim()}`)
+      .filter((ligne) => !/^(Upgrade|Connection) /.test(ligne))
+      .sort();
+
+  for (const [chemin, conf] of Object.entries(vhosts)) {
+    it(`${chemin} ne journalise pas /sso/<jeton>`, () => {
+      const sso = bloc(conf, "~ ^/sso/");
+      expect(sso, "aucun bloc location ~ ^/sso/").not.toBeNull();
+      expect(sso).toMatch(/^\s*access_log off;/m);
+      expect(sso).toMatch(/proxy_pass http:\/\/127\.0\.0\.1:(3210|\$PANEL_WEB_PORT);/);
+    });
+
+    it(`${chemin} relaie à /sso/ les mêmes en-têtes que l'interface`, () => {
+      expect(entetes(bloc(conf, "~ ^/sso/") ?? "")).toEqual(entetes(bloc(conf, "/") ?? ""));
+    });
+  }
+});
+
+/**
  * Le contrôle de fin de livraison reconnaît l'écran d'erreur à son titre.
  *
  * Chaque page embarque le catalogue de traductions, où ce titre figure en
