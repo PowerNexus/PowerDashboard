@@ -135,6 +135,7 @@ par cookie refusée depuis une autre origine (`Origin`, `Sec-Fetch-Site`,
 | Commit | Défaut | Test |
 |---|---|---|
 | `1cb0d55` | **Le lien de la facturation ne connectait personne** : la page posait le cookie pendant son rendu, ce que Next interdit ; chaque arrivée sans second facteur finissait en 500, session ouverte côté API et jamais remise au navigateur. Reproduit sur une instance jetable | `billing-link.test.ts` |
+| `11c698c` (PowerNexus/PowerDashboard#24) | Suite du précédent : derrière nginx, les redirections bâties sur `request.nextUrl.origin` renvoyaient le client vers l'adresse d'écoute de Next (`https://localhost:3210/`), sans son cookie de session ; les retours de l'annuaire et de Google avaient le même défaut. Redirections relatives (`redirectWithin`), le client reste sur le domaine d'arrivée, plateforme ou revendeur | `e2e/facturation.spec.ts`, `ceremony.test.ts`, `billing-link.test.ts` |
 | `9835769` | Quota de ports compté hors transaction : cinq demandes simultanées passaient toutes (même défaut que NC-08) | `allocations.integration.test.ts` |
 | `8be4083` | Rétention : décompte lu sous `rowCount`, que postgres-js n'expose pas — l'écran annonçait toujours « 0 ligne », et une seule tranche par heure | `retention.integration.test.ts` |
 | `efdeafa` | Nettoyage des bases de test : il coupait aussi l'autovacuum, superutilisateur, et le fichier échouait au nettoyage, tous ses tests verts | `throwaway-database.integration.test.ts` |
