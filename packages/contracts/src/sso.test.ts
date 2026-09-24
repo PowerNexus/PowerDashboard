@@ -53,8 +53,41 @@ describe("normalizeSsoProfile", () => {
     }
   });
 
+  /**
+   * `email_verified` atteste la revendication `email`, et elle seule (NC-27).
+   *
+   * `preferred_username` est souvent saisi par l'utilisateur lui-même : un
+   * annuaire qui le laisse libre et répond `email_verified: true` pour une
+   * autre adresse — ou sans adresse du tout — faisait rapprocher
+   * `admin@…` déclaré à la main du compte de l'administrateur.
+   */
+  it("ne tient pour vérifiée que l'adresse venue de « email »", () => {
+    for (const claims of [
+      { sub: "x", preferred_username: "admin@gamedashboard.fr", email_verified: true },
+      { sub: "x", mail: "admin@gamedashboard.fr", email_verified: true },
+      { sub: "x", preferred_username: "admin@gamedashboard.fr", emailVerified: "true" },
+    ]) {
+      const profile = normalizeSsoProfile(claims);
+      expect(profile.email).toBe("admin@gamedashboard.fr");
+      expect(profile.emailVerified).toBe(false);
+    }
+
+    const profile = normalizeSsoProfile({
+      sub: "x",
+      email: "alex@gamedashboard.fr",
+      preferred_username: "admin@gamedashboard.fr",
+      email_verified: true,
+    });
+    expect(profile.email).toBe("alex@gamedashboard.fr");
+    expect(profile.emailVerified).toBe(true);
+  });
+
   it("accepte « true » en chaîne, que rendent certains fournisseurs", () => {
-    expect(normalizeSsoProfile({ sub: "x", email_verified: "true" }).emailVerified).toBe(true);
+    // Avec une adresse : la revendication atteste `email`, elle n'a pas de
+    // sens sans lui.
+    expect(
+      normalizeSsoProfile({ sub: "x", email: "a@b.fr", email_verified: "true" }).emailVerified,
+    ).toBe(true);
   });
 
   it("refuse un profil sans identifiant stable", () => {
