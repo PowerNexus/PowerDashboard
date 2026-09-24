@@ -957,10 +957,13 @@ export class ServerFeaturesController {
     @Query("q") query?: string,
     @Query("page") page?: string,
   ) {
-    await this.access.require(principalOf(request), id, "activity.read");
+    const { isOwner } = await this.access.require(principalOf(request), id, "activity.read");
     const result = await this.activity.forServer(id, {
       query,
       page: Number.parseInt(page ?? "1", 10) || 1,
+      // Les adresses des acteurs ne vont qu'à qui a tous les droits sur ce
+      // serveur : voir `ActivityService.forServer`.
+      revealIp: isOwner,
     });
     return { data: result.items, meta: { page: result.page, hasMore: result.hasMore } };
   }
