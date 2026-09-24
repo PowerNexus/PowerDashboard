@@ -19,6 +19,7 @@ import {
   Logger,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -34,6 +35,19 @@ import { type BackupReport, RemoteBackupService } from "./remote-backup.service"
 import { RemoteServerService } from "./remote-server.service";
 import { SftpAuthService } from "./sftp-auth.service";
 import { WingsErrorFilter } from "./wings-error.filter";
+
+/**
+ * Identifiant de serveur ou de sauvegarde, contrôlé avant d'atteindre la base.
+ *
+ * Sans lui, `servers/pas-un-uuid` arrivait jusqu'à PostgreSQL, qui refusait la
+ * conversion : une 500, que Wings prend pour une panne passagère et rejoue
+ * avec temporisation. Un identifiant illisible ne le deviendra jamais — 400,
+ * définitif pour le daemon, et au format de `WingsErrorFilter` comme toute
+ * erreur de ce contrôleur : le filtre attrape aussi ce que lèvent les pipes.
+ */
+const REMOTE_UUID = new ParseUUIDPipe({
+  exceptionFactory: () => new BadRequestException("Identifiant mal formé : un UUID est attendu."),
+});
 
 interface RemoteRequest {
   /** Posé par `NodeTokenGuard` : le node authentifié, jamais un identifiant du corps. */
@@ -126,7 +140,10 @@ export class RemoteController {
    * appartient toujours au node de départ jusqu'à l'accusé de réception.
    */
   @Get("servers/:uuid")
-  async serverConfiguration(@Req() request: RemoteRequest, @Param("uuid") uuid: string) {
+  async serverConfiguration(
+    @Req() request: RemoteRequest,
+    @Param("uuid", REMOTE_UUID) uuid: string,
+  ) {
     const configuration = (await this.transfers.isTransferTarget(uuid, request.node.id))
       ? await this.servers.configurationForTransfer(uuid)
       : await this.servers.configuration(request.node.id, uuid);
@@ -140,7 +157,7 @@ export class RemoteController {
   @Get("servers/:uuid/install")
   async installationScript(
     @Req() request: RemoteRequest,
-    @Param("uuid") uuid: string,
+    @Param("uuid", REMOTE_UUID) uuid: string,
   ): Promise<WingsInstallationScript> {
     const script = await this.servers.installationScript(request.node.id, uuid);
     if (!script) throw new NotFoundException("Serveur inconnu sur ce node.");
@@ -151,7 +168,7 @@ export class RemoteController {
   @HttpCode(204)
   async installCompleted(
     @Req() request: RemoteRequest,
-    @Param("uuid") uuid: string,
+    @Param("uuid", REMOTE_UUID) uuid: string,
     @Body() body: unknown,
   ): Promise<void> {
     const status = parseInstallStatus(body);
@@ -187,7 +204,7 @@ export class RemoteController {
    */
   @Post("servers/:uuid/archive")
   @HttpCode(204)
-  archiveCompleted(@Param("uuid") uuid: string): void {
+  archiveCompleted(@Param("uuid", REMOTE_UUID) uuid: string): void {
     this.logger.log(`Archive prête pour le transfert de ${uuid}.`);
   }
 
@@ -206,7 +223,7 @@ export class RemoteController {
   @HttpCode(204)
   async transferState(
     @Req() request: RemoteRequest,
-    @Param("uuid") uuid: string,
+    @Param("uuid", REMOTE_UUID) uuid: string,
     @Param("state") state: string,
   ): Promise<void> {
     if (state === "success") {
@@ -253,7 +270,7 @@ export class RemoteController {
   @Get("backups/:uuid")
   async backupUploadUrls(
     @Req() request: RemoteRequest,
-    @Param("uuid") uuid: string,
+    @Param("uuid", REMOTE_UUID) uuid: string,
     @Query("size") size?: string,
   ) {
     const urls = await this.backups.openUpload(request.node.id, uuid, toPositiveInt(size, 0));
@@ -272,7 +289,7 @@ export class RemoteController {
   @HttpCode(204)
   async backupCompleted(
     @Req() request: RemoteRequest,
-    @Param("uuid") uuid: string,
+    @Param("uuid", REMOTE_UUID) uuid: string,
     @Body() body: unknown,
   ): Promise<void> {
     // Le corps vient du daemon, mais il est validé comme tout le reste : un
