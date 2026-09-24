@@ -1,6 +1,6 @@
-import { type Database, sessions, users } from "@gamedashboard/db";
+import { type Database, loginAttempts, sessions, users } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createThrowawayDatabase,
@@ -192,6 +192,52 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
 
       const ouvertes = await db.select().from(sessions).where(eq(sessions.userId, compte.id));
       expect(ouvertes).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  /**
+   * NC-29 : la réussite ne se consigne qu'une fois toutes les preuves données
+   * — c'est elle qui exempte l'adresse du verrou du compte. Le code TOTP la
+   * consignait ; la clé d'accès, second facteur au même titre, l'oubliait :
+   * son titulaire restait inconnu de son propre compte, et dix échecs d'un
+   * tiers l'enfermaient dehors.
+   */
+  it("fait connaître l'adresse au compte quand la clé d'accès a ouvert la session", async () => {
+    vi.stubEnv("PANEL_ORIGIN", "https://panel.gamedashboard.test");
+    try {
+      const compte = await compteAvecCodesDeSecours();
+      const [titulaire] = await db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, compte.id));
+      const auth = await processus({
+        authenticationOptions: async () => ({ challenge: "defi-webauthn" }),
+        verifyAuthentication: async () => true,
+      });
+
+      const options = fakeReply();
+      await auth.passkeyAuthenticationOptions(
+        { challenge: issueChallenge("login", compte.id, { method: "password" }) },
+        options as never,
+      );
+      const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
+      const passkey = fakeReply();
+      await auth.loginWithPasskey(
+        { challenge: ceremonie, response: {} },
+        REQUEST as never,
+        passkey as never,
+      );
+      expect(passkey.statusCode).toBe(200);
+
+      const reussites = await db
+        .select({ ip: loginAttempts.ip })
+        .from(loginAttempts)
+        .where(
+          and(eq(loginAttempts.email, titulaire?.email ?? ""), eq(loginAttempts.success, true)),
+        );
+      expect(reussites).toEqual([{ ip: REQUEST.ip }]);
     } finally {
       vi.unstubAllEnvs();
     }

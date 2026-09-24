@@ -1890,6 +1890,9 @@ export class AuthController {
       return;
     }
 
+    // Toutes les preuves sont données : l'adresse devient connue du compte,
+    // comme après un code (NC-29).
+    await this.users.recordAttempt(user.email, request.ip ?? null, true);
     await this.issueSession(user.id, request, reply, "passkey");
   }
 
