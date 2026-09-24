@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@nestjs/common";
 import { ForbiddenException } from "@nestjs/common";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiKeyRepository } from "./api-key.repository";
-import { SESSION_COOKIE, SessionGuard } from "./session.guard";
+import { SessionGuard, sessionCookie } from "./session.guard";
 import type { SessionRepository, SessionUser } from "./session.repository";
 
 /**
@@ -42,7 +42,7 @@ function contexte(requete: {
   const req: Record<string, unknown> = {
     method: requete.method,
     headers: requete.headers ?? {},
-    cookies: requete.cookie === false ? {} : { [SESSION_COOKIE]: "jeton-de-session" },
+    cookies: requete.cookie === false ? {} : { [sessionCookie()]: "jeton-de-session" },
   };
   const ctx = { switchToHttp: () => ({ getRequest: () => req }) } as unknown as ExecutionContext;
   return { ctx, req };

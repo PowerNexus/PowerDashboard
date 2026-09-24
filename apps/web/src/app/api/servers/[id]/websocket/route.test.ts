@@ -13,7 +13,8 @@ let entrants = new Headers();
 vi.mock("next/headers", () => ({
   headers: async () => entrants,
   cookies: async () => ({
-    get: (nom: string) => (nom === "gd_session" ? { value: "jeton-de-session" } : undefined),
+    // `__Host-gd_session` sous une origine HTTPS (NC-51), `gd_session` sinon.
+    get: (nom: string) => (nom.endsWith("gd_session") ? { value: "jeton-de-session" } : undefined),
   }),
 }));
 
