@@ -77,6 +77,33 @@ describe("infra/prod/panel.conf", () => {
     }
   });
 
+  /*
+   * En-têtes de transport (ASVS 14.4.5, 14.3.3). HSTS couvrait le seul nom du
+   * panel : un sous-domaine en HTTP restait une porte vers une page servie en
+   * clair sous son nom. `preload`, lui, ne se retire pas en un redéploiement :
+   * absent à dessein.
+   */
+  it("impose HTTPS aux sous-domaines, sans s'inscrire à la liste de préchargement", () => {
+    const hsts = /add_header Strict-Transport-Security "([^"]+)" always;/.exec(directives)?.[1];
+    expect(hsts).toBeDefined();
+    expect(hsts).toMatch(/max-age=31536000/);
+    expect(hsts).toContain("includeSubDomains");
+    expect(hsts).not.toContain("preload");
+  });
+
+  it("ne donne sa version de nginx dans aucune réponse", () => {
+    const serveurs = directives.split(/^server \{/m).slice(1);
+    expect(serveurs.length).toBe(2);
+    for (const bloc of serveurs) expect(bloc).toMatch(/^\s*server_tokens off;/m);
+  });
+
+  it("ne pose pas d'agrafage OCSP sans répondeur, et dit pourquoi", () => {
+    // Let's Encrypt n'inscrit plus d'adresse OCSP dans ses certificats :
+    // `ssl_stapling on` n'y produirait qu'un avertissement au démarrage.
+    expect(directives).not.toMatch(/ssl_stapling/);
+    expect(vhost).toMatch(/OCSP/);
+  });
+
   it("ne porte que le nom d'exemple, que deploy.sh remplace par le domaine réel", () => {
     const noms = [...directives.matchAll(/server_name\s+([^;]+);/g)].map((m) =>
       (m[1] ?? "").trim(),

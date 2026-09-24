@@ -4,6 +4,7 @@ import { assertEncryptionKey } from "@gamedashboard/auth";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
+import { registerResponseHeaders } from "./common/response-headers";
 import { trustedProxiesSetting } from "./modules/auth/sign-in-origin";
 import { CHUNK_SIZE } from "./modules/client/file-upload.service";
 
@@ -38,6 +39,10 @@ async function bootstrap(): Promise<void> {
   );
 
   await app.register(cookie);
+
+  // `nosniff` partout, `no-store` sauf route qui déclare son cache : voir
+  // `common/response-headers.ts`.
+  registerResponseHeaders(app.getHttpAdapter().getInstance());
 
   /*
    * Les morceaux d'un envoi reprenable arrivent en binaire brut.
