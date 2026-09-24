@@ -945,9 +945,13 @@
   "billingSso": {
     "eyebrow": "Connexion",
     "title": "Accès au panel",
-    "secondFactor": "Votre compte est protégé par un second facteur : confirmez qu'il s'agit bien de vous pour entrer.",
+    "expired": "Ce lien de connexion n'est plus valable.",
     "failedTitle": "Lien de connexion expiré",
     "retryHint": "Retournez dans votre espace client et cliquez de nouveau sur « Gérer mon serveur » : un nouveau lien sera créé.",
+    "suspendedTitle": "Compte suspendu",
+    "suspended": "Ce compte est suspendu. Contactez le support de votre hébergeur pour en connaître la raison.",
+    "unavailableTitle": "Connexion impossible",
+    "unavailable": "Le panel n'a pas pu vérifier ce lien. Réessayez dans un instant depuis votre espace client.",
     "staffSignIn": "Connexion équipe et sous-utilisateurs"
   },
   "invitation": {
@@ -1051,6 +1055,7 @@
     "title": "Connexion",
     "subtitle": "Accédez à votre panel de gestion.",
     "staffDescription": "Cette page est réservée à l'équipe et aux personnes invitées sur un serveur. Si vous êtes client, vous accédez à votre serveur depuis votre espace de facturation.",
+    "resumeDescription": "Votre compte est protégé par un second facteur : confirmez qu'il s'agit bien de vous pour entrer.",
     "clientsTitle": "Vous êtes client ?",
     "clientsBody": "Vous n'avez pas de mot de passe ici. Connectez-vous à votre espace client, puis ouvrez votre serveur depuis vos services.",
     "clientsCta": "Aller à mon espace client",

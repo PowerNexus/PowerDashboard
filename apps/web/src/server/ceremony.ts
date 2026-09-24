@@ -1,4 +1,5 @@
 import "server-only";
+import { LOCALE_COOKIE } from "@gamedashboard/i18n";
 import { type NextRequest, NextResponse } from "next/server";
 import {
   AUTH_COOKIE_OPTIONS,
@@ -119,42 +120,53 @@ export async function finishCeremony(
     return fail(refus?.noAccount ? "noAccount" : "refused");
   }
 
+  const conclusion = await concludeSignIn(origin, response);
+  // La cérémonie est terminée : le vérificateur n'a plus rien à protéger et
+  // ne doit pas resservir.
+  conclusion.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
+  return conclusion;
+}
+
+/**
+ * Fin commune des connexions attestées par un tiers : fournisseur OAuth, ou
+ * facturier par son lien à usage unique.
+ *
+ * Toujours depuis une **route de navigation**, jamais depuis le rendu d'une
+ * page : Next interdit d'y écrire un cookie. Le lien de la facturation le
+ * faisait, et chaque arrivée sans second facteur finissait en erreur 500 —
+ * jeton consommé et session ouverte côté API, jamais remise au navigateur.
+ *
+ * `response` est la réponse, réussie, de l'API.
+ */
+export async function concludeSignIn(origin: string, response: Response): Promise<NextResponse> {
   const body = (await response.json().catch(() => ({}))) as {
     twoFactorRequired?: boolean;
     challenge?: string;
     methods?: { totp: boolean; passkeys: boolean };
     remainingRecoveryCodes?: number;
+    user?: { locale?: unknown };
   };
 
   /**
-   * Le second facteur du panel s'applique aussi aux comptes SSO.
+   * Le second facteur du panel s'applique aussi à ces chemins.
    *
-   * Le défi repart dans l'URL de la page de connexion, qui reprend la main sur
-   * la seconde étape. Il ne donne accès à rien : il nomme seulement, sous
+   * Le défi repart vers la page de connexion, qui reprend la main sur la
+   * seconde étape. Il ne donne accès à rien : il nomme seulement, sous
    * chiffrement, le compte dont la preuve est attendue.
    *
    * Les preuves disponibles voyagent avec lui. Elles ne sont pas secrètes — la
    * connexion par mot de passe les rend déjà en clair — et sans elles, l'écran
    * proposerait une clé d'accès à qui n'en a pas.
    */
-  let destination: URL;
   if (body.twoFactorRequired && body.challenge) {
-    destination = new URL("/login", origin);
+    const destination = new URL("/login", origin);
     // Le défi voyage en cookie, pas dans l'URL : une adresse se retrouve dans
     // l'historique, les journaux du proxy et le Referer, un cookie non.
     if (body.methods?.totp) destination.searchParams.set("totp", "1");
     if (body.methods?.passkeys) destination.searchParams.set("passkeys", "1");
     destination.searchParams.set("recovery", String(body.remainingRecoveryCodes ?? 0));
-  } else {
-    destination = new URL("/", origin);
-  }
 
-  const redirect = NextResponse.redirect(destination);
-  // La cérémonie est terminée : le vérificateur n'a plus rien à protéger et
-  // ne doit pas resservir.
-  redirect.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
-
-  if (body.twoFactorRequired && body.challenge) {
+    const redirect = NextResponse.redirect(destination);
     redirect.cookies.set(SSO_CHALLENGE_COOKIE, body.challenge, {
       path: "/login",
       httpOnly: true,
@@ -163,8 +175,10 @@ export async function finishCeremony(
       // Même durée que le défi lui-même.
       maxAge: 5 * 60,
     });
+    return redirect;
   }
 
+  const redirect = NextResponse.redirect(new URL("/", origin));
   const setCookie = response.headers.get("set-cookie");
   const token = setCookie?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
   if (token) {
@@ -174,5 +188,15 @@ export async function finishCeremony(
     });
   }
 
+  // La langue du compte suit la connexion, comme après un mot de passe : le
+  // rendu lit un cookie, pas la session.
+  const locale = body.user?.locale;
+  if (typeof locale === "string" && locale !== "") {
+    redirect.cookies.set(LOCALE_COOKIE, locale, {
+      path: "/",
+      maxAge: 365 * 24 * 60 * 60,
+      sameSite: "lax",
+    });
+  }
   return redirect;
 }
