@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SsoProfile } from "@gamedashboard/contracts";
-import { type Database, users } from "@gamedashboard/db";
+import { type Database, userOauthAccounts, users } from "@gamedashboard/db";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -11,14 +11,15 @@ import {
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
-import { SsoService } from "./sso.service";
+import { SsoExchangeError, SsoService } from "./sso.service";
 
 /**
  * Le rapprochement SSO contre une vraie base.
  *
  * `sso-resolve.test.ts` éprouve l'ordre des décisions sur une base simulée.
  * Ce qui suit ne se voit qu'en SQL : la casse des adresses face à l'index
- * d'unicité (NC-28).
+ * d'unicité (NC-28), et deux cérémonies concurrentes sur un même compte
+ * (doute D-7 de l'audit).
  */
 
 function profil(surcharge: Partial<SsoProfile> = {}): SsoProfile {
@@ -96,13 +97,7 @@ describe.skipIf(!HAS_DATABASE)("rapprochement SSO (intégration)", () => {
        * la casse, elle doit laisser l'ancien index et le dire ; puis poser le
        * nouveau une fois les doublons résolus.
        */
-      const dossier = fileURLToPath(
-        new URL("../../../../../packages/db/migrations", import.meta.url),
-      );
-      const fichier = readdirSync(dossier).find((nom) =>
-        nom.endsWith("_users_email_lower_unique.sql"),
-      );
-      const migration = readFileSync(join(dossier, fichier ?? "introuvable"), "utf8");
+      const migration = lireMigration("_users_email_lower_unique.sql");
 
       const definition = async () => {
         const [ligne] = await db.execute<{ indexdef: string }>(
@@ -125,4 +120,99 @@ describe.skipIf(!HAS_DATABASE)("rapprochement SSO (intégration)", () => {
       expect(await definition()).toContain("lower((email)::text)");
     });
   });
+
+  describe("liaison concurrente (D-7)", () => {
+    /*
+     * Un compte ne porte qu'une identité par fournisseur : une seconde, qui
+     * partagerait son adresse, est refusée (« déjà lié à une autre
+     * identité »). Le contrôle lisait la liaison existante **puis**
+     * l'écrivait, sans index pour trancher entre deux cérémonies menées en
+     * même temps : les deux lisaient « aucune liaison », et les deux
+     * écrivaient la leur.
+     *
+     * Plusieurs essais : la course ne se produit que si les deux lectures
+     * précèdent les deux écritures, ce que l'ordonnancement ne garantit pas à
+     * chaque fois.
+     */
+    it("ne lie jamais deux identités du même fournisseur à un compte", async () => {
+      for (let essai = 0; essai < 10; essai += 1) {
+        await db.execute(sql.raw("truncate table users cascade"));
+        const id = await compte("paul@exemple.fr");
+
+        const issues = await Promise.allSettled([
+          sso.resolveUser(profil({ subject: "identite-a" }), { provider: "oidc" }),
+          sso.resolveUser(profil({ subject: "identite-b" }), { provider: "oidc" }),
+        ]);
+
+        const liaisons = await db
+          .select({ sujet: userOauthAccounts.providerUserId })
+          .from(userOauthAccounts)
+          .where(eq(userOauthAccounts.userId, id));
+        expect(liaisons).toHaveLength(1);
+
+        // Seule l'identité liée ouvre le compte ; l'autre reçoit le refus
+        // rédigé, et non une erreur SQL que le contrôleur tairait.
+        const ouvertes = issues.filter((issue) => issue.status === "fulfilled");
+        expect(ouvertes).toEqual([{ status: "fulfilled", value: { id, created: false } }]);
+        const refus = issues.find((issue) => issue.status === "rejected");
+        expect(refus?.status === "rejected" && refus.reason).toBeInstanceOf(SsoExchangeError);
+      }
+    });
+
+    it("laisse deux cérémonies de la même identité aboutir toutes deux", async () => {
+      const id = await compte("paul@exemple.fr");
+
+      const issues = await Promise.all([
+        sso.resolveUser(profil(), { provider: "oidc" }),
+        sso.resolveUser(profil(), { provider: "oidc" }),
+      ]);
+
+      expect(issues).toEqual([
+        { id, created: false },
+        { id, created: false },
+      ]);
+      const liaisons = await db
+        .select()
+        .from(userOauthAccounts)
+        .where(eq(userOauthAccounts.userId, id));
+      expect(liaisons).toHaveLength(1);
+    });
+
+    it("migre une base où la course a déjà lié deux identités sans arrêter la livraison", async () => {
+      const migration = lireMigration("_oauth_user_provider_unique.sql");
+      const present = async () =>
+        (
+          await db.execute<{ n: number }>(
+            sql.raw(
+              "select count(*)::int as n from pg_indexes where indexname = 'oauth_user_provider_unique'",
+            ),
+          )
+        )[0]?.n === 1;
+
+      await db.execute(sql.raw('drop index "oauth_user_provider_unique"'));
+      const id = await compte("paul@exemple.fr");
+      for (const sujet of ["identite-a", "identite-b"]) {
+        await db.insert(userOauthAccounts).values({
+          userId: id,
+          provider: "oidc",
+          providerUserId: sujet,
+          email: "paul@exemple.fr",
+        });
+      }
+
+      await expect(db.execute(sql.raw(migration))).resolves.toBeDefined();
+      expect(await present()).toBe(false);
+
+      await db.delete(userOauthAccounts).where(eq(userOauthAccounts.providerUserId, "identite-b"));
+      await db.execute(sql.raw(migration));
+      expect(await present()).toBe(true);
+    });
+  });
 });
+
+/** Le texte d'une migration, retrouvé par son nom : l'intégration peut la renuméroter. */
+function lireMigration(suffixe: string): string {
+  const dossier = fileURLToPath(new URL("../../../../../packages/db/migrations", import.meta.url));
+  const fichier = readdirSync(dossier).find((nom) => nom.endsWith(suffixe));
+  return readFileSync(join(dossier, fichier ?? "introuvable"), "utf8");
+}

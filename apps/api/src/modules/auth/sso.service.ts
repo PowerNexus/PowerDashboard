@@ -367,10 +367,18 @@ export class SsoService {
    * permet d'expliquer une liaison surprenante.
    *
    * Idempotent : rejouer une connexion ne doit pas échouer sur l'index unique.
+   *
+   * **C'est l'index qui tranche**, pas la lecture de `resolveUser` : deux
+   * cérémonies concurrentes, pour deux identités partageant l'adresse,
+   * lisaient toutes deux « aucune liaison » et écrivaient chacune la sienne
+   * (doute D-7 de l'audit). L'unicité `(user_id, provider)` en laisse passer
+   * une ; l'insertion qui n'a rien écrit relit ce qui est lié, et refuse si
+   * ce n'est pas cette identité — sans quoi elle ouvrirait le compte à un
+   * profil qui n'y est pas lié.
    */
   private async link(userId: string, profile: SsoProfile, provider: SsoProvider): Promise<void> {
     const now = new Date().toISOString();
-    await this.db
+    const [ecrite] = await this.db
       .insert(userOauthAccounts)
       .values({
         userId,
@@ -379,7 +387,19 @@ export class SsoService {
         email: profile.email ?? "",
         linkedAt: now,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: userOauthAccounts.id });
+    if (ecrite) return;
+
+    const [liee] = await this.db
+      .select({ providerUserId: userOauthAccounts.providerUserId })
+      .from(userOauthAccounts)
+      .where(and(eq(userOauthAccounts.userId, userId), eq(userOauthAccounts.provider, provider)))
+      .limit(1);
+
+    if (liee?.providerUserId !== profile.subject) {
+      throw new SsoExchangeError("ce compte est déjà lié à une autre identité");
+    }
   }
 
   /**

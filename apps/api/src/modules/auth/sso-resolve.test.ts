@@ -64,7 +64,8 @@ function service(scenario: {
       values: (v: unknown) => {
         inserts.push(v);
         return {
-          onConflictDoNothing: async () => undefined,
+          // La liaison est écrite : l'insertion rend sa ligne.
+          onConflictDoNothing: () => ({ returning: async () => [{ id: "liaison" }] }),
           returning: async () => [{ id: "compte-cree" }],
         };
       },

@@ -118,6 +118,10 @@ export const userOauthAccounts = pgTable(
     // Un compte distant ne peut être rattaché qu'à un seul compte local :
     // sans cela, deux utilisateurs pourraient se connecter avec le même Google.
     uniqueIndex("oauth_provider_identity_unique").on(table.provider, table.providerUserId),
+    // Et un compte local ne porte qu'une identité par fournisseur. Le
+    // rapprochement le vérifiait par une lecture, que deux cérémonies
+    // concurrentes passaient ensemble (doute D-7, migration 0043).
+    uniqueIndex("oauth_user_provider_unique").on(table.userId, table.provider),
     index("oauth_user_idx").on(table.userId),
   ],
 );
