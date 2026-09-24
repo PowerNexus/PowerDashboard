@@ -12,6 +12,7 @@ import {
   ForbiddenException,
   Get,
   Inject,
+  Logger,
   Param,
   Post,
   Query,
@@ -28,7 +29,11 @@ import { SessionGuard } from "../auth/session.guard";
 import { EngineService } from "../marketplace/engine.service";
 import { EulaService, MINECRAFT_EULA_URL } from "../marketplace/eula.service";
 import { MarketplaceService } from "../marketplace/marketplace.service";
-import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
+import {
+  DAEMON_UNAVAILABLE_MESSAGE,
+  WingsClientService,
+  WingsUnavailableError,
+} from "../wings/wings-client.service";
 import { AllocationsService } from "./allocations.service";
 import { BackupsService } from "./backups.service";
 import { DatabasesService } from "./databases.service";
@@ -90,6 +95,8 @@ function principalOf(request: ClientRequest) {
 @Controller("api/v1/client/servers/:id")
 @UseGuards(SessionGuard, ImpersonationReadOnlyGuard)
 export class ServerFeaturesController {
+  private readonly logger = new Logger(ServerFeaturesController.name);
+
   constructor(
     @Inject(ServerAccessService) private readonly access: ServerAccessService,
     @Inject(ServerWebhooksService) private readonly serverWebhooks: ServerWebhooksService,
@@ -1115,7 +1122,8 @@ export class ServerFeaturesController {
     } catch (error) {
       if (error instanceof WingsUnavailableError) {
         if (error.isRefusal && error.detail) throw new BadRequestException(error.detail);
-        throw new ServiceUnavailableException(error.message);
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

@@ -8,6 +8,7 @@ import {
   Get,
   Headers,
   Inject,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -25,7 +26,7 @@ import { BillingSsoService } from "../auth/billing-sso.service";
 import { ServerResizeService } from "../client/server-resize.service";
 import { BrandingService } from "../reseller/branding.service";
 import { ResellerQuotaService } from "../reseller/reseller-quota.service";
-import { WingsUnavailableError } from "../wings/wings-client.service";
+import { DAEMON_UNAVAILABLE_MESSAGE, WingsUnavailableError } from "../wings/wings-client.service";
 import {
   ApplicationGuard,
   type ApplicationRequest,
@@ -118,6 +119,8 @@ const CertificateResult = z.object({
 @Controller("api/v1/application")
 @UseGuards(ApplicationGuard)
 export class ApplicationController {
+  private readonly logger = new Logger(ApplicationController.name);
+
   constructor(
     @Inject(ApplicationService) private readonly app: ApplicationService,
     @Inject(AdminActionsService) private readonly actions: AdminActionsService,
@@ -552,7 +555,10 @@ export class ApplicationController {
       return await call();
     } catch (error) {
       if (error instanceof WingsUnavailableError) {
-        throw new ServiceUnavailableException(error.message);
+        // Le nom interne du node et la cause brute ne sortent pas du panel,
+        // pas plus vers une boutique que vers un navigateur.
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

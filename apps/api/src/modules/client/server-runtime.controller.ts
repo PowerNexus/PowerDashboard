@@ -15,6 +15,7 @@ import {
   Delete,
   Get,
   Inject,
+  Logger,
   Param,
   Post,
   Query,
@@ -28,7 +29,11 @@ import { ImpersonationReadOnlyGuard, withImpersonator } from "../auth/impersonat
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { EulaService } from "../marketplace/eula.service";
-import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
+import {
+  DAEMON_UNAVAILABLE_MESSAGE,
+  WingsClientService,
+  WingsUnavailableError,
+} from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
 import { FileUploadService } from "./file-upload.service";
 import { ServerAccessService } from "./server-access.service";
@@ -72,6 +77,8 @@ function confine(base: string, ...paths: string[]): void {
 @Controller("api/v1/client/servers/:id")
 @UseGuards(SessionGuard, ImpersonationReadOnlyGuard)
 export class ServerRuntimeController {
+  private readonly logger = new Logger(ServerRuntimeController.name);
+
   constructor(
     @Inject(ServerAccessService) private readonly access: ServerAccessService,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
@@ -661,7 +668,10 @@ export class ServerRuntimeController {
          * tel quel, en 400.
          */
         if (error.isRefusal && error.detail) throw new BadRequestException(error.detail);
-        throw new ServiceUnavailableException(error.message);
+        // Nom interne du node et cause brute pour l'exploitant, une phrase pour
+        // le client : voir `DAEMON_UNAVAILABLE_MESSAGE`.
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

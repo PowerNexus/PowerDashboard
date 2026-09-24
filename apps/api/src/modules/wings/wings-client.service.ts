@@ -62,6 +62,23 @@ export class WingsUnavailableError extends Error {
   }
 }
 
+/**
+ * Ce qu'un client lit quand le daemon ne répond pas, ou répond mal.
+ *
+ * Le message de `WingsUnavailableError` est écrit pour l'exploitant : il nomme
+ * le node par son nom interne et donne la cause brute — `connect ECONNREFUSED
+ * 10.0.0.5:8080`, soit l'adresse privée de la machine et le port du daemon.
+ * Relayé tel quel, il partait au navigateur ou à la boutique d'un revendeur.
+ * Le client a besoin de savoir que la machine ne répond pas et qu'il peut
+ * réessayer ; la cause va au journal du processus (`Logger`), où l'on cherche
+ * une panne.
+ *
+ * Un refus que le daemon a écrit pour être lu (`isRefusal` avec `detail`) n'est
+ * pas concerné : il dit quoi changer, et il est relayé en 400.
+ */
+export const DAEMON_UNAVAILABLE_MESSAGE =
+  "La machine qui héberge ce serveur n'a pas répondu. Réessayez dans un instant.";
+
 export interface WingsResources {
   state: string;
   is_suspended: boolean;
