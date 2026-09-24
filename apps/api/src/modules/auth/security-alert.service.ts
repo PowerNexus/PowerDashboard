@@ -1,4 +1,9 @@
-import { ATTEMPT_WINDOW_MS, hashToken, shouldAlertOwner } from "@gamedashboard/auth";
+import {
+  ATTEMPT_WINDOW_MS,
+  hashToken,
+  MAX_ATTEMPTS_PER_ACCOUNT,
+  shouldAlertOwner,
+} from "@gamedashboard/auth";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { battre } from "../../common/background-tick";
 import { ActivityService } from "../activity/activity.service";
@@ -20,8 +25,29 @@ import { assessSignIn, deviceFamily, networkOf } from "./sign-in-origin";
 export const FAILURE_ALERT = "account.login_failures";
 export const NEW_DEVICE_ALERT = "account.new_device";
 
+/**
+ * Étape à laquelle une preuve a été refusée, telle que le journal la nomme.
+ *
+ * La distinction est ce que cherche celui qui relit un compte compromis :
+ * des échecs au mot de passe disent qu'on le devine, des échecs au second
+ * facteur disent qu'on le **connaît** déjà.
+ */
+export type FailureStage = "password" | "second_factor" | "passkey" | "reauthentication";
+
 /** Page où l'on change son mot de passe, active la 2FA et ferme ses sessions. */
 const SECURITY_PAGE = "/account/security";
+
+/** Ce que la route sait d'un échec sur un compte existant. */
+export interface FailureContext {
+  userId: string;
+  /** Adresse **du compte**, et non celle saisie : c'est elle que le journal nomme. */
+  email: string;
+  ip: string | null;
+  userAgent: string | null;
+  /** Domaine d'arrivée, pour la marque et le lien du courriel. */
+  host: string | null;
+  stage: FailureStage;
+}
 
 /** Ce que la connexion sait d'elle-même, au moment où la session s'ouvre. */
 export interface SignInContext {
@@ -83,12 +109,15 @@ export class SecurityAlertService {
    * Après un échec sur un compte **existant**.
    *
    * L'appelant ne l'appelle pas pour une adresse inconnue : il n'y a personne à
-   * prévenir. Et rien de ce qui se passe ici ne revient dans la réponse — elle
-   * est la même pour un compte inconnu et pour un mot de passe faux, sans quoi
-   * le formulaire de connexion redeviendrait un annuaire des clients.
+   * prévenir, ni d'historique de compte où ranger l'échec. Et rien de ce qui se
+   * passe ici ne revient dans la réponse — elle est la même pour un compte
+   * inconnu et pour un mot de passe faux, sans quoi le formulaire de connexion
+   * redeviendrait un annuaire des clients. C'est aussi pourquoi le journal
+   * s'écrit ici, détaché : deux écritures de plus, attendues par la route,
+   * suffiraient à distinguer au chronomètre une adresse connue d'une autre.
    */
-  afterFailure(input: { userId: string; email: string; ip: string | null; host: string | null }) {
-    this.detach("alerte d'échecs de connexion", () => this.checkFailures(input));
+  afterFailure(input: FailureContext) {
+    this.detach("échec de connexion", () => this.checkFailures(input));
   }
 
   /** Après l'ouverture d'une session, quel que soit le chemin d'entrée. */
@@ -118,13 +147,10 @@ export class SecurityAlertService {
    * voit son compteur glisser et repasser par cinq, et ne doit pas pour autant
    * remplir la boîte du titulaire.
    */
-  private async checkFailures(input: {
-    userId: string;
-    email: string;
-    ip: string | null;
-    host: string | null;
-  }): Promise<void> {
+  private async checkFailures(input: FailureContext): Promise<void> {
     const since = new Date(Date.now() - ATTEMPT_WINDOW_MS);
+    await this.journalFailure(input, since);
+
     const failures = await this.repository.consecutiveFailures(input.email, since);
     if (!shouldAlertOwner(failures)) return;
     if (await this.repository.alertedSince(input.userId, FAILURE_ALERT, since)) return;
@@ -143,6 +169,43 @@ export class SecurityAlertService {
     });
 
     await this.deliver(recipient, FAILURE_ALERT, "danger", texts);
+  }
+
+  /**
+   * Consigne l'échec au journal d'audit, puis le verrouillage s'il vient de
+   * s'enclencher (ASVS 7.2.1).
+   *
+   * `login_attempts` les gardait déjà, mais trente jours et hors de tout
+   * écran : l'administrateur qui reconstitue une compromission lit le journal,
+   * et y voyait des connexions sans jamais les essais qui les précédaient.
+   *
+   * Ni le secret essayé, ni sa longueur : seulement l'étape refusée. Le
+   * verrouillage n'est consigné qu'au franchissement exact du seuil, comme
+   * l'alerte : le compteur n'avance plus tant que le verrou tient, et une
+   * ligne par tentative refusée noierait le journal sous l'attaque même.
+   */
+  private async journalFailure(input: FailureContext, since: Date): Promise<void> {
+    const entry = {
+      serverId: null,
+      actorId: input.userId,
+      actorType: "user" as const,
+      actorLabel: input.email,
+      ip: input.ip,
+      userAgent: input.userAgent,
+    };
+    await this.activity.record({
+      ...entry,
+      event: "account.login_failed",
+      properties: { stage: input.stage },
+    });
+
+    const failures = await this.repository.failuresSince(input.email, since);
+    if (failures !== MAX_ATTEMPTS_PER_ACCOUNT) return;
+    await this.activity.record({
+      ...entry,
+      event: "account.locked",
+      properties: { failures, minutes: ATTEMPT_WINDOW_MS / 60_000 },
+    });
   }
 
   /**

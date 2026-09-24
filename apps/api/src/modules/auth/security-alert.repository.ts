@@ -91,6 +91,26 @@ export class SecurityAlertRepository {
     return row?.total ?? 0;
   }
 
+  /**
+   * Tous les échecs d'un compte depuis `since`, réussites intercalées ou non.
+   *
+   * C'est le compteur du verrou (`UserRepository.countRecentFailures`), relu
+   * ici pour savoir si l'échec qu'on consigne vient de l'enclencher.
+   */
+  async failuresSince(email: string, since: Date): Promise<number> {
+    const [row] = await this.db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(loginAttempts)
+      .where(
+        and(
+          sql`lower(${loginAttempts.email}) = lower(${email})`,
+          eq(loginAttempts.success, false),
+          gte(loginAttempts.at, since.toISOString()),
+        ),
+      );
+    return row?.total ?? 0;
+  }
+
   /** Une alerte de ce type est-elle déjà partie depuis `since` ? */
   async alertedSince(userId: string, type: string, since: Date): Promise<boolean> {
     const [row] = await this.db

@@ -1,7 +1,7 @@
 import { hashPassword } from "@gamedashboard/auth";
-import { type Database, users } from "@gamedashboard/db";
+import { activityLogs, type Database, loginAttempts, users } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
-import { sql } from "drizzle-orm";
+import { asc, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createThrowawayDatabase,
@@ -190,6 +190,42 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     } as never;
   }
 
+  /** Connexion par mot de passe, depuis une adresse donnée. */
+  async function login(email: string, password: string, ip = "203.0.113.7") {
+    const reply = fakeReply();
+    await controller.login(
+      { email, password },
+      { ip, headers: { "user-agent": FIREFOX }, socket: { remoteAddress: "127.0.0.1" } } as never,
+      reply as never,
+    );
+    return reply;
+  }
+
+  /**
+   * Échecs posés directement en base : les rejouer par la route coûterait le
+   * délai progressif, jusqu'à cinq secondes par tentative.
+   */
+  async function seedFailures(email: string, ip: string, count: number): Promise<void> {
+    const at = new Date().toISOString();
+    await db
+      .insert(loginAttempts)
+      .values(Array.from({ length: count }, () => ({ email, ip, success: false, at })));
+  }
+
+  /** Le journal d'audit, dans l'ordre d'écriture. */
+  async function journal() {
+    return await db
+      .select({
+        event: activityLogs.event,
+        actorId: activityLogs.actorId,
+        actorLabel: activityLogs.actorLabel,
+        ip: activityLogs.ip,
+        properties: activityLogs.properties,
+      })
+      .from(activityLogs)
+      .orderBy(asc(activityLogs.at));
+  }
+
   describe("changement de mot de passe", () => {
     it("éteint les liens de réinitialisation encore valables", async () => {
       const account = await seedAccount();
@@ -226,6 +262,52 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       const client = await seedAccount("user");
       expect((await controller.twoFactorStatus(signedIn(client))).data.required).toBe(false);
     });
+  });
+
+  describe("journal d'audit des échecs", () => {
+    it("consigne l'échec sur le compte visé, sans le secret essayé", async () => {
+      const account = await seedAccount();
+      const reply = await login(account.email, "pas-le-bon-mot-de-passe", "198.51.100.4");
+      expect(reply.statusCode).toBe(401);
+      await alerts.settled();
+
+      const rows = (await journal()).filter((row) => row.event === "account.login_failed");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        actorId: account.id,
+        actorLabel: account.email,
+        ip: "198.51.100.4",
+        properties: { stage: "password" },
+      });
+      expect(JSON.stringify(rows)).not.toContain("pas-le-bon-mot-de-passe");
+    });
+
+    it("ne consigne rien pour une adresse inconnue : l'identifiant saisi peut être un secret", async () => {
+      // Un mot de passe tapé dans le champ de l'adresse est une erreur
+      // ordinaire ; le journal, lu par tout le personnel, ne doit pas le garder.
+      await login("cheval-agrafe@inconnu.test", "faux");
+      await alerts.settled();
+      expect(await journal()).toEqual([]);
+    });
+
+    it("consigne le verrouillage une fois, au franchissement du seuil", async () => {
+      const account = await seedAccount();
+      await seedFailures(account.email, "198.51.100.4", 9);
+
+      expect((await login(account.email, "faux", "198.51.100.4")).statusCode).toBe(401);
+      await alerts.settled();
+      // Verrouillé : la tentative suivante n'est ni vérifiée ni comptée.
+      expect((await login(account.email, "faux", "198.51.100.4")).statusCode).toBe(429);
+      await alerts.settled();
+
+      const locked = (await journal()).filter((row) => row.event === "account.locked");
+      expect(locked).toHaveLength(1);
+      expect(locked[0]).toMatchObject({
+        actorId: account.id,
+        ip: "198.51.100.4",
+        properties: { failures: 10 },
+      });
+    }, 30_000);
   });
 });
 

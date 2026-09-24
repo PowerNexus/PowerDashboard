@@ -42,7 +42,7 @@ import { issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
-import { SecurityAlertService } from "./security-alert.service";
+import { type FailureStage, SecurityAlertService } from "./security-alert.service";
 import { authCookieOptions, SessionGuard, sessionCookie } from "./session.guard";
 import {
   SESSION_TTL_MS,
@@ -307,7 +307,7 @@ export class AuthController {
     const valid = await verifyPassword(digest, parsed.data.password);
 
     if (!user || !valid) {
-      await this.recordFailure(parsed.data.email, request, user);
+      await this.recordFailure(parsed.data.email, request, user, "password");
       // Délai progressif : gênant pour une énumération automatisée, invisible
       // pour quelqu'un qui se trompe deux fois. Le verrou, lui, est plus haut.
       await pause(throttle.delayMs);
@@ -403,7 +403,7 @@ export class AuthController {
       : await this.twoFactor.verifyCode(sealed.userId, parsed.data.code ?? "");
 
     if (!accepted) {
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "second_factor");
       await pause(throttle.delayMs);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
@@ -439,7 +439,9 @@ export class AuthController {
    * Consigne un échec, et prévient le titulaire au cinquième d'affilée (§5.1).
    *
    * `account` est nul pour une adresse inconnue : il n'y a alors personne à
-   * prévenir. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
+   * prévenir, et rien n'entre au journal d'audit — l'identifiant saisi n'y
+   * serait qu'une chaîne quelconque, parfois un mot de passe tapé dans le
+   * mauvais champ. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
    * l'alerte part en tâche détachée, sans rien attendre ni rien renvoyer, si
    * bien qu'un compte existant et une adresse inventée répondent pareil et
    * dans le même temps.
@@ -448,6 +450,7 @@ export class AuthController {
     email: string,
     request: ClientRequest,
     account: { id: string; email: string } | null,
+    stage: FailureStage,
   ): Promise<void> {
     await this.users.recordAttempt(email, request.ip ?? null, false);
     if (!account) return;
@@ -455,7 +458,9 @@ export class AuthController {
       userId: account.id,
       email: account.email,
       ip: request.ip ?? null,
+      userAgent: headerValue(request.headers["user-agent"]),
       host: arrivalHost(request),
+      stage,
     });
   }
 
@@ -674,7 +679,7 @@ export class AuthController {
     if (throttle === null) return;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.currentPassword))) {
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "reauthentication");
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe actuel incorrect.", problems: [] });
       return;
@@ -1849,7 +1854,7 @@ export class AuthController {
       // Pas de délai progressif : une signature ne se devine pas par essais
       // successifs, contrairement à six chiffres. Le ralentissement viserait
       // un risque qui n'existe pas ici.
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "passkey");
       reply.status(401).send({ message: publicFailureMessage() });
       return;
     }
@@ -1908,7 +1913,7 @@ export class AuthController {
     if (throttle === null) return null;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.password))) {
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "reauthentication");
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe incorrect." });
       return null;

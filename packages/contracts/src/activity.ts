@@ -156,6 +156,12 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   // quand un frontal de confiance l'a fourni : c'est ce qui permet de
   // reconnaître un « nouveau pays » sans colonne dédiée.
   "account.login": { category: "account", label: "Connexion" },
+  // Une preuve refusée, avec l'étape (mot de passe, second facteur, clé
+  // d'accès, confirmation) et jamais le secret essayé. Seulement sur un compte
+  // existant : une adresse inconnue n'a pas d'historique où la ranger.
+  "account.login_failed": { category: "account", label: "Échec de connexion" },
+  // Consigné au franchissement du seuil, pas à chaque tentative refusée.
+  "account.locked": { category: "account", label: "Connexions suspendues après trop d'échecs" },
   "account.password": { category: "account", label: "Mot de passe modifié" },
   "account.2fa_enabled": { category: "account", label: "Double authentification activée" },
   "account.2fa_disabled": { category: "account", label: "Double authentification désactivée" },
