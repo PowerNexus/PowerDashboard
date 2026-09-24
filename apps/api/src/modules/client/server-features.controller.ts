@@ -22,7 +22,7 @@ import {
 import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
-import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
+import { ImpersonationReadOnlyGuard, withImpersonator } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { EngineService } from "../marketplace/engine.service";
@@ -270,6 +270,17 @@ export class ServerFeaturesController {
     @Param("databaseId") databaseId: string,
   ) {
     await this.access.require(principalOf(request), id, "databases.update");
+    /*
+     * Pas pendant une prise en main. Le garde laisse passer les `GET`, mais
+     * celui-ci fait sortir un secret — remis à l'agent, sous le nom du client.
+     * « Voir ce que voit le client » n'en a pas besoin : l'écran montre les
+     * coordonnées de la base sans le mot de passe.
+     */
+    if (request.user.impersonator) {
+      throw new ForbiddenException(
+        "Vous regardez ce compte en tant que membre du personnel : le mot de passe d'une base ne vous est pas révélé.",
+      );
+    }
     const revealed = await this.databases.password(id, databaseId);
     // La consultation est journalisée au même titre que la modification :
     // c est le moment où un identifiant quitte le panel.
@@ -1064,6 +1075,10 @@ export class ServerFeaturesController {
    * Le type d'acteur distingue une session d'une clé d'API. La distinction est
    * ce qui permet de répondre à « est-ce moi, ou mon bot ? » — la première
    * question que se pose quiconque découvre une action qu'il ne reconnaît pas.
+   *
+   * Pendant une prise en main, l'agent est nommé (`withImpersonator`) : les
+   * `GET` qui ont un effet — tirer une sauvegarde — lui passent, et le journal
+   * les imputait au client.
    */
   private async log(
     request: ClientRequest,
@@ -1078,7 +1093,7 @@ export class ServerFeaturesController {
       actorType: request.scopes === null ? "user" : "api_key",
       actorLabel: await this.activity.labelFor(request.user.id),
       ip: request.ip ?? null,
-      properties,
+      properties: withImpersonator(request, properties),
     });
   }
 

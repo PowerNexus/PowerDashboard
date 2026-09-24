@@ -22,7 +22,7 @@ import {
 } from "@nestjs/common";
 import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
-import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
+import { ImpersonationReadOnlyGuard, withImpersonator } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { EulaService } from "../marketplace/eula.service";
@@ -607,7 +607,8 @@ export class ServerRuntimeController {
       actorType: request.scopes === null ? "user" : "api_key",
       actorLabel: await this.activity.labelFor(request.user.id),
       ip: request.ip ?? null,
-      properties,
+      // L'agent d'une prise en main est nommé : voir `withImpersonator`.
+      properties: withImpersonator(request, properties),
     });
   }
 
