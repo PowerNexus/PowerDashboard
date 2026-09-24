@@ -10,6 +10,7 @@
 | [Reprise Pterodactyl](./reprise-pterodactyl.md) | Basculer un panel Pterodactyl existant, Wings compris |
 | [Audit ASVS niveau 2](./securite/audit-asvs-l2.md) | Consigne de l'audit de sécurité de la V1, à confier à une session Claude |
 | [Rapport ASVS niveau 2](./securite/rapport-asvs-l2.md) | Résultat de l'audit : non-conformités par gravité, sondes, tableau des exigences V1 à V14 |
+| [Modèle de menace](./securite/modele-de-menace.md) | Acteurs, actifs, frontières de confiance, menaces principales et contrôles qui y répondent |
 
 Le plan d'ensemble est dans [PLAN.md](../PLAN.md). Le démarrage rapide et
 l'état des écrans sont dans le [README](../README.md).
