@@ -1,9 +1,11 @@
+import { encryptSecret, generateTotpSecret } from "@gamedashboard/auth";
 import {
   activityLogs,
   type Database,
   sessions as sessionsTable,
   userOauthAccounts,
   users,
+  userTotpCredentials,
 } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
@@ -16,12 +18,15 @@ import {
 import { ActivityService } from "../activity/activity.service";
 import type { PlatformSettingsService, SsoConfiguration } from "../admin/platform-settings.service";
 import { AuthController } from "./auth.controller";
+import { readChallenge } from "./login-challenge";
 import type { SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
 import { SsoService } from "./sso.service";
 import { TwoFactorRepository } from "./two-factor.repository";
 import { UserRepository } from "./user.repository";
+
+process.env.APP_SECRET_KEY ??= "clé de test des défis de connexion";
 
 /**
  * Le bouton « Se connecter avec Google » (PLAN §12.4, décision 4), de la
@@ -252,6 +257,36 @@ describe.skipIf(!HAS_DATABASE)("Connexion avec Google (intégration)", () => {
     expect(reply.statusCode).toBe(409);
     expect(await db.select().from(userOauthAccounts)).toEqual([]);
   });
+
+  /*
+   * NC-58, décision de Matheo : le bouton rapproche aussi les comptes du
+   * personnel par adresse vérifiée — parité avec la réinitialisation par
+   * courriel —, et c'est le second facteur du panel qui les garde. Ce test
+   * fige cette garde : un compte Google détourné ne doit jamais suffire à
+   * ouvrir une session d'administration.
+   */
+  it.each(["admin", "support"] as const)(
+    "mène un compte %s doté d'un second facteur au défi, sans ouvrir de session",
+    async (role) => {
+      const id = await compte("alex@gmail.com");
+      await db.update(users).set({ role }).where(eq(users.id, id));
+      await db.insert(userTotpCredentials).values({
+        userId: id,
+        secretEnc: encryptSecret(generateTotpSecret()),
+        verifiedAt: new Date().toISOString(),
+      });
+
+      const reply = await retour();
+      expect(reply.statusCode).toBe(200);
+      expect(reply.body).toMatchObject({ twoFactorRequired: true, challenge: expect.any(String) });
+      expect(reply.cookies.size).toBe(0);
+      expect(await db.select().from(sessionsTable).where(eq(sessionsTable.userId, id))).toEqual([]);
+
+      // Le défi nomme ce compte, et la session qu'il ouvrira se dira « google ».
+      const defi = readChallenge("login", (reply.body as { challenge: string }).challenge);
+      expect(defi).toMatchObject({ userId: id, method: "google" });
+    },
+  );
 
   it("s'efface quand l'annuaire est obligatoire : il est alors le seul chemin", async () => {
     annuaire = ANNUAIRE;
