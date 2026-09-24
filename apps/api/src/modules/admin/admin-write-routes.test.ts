@@ -1,15 +1,17 @@
 import "reflect-metadata";
-import { type ExecutionContext, RequestMethod } from "@nestjs/common";
-import { GUARDS_METADATA, METHOD_METADATA } from "@nestjs/common/constants";
+import type { ExecutionContext } from "@nestjs/common";
+import { GUARDS_METADATA } from "@nestjs/common/constants";
 import { describe, expect, it } from "vitest";
+import {
+  ADMIN_CONTROLLERS,
+  guardsOf,
+  routeLabel as label,
+  type Route,
+  routesOf,
+  WRITE_METHODS,
+} from "../../test/routes";
 import type { DenialLogService } from "../activity/denial-log.service";
-import { ApplicationKeysController } from "../application/application-keys.controller";
-import { WebhooksController } from "../application/webhooks.controller";
-import { IncidentsController } from "../status/incidents.controller";
-import { AdminController } from "./admin.controller";
 import { AdminGuard } from "./admin.guard";
-import { AdminNodesController } from "./admin-nodes.controller";
-import { AdminUsersController } from "./admin-users.controller";
 import { AdminWriteGuard } from "./admin-write.guard";
 import { StaffTwoFactorGuard } from "./staff-2fa.guard";
 
@@ -27,24 +29,6 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
  * méthode déclarée `POST`, `PUT`, `PATCH` ou `DELETE` sur un contrôleur de
  * l'espace est vérifiée, sans qu'on ait à y penser.
  */
-type Controller = abstract new (...args: never[]) => object;
-
-/** Les contrôleurs montés sous `/api/v1/admin`. */
-const ADMIN_CONTROLLERS: readonly Controller[] = [
-  AdminController,
-  AdminNodesController,
-  AdminUsersController,
-  WebhooksController,
-  ApplicationKeysController,
-  IncidentsController,
-];
-
-const WRITE_METHODS = new Set<number>([
-  RequestMethod.POST,
-  RequestMethod.PUT,
-  RequestMethod.PATCH,
-  RequestMethod.DELETE,
-]);
 
 /**
  * Lectures réservées elles aussi, pour ce qu'elles emportent : le journal
@@ -55,35 +39,9 @@ const RESERVED_READS: Record<string, readonly string[]> = {
   AdminController: ["exportActivity", "nodeConfiguration", "settings"],
 };
 
-interface Route {
-  controller: Controller;
-  name: string;
-  handler: object;
-  method: number;
-}
-
-function routesOf(controller: Controller): Route[] {
-  const prototype = controller.prototype as Record<string, unknown>;
-  return Object.getOwnPropertyNames(prototype).flatMap((name) => {
-    const handler = prototype[name];
-    if (name === "constructor" || typeof handler !== "function") return [];
-    const method = Reflect.getMetadata(METHOD_METADATA, handler) as number | undefined;
-    return method === undefined ? [] : [{ controller, name, handler, method }];
-  });
-}
-
-/** Gardes effectifs : ceux du contrôleur, puis ceux de la méthode. */
-function guardsOf(route: Route): unknown[] {
-  return [
-    ...(Reflect.getMetadata(GUARDS_METADATA, route.controller) ?? []),
-    ...(Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []),
-  ];
-}
-
-const ROUTES = ADMIN_CONTROLLERS.flatMap(routesOf);
+const ROUTES: Route[] = ADMIN_CONTROLLERS.flatMap(routesOf);
 const WRITES = ROUTES.filter((route) => WRITE_METHODS.has(route.method));
 const READS = ROUTES.filter((route) => RESERVED_READS[route.controller.name]?.includes(route.name));
-const label = (route: Route) => `${route.controller.name}.${route.name}`;
 
 /** Le journal des refus, muet : le sujet est ici le rôle, pas la trace. */
 const silence = { record: async () => {} } as unknown as DenialLogService;

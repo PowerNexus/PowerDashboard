@@ -55,6 +55,20 @@ function eventsConsignes(directory: string): Set<string> {
     for (const m of source.matchAll(/\.trace\([^,]+,\s*"([a-z][a-z0-9._-]+)"/g)) {
       if (m[1]) found.add(m[1]);
     }
+    /*
+     * `event: ok ? "a.b" : "a.c"` et `this.trace(request, ok ? "a.b" : "a.c", …)`.
+     *
+     * Le même angle mort, une troisième fois : les deux issues d'un geste
+     * nommées par une condition échappaient aux motifs ci-dessus, et quatre
+     * événements (`node.token_rotated`, `reseller.domain_verified` et leurs
+     * pendants en échec) s'affichaient sous leur identifiant brut.
+     */
+    for (const m of source.matchAll(
+      /(?:event:|\.trace\([^,]+,)\s*[^"?,;]+\?\s*"([a-z][a-z0-9._-]+)"\s*:\s*"([a-z][a-z0-9._-]+)"/g,
+    )) {
+      if (m[1]) found.add(m[1]);
+      if (m[2]) found.add(m[2]);
+    }
   }
 
   return found;

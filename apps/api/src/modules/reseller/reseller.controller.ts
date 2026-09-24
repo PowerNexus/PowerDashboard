@@ -424,6 +424,19 @@ export class ResellerController {
     if (!parsed.success) throw new BadRequestException("État manquant.");
 
     await this.webhooks_.setActive(webhookId, parsed.data.active, request.user.id);
+
+    // Seul geste de l'espace qui n'était pas consigné : couper un rappel rend
+    // sa boutique sourde, et « depuis quand » est la première question.
+    await this.activity.record({
+      event: "reseller.webhook_active_set",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      properties: { webhookId, active: parsed.data.active },
+    });
+
     return { data: { webhookId, active: parsed.data.active } };
   }
 

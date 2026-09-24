@@ -112,11 +112,28 @@ export class WebhooksController {
 
   @Post(":webhookId/active")
   @UseGuards(AdminWriteGuard)
-  async setActive(@Param("webhookId") webhookId: string, @Body() body: unknown) {
+  async setActive(
+    @Req() request: AdminRequest,
+    @Param("webhookId") webhookId: string,
+    @Body() body: unknown,
+  ) {
     const parsed = SetActive.safeParse(body);
     if (!parsed.success) throw new BadRequestException("État manquant.");
 
     await this.registry.setActive(webhookId, parsed.data.active);
+
+    // Couper un rappel, c'est rendre la boutique sourde à ce qui se passe :
+    // qui l'a fait se consigne comme la création et la suppression.
+    await this.activity.record({
+      event: "admin.webhook_active_set",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      properties: { webhookId, active: parsed.data.active },
+    });
+
     return { data: { webhookId, active: parsed.data.active } };
   }
 

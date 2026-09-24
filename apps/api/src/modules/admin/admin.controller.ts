@@ -1,5 +1,10 @@
 import { Readable } from "node:stream";
-import { AuditExportQuery, AuditFilters, ServerLimitsPatch } from "@gamedashboard/contracts";
+import {
+  AuditExportQuery,
+  AuditFilters,
+  SETTING_BY_KEY,
+  ServerLimitsPatch,
+} from "@gamedashboard/contracts";
 import {
   BadRequestException,
   Body,
@@ -98,6 +103,67 @@ const EGG_ID = new ParseUUIDPipe({
 function headerValue(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
+}
+
+/** Ce qu'un montage expose, et comment : la trace d'une création ou d'une modification. */
+function mountTrace(mount: {
+  id: string;
+  name: string;
+  source: string;
+  target: string;
+  readOnly: boolean;
+  userMountable: boolean;
+}) {
+  return {
+    mountId: mount.id,
+    name: mount.name,
+    source: mount.source,
+    target: mount.target,
+    readOnly: mount.readOnly,
+    userMountable: mount.userMountable,
+  };
+}
+
+/** Un hôte de bases tel que le journal le décrit : où, sous quel compte — sans mot de passe. */
+function databaseHostTrace(host: {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  nodeId: string | null;
+}) {
+  return {
+    hostId: host.id,
+    name: host.name,
+    host: host.host,
+    port: host.port,
+    username: host.username,
+    nodeId: host.nodeId,
+  };
+}
+
+/**
+ * Ce que le journal garde d'un enregistrement de réglages.
+ *
+ * Toutes les clés enregistrées ; la valeur seulement pour les interrupteurs,
+ * les choix et les nombres — « seconde preuve du personnel : non »,
+ * « facturation : WHMCS », c'est ce qu'on vient chercher au journal. Jamais
+ * celle d'un secret, ni d'un texte : les champs textuels portent les
+ * identifiants des services (clé d'accès S3, identifiant client de
+ * l'annuaire, hôtes), que le support ne lit plus dans les réglages (NC-40) et
+ * ne doit pas relire au journal, qu'il consulte et qui s'exporte.
+ */
+function settingsTrace(
+  saved: readonly string[],
+  values: Record<string, unknown>,
+): { keys: string[]; values: Record<string, unknown> } {
+  const shown: Record<string, unknown> = {};
+  for (const key of saved) {
+    const kind = SETTING_BY_KEY.get(key)?.kind;
+    if (kind === "boolean" || kind === "choice" || kind === "number") shown[key] = values[key];
+  }
+  return { keys: [...saved], values: shown };
 }
 
 /**
@@ -258,7 +324,7 @@ export class AdminController {
    */
   @Post("settings")
   @UseGuards(AdminWriteGuard)
-  async saveSettings(@Body() body: unknown) {
+  async saveSettings(@Req() request: AdminRequest, @Body() body: unknown) {
     const values = (body as { values?: unknown })?.values;
     if (!values || typeof values !== "object" || Array.isArray(values)) {
       throw new BadRequestException("Réglages manquants.");
@@ -268,15 +334,24 @@ export class AdminController {
     // cette purge, le nouveau logo n'apparaîtrait qu'une minute plus tard, et
     // l'on rechargerait la page en croyant l'enregistrement perdu.
     if (result.saved.some((key) => key.startsWith("brand."))) this.branding.forgetAll();
+
+    if (result.saved.length > 0) {
+      await this.trace(
+        request,
+        "admin.settings_saved",
+        settingsTrace(result.saved, values as Record<string, unknown>),
+      );
+    }
     return { data: result };
   }
 
   @Post("settings/flags/:key")
   @UseGuards(AdminWriteGuard)
-  async setFlag(@Param("key") key: string, @Body() body: unknown) {
+  async setFlag(@Req() request: AdminRequest, @Param("key") key: string, @Body() body: unknown) {
     const enabled = (body as { enabled?: unknown })?.enabled;
     if (typeof enabled !== "boolean") throw new BadRequestException("État manquant.");
     await this.platform.setFlag(key, enabled);
+    await this.trace(request, "admin.feature_flag_set", { key, enabled });
     return { data: { key, enabled } };
   }
 
@@ -340,14 +415,27 @@ export class AdminController {
 
   @Post("announcements")
   @UseGuards(AdminWriteGuard)
-  async saveAnnouncement(@Body() body: unknown) {
-    return { data: await this.announcementsService.save(this.announcementInput(body)) };
+  async saveAnnouncement(@Req() request: AdminRequest, @Body() body: unknown) {
+    const saved = await this.announcementsService.save(this.announcementInput(body));
+    // Le titre et la portée, pas le corps : c'est le qui et le quand qu'on
+    // vient chercher, le texte est à l'écran des annonces.
+    await this.trace(request, "admin.announcement_saved", {
+      announcementId: saved.id,
+      title: saved.title,
+      level: saved.level,
+      audience: saved.audience,
+    });
+    return { data: saved };
   }
 
   @Delete("announcements/:announcementId")
   @UseGuards(AdminWriteGuard)
-  async deleteAnnouncement(@Param("announcementId") announcementId: string) {
+  async deleteAnnouncement(
+    @Req() request: AdminRequest,
+    @Param("announcementId") announcementId: string,
+  ) {
     await this.announcementsService.remove(announcementId);
+    await this.trace(request, "admin.announcement_deleted", { announcementId });
     return { data: { deleted: announcementId } };
   }
 
@@ -398,22 +486,36 @@ export class AdminController {
     return { data: await this.mountsService.list() };
   }
 
+  /*
+   * Un montage ouvre au conteneur un dossier de la machine hôte : chaque geste
+   * est consigné avec la source, la cible et le mode, qui disent ce qui a été
+   * exposé et à qui.
+   */
   @Post("mounts")
   @UseGuards(AdminWriteGuard)
-  async createMount(@Body() body: unknown) {
-    return { data: await this.mountsService.create(this.mountInput(body)) };
+  async createMount(@Req() request: AdminRequest, @Body() body: unknown) {
+    const mount = await this.mountsService.create(this.mountInput(body));
+    await this.trace(request, "admin.mount_created", mountTrace(mount));
+    return { data: mount };
   }
 
   @Post("mounts/:mountId")
   @UseGuards(AdminWriteGuard)
-  async updateMount(@Param("mountId") mountId: string, @Body() body: unknown) {
-    return { data: await this.mountsService.update(mountId, this.mountInput(body)) };
+  async updateMount(
+    @Req() request: AdminRequest,
+    @Param("mountId") mountId: string,
+    @Body() body: unknown,
+  ) {
+    const mount = await this.mountsService.update(mountId, this.mountInput(body));
+    await this.trace(request, "admin.mount_updated", mountTrace(mount));
+    return { data: mount };
   }
 
   @Delete("mounts/:mountId")
   @UseGuards(AdminWriteGuard)
-  async deleteMount(@Param("mountId") mountId: string) {
+  async deleteMount(@Req() request: AdminRequest, @Param("mountId") mountId: string) {
     await this.mountsService.remove(mountId);
+    await this.trace(request, "admin.mount_deleted", { mountId });
     return { data: { deleted: mountId } };
   }
 
@@ -425,15 +527,25 @@ export class AdminController {
 
   @Post("servers/:serverId/mounts/:mountId")
   @UseGuards(AdminWriteGuard)
-  async attachMount(@Param("serverId") serverId: string, @Param("mountId") mountId: string) {
+  async attachMount(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Param("mountId") mountId: string,
+  ) {
     await this.mountsService.attach(serverId, mountId);
+    await this.trace(request, "admin.mount_attached", { mountId }, serverId);
     return { data: { attached: mountId } };
   }
 
   @Delete("servers/:serverId/mounts/:mountId")
   @UseGuards(AdminWriteGuard)
-  async detachMount(@Param("serverId") serverId: string, @Param("mountId") mountId: string) {
+  async detachMount(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Param("mountId") mountId: string,
+  ) {
     await this.mountsService.detach(serverId, mountId);
+    await this.trace(request, "admin.mount_detached", { mountId }, serverId);
     return { data: { detached: mountId } };
   }
 
@@ -546,28 +658,44 @@ export class AdminController {
    */
   @Post("database-hosts/test")
   @UseGuards(AdminWriteGuard)
-  async testDatabaseHost(@Body() body: unknown) {
+  async testDatabaseHost(@Req() request: AdminRequest, @Body() body: unknown) {
     const input = this.hostInput(body);
     if (input.password === "") throw new BadRequestException("Mot de passe manquant.");
-    return { data: await this.databaseHosts_.probe(input) };
+    const outcome = await this.databaseHosts_.probe(input);
+    // L'essai fait se connecter le panel à l'hôte qu'on lui donne : la
+    // destination est consignée, les identifiants jamais.
+    await this.trace(request, "admin.database_host_tested", {
+      host: input.host,
+      port: input.port,
+    });
+    return { data: outcome };
   }
 
   @Post("database-hosts")
   @UseGuards(AdminWriteGuard)
-  async createDatabaseHost(@Body() body: unknown) {
-    return { data: await this.databaseHosts_.create(this.hostInput(body)) };
+  async createDatabaseHost(@Req() request: AdminRequest, @Body() body: unknown) {
+    const host = await this.databaseHosts_.create(this.hostInput(body));
+    await this.trace(request, "admin.database_host_created", databaseHostTrace(host));
+    return { data: host };
   }
 
   @Post("database-hosts/:hostId")
   @UseGuards(AdminWriteGuard)
-  async updateDatabaseHost(@Param("hostId") hostId: string, @Body() body: unknown) {
-    return { data: await this.databaseHosts_.update(hostId, this.hostInput(body)) };
+  async updateDatabaseHost(
+    @Req() request: AdminRequest,
+    @Param("hostId") hostId: string,
+    @Body() body: unknown,
+  ) {
+    const host = await this.databaseHosts_.update(hostId, this.hostInput(body));
+    await this.trace(request, "admin.database_host_updated", databaseHostTrace(host));
+    return { data: host };
   }
 
   @Delete("database-hosts/:hostId")
   @UseGuards(AdminWriteGuard)
-  async deleteDatabaseHost(@Param("hostId") hostId: string) {
+  async deleteDatabaseHost(@Req() request: AdminRequest, @Param("hostId") hostId: string) {
     await this.databaseHosts_.remove(hostId);
+    await this.trace(request, "admin.database_host_deleted", { hostId });
     return { data: { deleted: hostId } };
   }
 
@@ -611,22 +739,32 @@ export class AdminController {
    */
   @Post("users")
   @UseGuards(AdminWriteGuard)
-  async createUser(@Body() body: unknown) {
+  async createUser(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as Record<string, unknown>;
     const text = (key: string): string =>
       typeof payload[key] === "string" ? (payload[key] as string) : "";
 
-    return {
-      data: await this.actions.createUser({
-        email: text("email"),
-        nameFirst: text("nameFirst"),
-        nameLast: text("nameLast"),
-        role: text("role") || "user",
-        // Absent vaut **avec** mot de passe : c'est le cas courant, et un compte
-        // créé sans accès par inadvertance ne se remarque qu'au support.
-        withPassword: payload.withPassword !== false,
-      }),
+    const input = {
+      email: text("email"),
+      nameFirst: text("nameFirst"),
+      nameLast: text("nameLast"),
+      role: text("role") || "user",
+      // Absent vaut **avec** mot de passe : c'est le cas courant, et un compte
+      // créé sans accès par inadvertance ne se remarque qu'au support.
+      withPassword: payload.withPassword !== false,
     };
+    const created = await this.actions.createUser(input);
+
+    // Le mot de passe provisoire n'y figure pas : il n'est rendu qu'une fois,
+    // à l'administrateur qui l'a demandé, et nulle part ailleurs.
+    await this.trace(request, "admin.user_created", {
+      userId: created.id,
+      account: input.email.trim().toLowerCase(),
+      role: input.role,
+      withPassword: input.withPassword,
+    });
+
+    return { data: created };
   }
 
   @Post("users/:userId/role")
@@ -638,7 +776,13 @@ export class AdminController {
   ) {
     const role = (body as { role?: unknown })?.role;
     if (typeof role !== "string") throw new BadRequestException("Rôle manquant.");
-    await this.actions.setUserRole(request.user.id, userId, role);
+    const { previous, email } = await this.actions.setUserRole(request.user.id, userId, role);
+    await this.trace(request, "admin.user_role_changed", {
+      userId,
+      account: email,
+      from: previous,
+      to: role,
+    });
     return { data: { userId, role } };
   }
 
@@ -669,7 +813,11 @@ export class AdminController {
    */
   @Post("users/:userId/quota")
   @UseGuards(AdminWriteGuard)
-  async setResellerQuota(@Param("userId") userId: string, @Body() body: unknown) {
+  async setResellerQuota(
+    @Req() request: AdminRequest,
+    @Param("userId") userId: string,
+    @Body() body: unknown,
+  ) {
     const quota = {
       memoryMb: this.quotaField(body, "memoryMb"),
       diskMb: this.quotaField(body, "diskMb"),
@@ -677,6 +825,7 @@ export class AdminController {
     };
 
     await this.quotas.setQuota(userId, quota);
+    await this.trace(request, "admin.reseller_quota_set", { userId, ...quota });
     return { data: { userId, quota } };
   }
 
@@ -692,14 +841,17 @@ export class AdminController {
 
   @Post("users/:userId/revoke-sessions")
   @UseGuards(AdminWriteGuard)
-  async revokeSessions(@Param("userId") userId: string) {
-    return { data: await this.actions.revokeUserSessions(userId) };
+  async revokeSessions(@Req() request: AdminRequest, @Param("userId") userId: string) {
+    const outcome = await this.actions.revokeUserSessions(userId);
+    await this.trace(request, "admin.user_sessions_revoked", { userId, ...outcome });
+    return { data: outcome };
   }
 
   @Delete("users/:userId")
   @UseGuards(AdminWriteGuard)
   async deleteUser(@Req() request: AdminRequest, @Param("userId") userId: string) {
-    await this.actions.deleteUser(request.user.id, userId);
+    const { email } = await this.actions.deleteUser(request.user.id, userId);
+    await this.trace(request, "admin.user_deleted", { userId, account: email });
     return { data: { deleted: userId } };
   }
 
@@ -805,17 +957,25 @@ export class AdminController {
    */
   @Post("servers/:serverId/runtime")
   @UseGuards(AdminWriteGuard)
-  async setServerRuntime(@Param("serverId") serverId: string, @Body() body: unknown) {
+  async setServerRuntime(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Body() body: unknown,
+  ) {
     const payload = (body ?? {}) as {
       dockerImage?: unknown;
       startup?: unknown;
       oomKiller?: unknown;
     };
-    await this.adminServers.setRuntime(serverId, {
+    const runtime = {
       dockerImage: typeof payload.dockerImage === "string" ? payload.dockerImage : undefined,
       startup: typeof payload.startup === "string" ? payload.startup : undefined,
       oomKiller: typeof payload.oomKiller === "boolean" ? payload.oomKiller : undefined,
-    });
+    };
+    await this.adminServers.setRuntime(serverId, runtime);
+    // La commande et l'image en entier : ce sont les deux leviers qui font
+    // exécuter autre chose au conteneur, et ce qu'on relit après un incident.
+    await this.trace(request, "admin.server_runtime_changed", { ...runtime }, serverId);
     return { data: { updated: serverId } };
   }
 
@@ -835,13 +995,23 @@ export class AdminController {
    */
   @Post("servers/:serverId/egg")
   @UseGuards(AdminWriteGuard)
-  async setServerEgg(@Param("serverId") serverId: string, @Body() body: unknown) {
+  async setServerEgg(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Body() body: unknown,
+  ) {
     const payload = (body ?? {}) as { eggId?: unknown; reinstall?: unknown };
     if (typeof payload.eggId !== "string" || payload.eggId.trim() === "") {
       throw new BadRequestException("Jeu manquant.");
     }
     const reinstall = payload.reinstall === true;
     await this.adminServers.setEgg(serverId, payload.eggId, reinstall);
+    await this.trace(
+      request,
+      "admin.server_egg_changed",
+      { eggId: payload.eggId, reinstall },
+      serverId,
+    );
     return { data: { updated: serverId, reinstall } };
   }
 
@@ -931,19 +1101,39 @@ export class AdminController {
    */
   @Post("servers/:serverId/transfer")
   @UseGuards(AdminWriteGuard)
-  async transferServer(@Param("serverId") serverId: string, @Body() body: unknown) {
+  async transferServer(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Body() body: unknown,
+  ) {
     const { nodeId } = (body ?? {}) as { nodeId?: unknown };
     if (typeof nodeId !== "string" || nodeId.trim() === "") {
       throw new BadRequestException("Node de destination manquant.");
     }
 
-    return { data: await this.transfers.start(serverId, nodeId) };
+    const transfer = await this.transfers.start(serverId, nodeId);
+    await this.trace(
+      request,
+      "admin.server_transfer_started",
+      {
+        transferId: transfer.id,
+        nodeId,
+        from: transfer.fromNodeName,
+        to: transfer.toNodeName,
+      },
+      serverId,
+    );
+    return { data: transfer };
   }
 
   /** Écrit une variable d'egg, y compris celles fermées au propriétaire. */
   @Post("servers/:serverId/variables")
   @UseGuards(AdminWriteGuard)
-  async setServerVariable(@Param("serverId") serverId: string, @Body() body: unknown) {
+  async setServerVariable(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Body() body: unknown,
+  ) {
     const payload = (body ?? {}) as { envVariable?: unknown; value?: unknown };
     if (typeof payload.envVariable !== "string" || payload.envVariable.trim() === "") {
       throw new BadRequestException("Variable manquante.");
@@ -953,26 +1143,47 @@ export class AdminController {
       payload.envVariable.trim(),
       typeof payload.value === "string" ? payload.value : "",
     );
+    // Le nom de la variable, pas sa valeur : un mot de passe RCON ou une clé
+    // de licence y vivent, et le journal se lit par le support.
+    await this.trace(
+      request,
+      "admin.server_variable_set",
+      { envVariable: payload.envVariable.trim() },
+      serverId,
+    );
     return { data: { updated: payload.envVariable } };
   }
 
   @Post("servers/:serverId/suspend")
   @UseGuards(AdminWriteGuard)
-  async suspendServer(@Param("serverId") serverId: string, @Body() body: unknown) {
+  async suspendServer(
+    @Req() request: AdminRequest,
+    @Param("serverId") serverId: string,
+    @Body() body: unknown,
+  ) {
     const { suspended, reason } = (body ?? {}) as { suspended?: unknown; reason?: unknown };
     if (typeof suspended !== "boolean") throw new BadRequestException("État manquant.");
-    await this.actions.setServerSuspended(
+    const motif = typeof reason === "string" ? reason : "";
+    await this.actions.setServerSuspended(serverId, suspended, motif);
+    await this.trace(
+      request,
+      suspended ? "admin.server_suspended" : "admin.server_resumed",
+      { reason: suspended ? motif.trim() || null : null },
       serverId,
-      suspended,
-      typeof reason === "string" ? reason : "",
     );
     return { data: { serverId, suspended } };
   }
 
   @Delete("servers/:serverId")
   @UseGuards(AdminWriteGuard)
-  async deleteServer(@Param("serverId") serverId: string) {
-    await this.relay(() => this.actions.deleteServer(serverId));
+  async deleteServer(@Req() request: AdminRequest, @Param("serverId") serverId: string) {
+    const deleted = await this.relay(() => this.actions.deleteServer(serverId));
+    // Le serveur n'existe plus : l'y rattacher ferait échouer l'écriture.
+    await this.trace(request, "admin.server_deleted", {
+      serverId,
+      name: deleted.name,
+      ownerId: deleted.ownerId,
+    });
     return { data: { deleted: serverId } };
   }
 
@@ -985,42 +1196,56 @@ export class AdminController {
 
   @Post("node-categories")
   @UseGuards(AdminWriteGuard)
-  async createNodeCategory(@Body() body: unknown) {
+  async createNodeCategory(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as { name?: unknown; description?: unknown };
     if (typeof payload.name !== "string") throw new BadRequestException("Nom attendu.");
-    return {
-      data: await this.infrastructure.createCategory({
-        name: payload.name,
-        description: typeof payload.description === "string" ? payload.description : undefined,
-      }),
-    };
+    const created = await this.infrastructure.createCategory({
+      name: payload.name,
+      description: typeof payload.description === "string" ? payload.description : undefined,
+    });
+    await this.trace(request, "admin.node_category_created", {
+      categoryId: created.id,
+      name: payload.name,
+    });
+    return { data: created };
   }
 
   @Delete("node-categories/:categoryId")
   @UseGuards(AdminWriteGuard)
-  async removeNodeCategory(@Param("categoryId") categoryId: string) {
-    return { data: await this.infrastructure.removeCategory(categoryId) };
+  async removeNodeCategory(@Req() request: AdminRequest, @Param("categoryId") categoryId: string) {
+    const outcome = await this.infrastructure.removeCategory(categoryId);
+    await this.trace(request, "admin.node_category_removed", { categoryId, ...outcome });
+    return { data: outcome };
   }
 
   @Post("node-subcategories")
   @UseGuards(AdminWriteGuard)
-  async createNodeSubcategory(@Body() body: unknown) {
+  async createNodeSubcategory(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as { categoryId?: unknown; name?: unknown };
     if (typeof payload.categoryId !== "string" || typeof payload.name !== "string") {
       throw new BadRequestException("Catégorie et nom attendus.");
     }
-    return {
-      data: await this.infrastructure.createSubcategory({
-        categoryId: payload.categoryId,
-        name: payload.name,
-      }),
-    };
+    const created = await this.infrastructure.createSubcategory({
+      categoryId: payload.categoryId,
+      name: payload.name,
+    });
+    await this.trace(request, "admin.node_subcategory_created", {
+      subcategoryId: created.id,
+      categoryId: payload.categoryId,
+      name: payload.name,
+    });
+    return { data: created };
   }
 
   @Delete("node-subcategories/:subcategoryId")
   @UseGuards(AdminWriteGuard)
-  async removeNodeSubcategory(@Param("subcategoryId") subcategoryId: string) {
-    return { data: await this.infrastructure.removeSubcategory(subcategoryId) };
+  async removeNodeSubcategory(
+    @Req() request: AdminRequest,
+    @Param("subcategoryId") subcategoryId: string,
+  ) {
+    const outcome = await this.infrastructure.removeSubcategory(subcategoryId);
+    await this.trace(request, "admin.node_subcategory_removed", { subcategoryId, ...outcome });
+    return { data: outcome };
   }
 
   @Get("locations")
@@ -1030,23 +1255,21 @@ export class AdminController {
 
   @Post("locations")
   @UseGuards(AdminWriteGuard)
-  async createLocation(@Body() body: unknown) {
+  async createLocation(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as Record<string, unknown>;
     const text = (key: string): string =>
       typeof payload[key] === "string" ? (payload[key] as string) : "";
-    return {
-      data: await this.infrastructure.createLocation({
-        short: text("short"),
-        long: text("long"),
-        countryCode: text("countryCode"),
-      }),
-    };
+    const input = { short: text("short"), long: text("long"), countryCode: text("countryCode") };
+    const created = await this.infrastructure.createLocation(input);
+    await this.trace(request, "admin.location_created", { locationId: created.id, ...input });
+    return { data: created };
   }
 
   @Delete("locations/:locationId")
   @UseGuards(AdminWriteGuard)
-  async removeLocation(@Param("locationId") locationId: string) {
+  async removeLocation(@Req() request: AdminRequest, @Param("locationId") locationId: string) {
     await this.infrastructure.removeLocation(locationId);
+    await this.trace(request, "admin.location_removed", { locationId });
     return { data: { removed: true } };
   }
 
@@ -1060,37 +1283,50 @@ export class AdminController {
    */
   @Post("nodes")
   @UseGuards(AdminWriteGuard)
-  async createNode(@Body() body: unknown) {
+  async createNode(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as Record<string, unknown>;
     const text = (key: string): string =>
       typeof payload[key] === "string" ? (payload[key] as string) : "";
     const num = (key: string, fallback: number): number =>
       typeof payload[key] === "number" ? (payload[key] as number) : fallback;
 
-    return {
-      data: await this.infrastructure.createNode({
-        name: text("name"),
-        locationId: text("locationId"),
-        // Chaîne vide vaut « non classé » : c'est un choix possible, pas un
-        // champ oublié.
-        category: text("category") || null,
-        subcategory: text("subcategory") || null,
-        fqdn: text("fqdn"),
-        scheme: text("scheme") || "https",
-        daemonPort: num("daemonPort", 8080),
-        daemonSftpPort: num("daemonSftpPort", 2022),
-        memoryMb: num("memoryMb", 0),
-        diskMb: num("diskMb", 0),
-        cpuCores: num("cpuCores", 0),
-        isPublic: payload.isPublic !== false,
-      }),
+    const input = {
+      name: text("name"),
+      locationId: text("locationId"),
+      // Chaîne vide vaut « non classé » : c'est un choix possible, pas un
+      // champ oublié.
+      category: text("category") || null,
+      subcategory: text("subcategory") || null,
+      fqdn: text("fqdn"),
+      scheme: text("scheme") || "https",
+      daemonPort: num("daemonPort", 8080),
+      daemonSftpPort: num("daemonSftpPort", 2022),
+      memoryMb: num("memoryMb", 0),
+      diskMb: num("diskMb", 0),
+      cpuCores: num("cpuCores", 0),
+      isPublic: payload.isPublic !== false,
     };
+    const created = await this.infrastructure.createNode(input);
+
+    // L'identifiant du jeton, jamais le jeton : il est rendu une fois, ici,
+    // et c'est tout.
+    await this.trace(request, "node.created", {
+      nodeId: created.id,
+      tokenId: created.tokenId,
+      name: input.name,
+      fqdn: input.fqdn,
+      scheme: input.scheme,
+      daemonPort: input.daemonPort,
+    });
+
+    return { data: created };
   }
 
   @Delete("nodes/:nodeId")
   @UseGuards(AdminWriteGuard)
-  async removeNode(@Param("nodeId") nodeId: string) {
+  async removeNode(@Req() request: AdminRequest, @Param("nodeId") nodeId: string) {
     await this.infrastructure.removeNode(nodeId);
+    await this.trace(request, "node.removed", { nodeId });
     return { data: { removed: true } };
   }
 
@@ -1181,7 +1417,11 @@ export class AdminController {
 
   @Post("nodes/:nodeId/shares")
   @UseGuards(AdminWriteGuard)
-  async setNodeShare(@Param("nodeId") nodeId: string, @Body() body: unknown) {
+  async setNodeShare(
+    @Req() request: AdminRequest,
+    @Param("nodeId") nodeId: string,
+    @Body() body: unknown,
+  ) {
     const payload = (body ?? {}) as Record<string, unknown>;
     if (typeof payload.resellerId !== "string") {
       throw new BadRequestException("Revendeur attendu.");
@@ -1190,32 +1430,43 @@ export class AdminController {
     const int = (key: string): number =>
       typeof payload[key] === "number" ? (payload[key] as number) : Number.NaN;
 
-    return {
-      data: await this.shares.setShare({
-        nodeId,
-        resellerId: payload.resellerId,
-        memoryMb: int("memoryMb"),
-        diskMb: int("diskMb"),
-        // `null` est une valeur attendue — « aucun plafond sur le nombre de
-        // serveurs » — et non un champ oublié.
-        serversMax: payload.serversMax === null ? null : int("serversMax"),
-      }),
+    const share = {
+      nodeId,
+      resellerId: payload.resellerId,
+      memoryMb: int("memoryMb"),
+      diskMb: int("diskMb"),
+      // `null` est une valeur attendue — « aucun plafond sur le nombre de
+      // serveurs » — et non un champ oublié.
+      serversMax: payload.serversMax === null ? null : int("serversMax"),
     };
+    const saved = await this.shares.setShare(share);
+    await this.trace(request, "node.share_set", { shareId: saved.id, ...share });
+    return { data: saved };
   }
 
   @Delete("nodes/:nodeId/shares/:resellerId")
   @UseGuards(AdminWriteGuard)
-  async removeNodeShare(@Param("nodeId") nodeId: string, @Param("resellerId") resellerId: string) {
+  async removeNodeShare(
+    @Req() request: AdminRequest,
+    @Param("nodeId") nodeId: string,
+    @Param("resellerId") resellerId: string,
+  ) {
     await this.shares.removeShare(nodeId, resellerId);
+    await this.trace(request, "node.share_removed", { nodeId, resellerId });
     return { data: { removed: true } };
   }
 
   @Post("nodes/:nodeId/maintenance")
   @UseGuards(AdminWriteGuard)
-  async setMaintenance(@Param("nodeId") nodeId: string, @Body() body: unknown) {
+  async setMaintenance(
+    @Req() request: AdminRequest,
+    @Param("nodeId") nodeId: string,
+    @Body() body: unknown,
+  ) {
     const enabled = (body as { enabled?: unknown })?.enabled;
     if (typeof enabled !== "boolean") throw new BadRequestException("État manquant.");
     await this.actions.setNodeMaintenance(nodeId, enabled);
+    await this.trace(request, "node.maintenance_set", { nodeId, enabled });
     return { data: { nodeId, enabled } };
   }
 
@@ -1228,13 +1479,18 @@ export class AdminController {
    */
   @Post("nodes/:nodeId/owner")
   @UseGuards(AdminWriteGuard)
-  async setNodeOwner(@Param("nodeId") nodeId: string, @Body() body: unknown) {
+  async setNodeOwner(
+    @Req() request: AdminRequest,
+    @Param("nodeId") nodeId: string,
+    @Body() body: unknown,
+  ) {
     const ownerId = (body as { ownerId?: unknown })?.ownerId;
     if (ownerId !== null && typeof ownerId !== "string") {
       throw new BadRequestException("Identifiant de revendeur ou `null` attendu.");
     }
 
     await this.actions.setNodeOwner(nodeId, ownerId);
+    await this.trace(request, "node.owner_changed", { nodeId, ownerId });
     return { data: { nodeId, ownerId } };
   }
 
@@ -1246,7 +1502,11 @@ export class AdminController {
    */
   @Post("nodes/:nodeId/allocations")
   @UseGuards(AdminWriteGuard)
-  async addAllocations(@Param("nodeId") nodeId: string, @Body() body: unknown) {
+  async addAllocations(
+    @Req() request: AdminRequest,
+    @Param("nodeId") nodeId: string,
+    @Body() body: unknown,
+  ) {
     const { ip, from, to } = (body ?? {}) as { ip?: unknown; from?: unknown; to?: unknown };
     if (typeof ip !== "string") throw new BadRequestException("Adresse IP manquante.");
 
@@ -1259,17 +1519,33 @@ export class AdminController {
     if (end - start > 5000) throw new BadRequestException("Plage trop large (5000 ports maximum).");
 
     const ports = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    return { data: await this.actions.addAllocations(nodeId, ip, ports) };
+    const outcome = await this.actions.addAllocations(nodeId, ip, ports);
+    await this.trace(request, "node.allocations_added", {
+      nodeId,
+      ip,
+      from: start,
+      to: end,
+      ...outcome,
+    });
+    return { data: outcome };
   }
 
   /* --- Catalogue ----------------------------------------------------------- */
 
   @Post("eggs/:eggId/enabled")
   @UseGuards(AdminWriteGuard)
-  async setEggEnabled(@Param("eggId") eggId: string, @Body() body: unknown) {
+  async setEggEnabled(
+    @Req() request: AdminRequest,
+    @Param("eggId") eggId: string,
+    @Body() body: unknown,
+  ) {
     const enabled = (body as { enabled?: unknown })?.enabled;
     if (typeof enabled !== "boolean") throw new BadRequestException("État manquant.");
-    return { data: { eggId, enabled, ...(await this.actions.setEggEnabled(eggId, enabled)) } };
+    const outcome = await this.actions.setEggEnabled(eggId, enabled);
+    // Activer, c'est déclarer avoir relu le script d'installation (§8.3) :
+    // qui l'a déclaré doit rester écrit.
+    await this.trace(request, "admin.egg_enabled_set", { eggId, enabled });
+    return { data: { eggId, enabled, ...outcome } };
   }
 
   /**
@@ -1280,14 +1556,16 @@ export class AdminController {
    */
   @Post("eggs/import")
   @UseGuards(AdminWriteGuard)
-  async importEgg(@Body() body: unknown) {
+  async importEgg(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = body as { egg?: unknown; nest?: unknown };
     const egg = payload?.egg;
     if (egg === undefined || egg === null) {
       throw new BadRequestException("Aucun egg : collez le contenu d'un export Pterodactyl.");
     }
     const nest = typeof payload.nest === "string" ? payload.nest : undefined;
-    return { data: await this.eggImport.importOne({ json: egg, nestName: nest }) };
+    const imported = await this.eggImport.importOne({ json: egg, nestName: nest });
+    await this.trace(request, "admin.egg_imported", { eggId: imported.id, nest: nest ?? null });
+    return { data: imported };
   }
 
   /** L'egg complet, variables et emploi par les serveurs compris, pour l'éditeur. */
@@ -1360,12 +1638,19 @@ export class AdminController {
 
   @Post("egg-catalogue/import")
   @UseGuards(AdminWriteGuard)
-  async importFromCatalogue(@Body() body: unknown) {
+  async importFromCatalogue(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = (body ?? {}) as { sourceId?: unknown; path?: unknown };
     if (typeof payload.sourceId !== "string" || typeof payload.path !== "string") {
       throw new BadRequestException("Source et chemin attendus.");
     }
-    return { data: await this.eggImport.importFromSource(payload.sourceId, payload.path) };
+    const imported = await this.eggImport.importFromSource(payload.sourceId, payload.path);
+    await this.trace(request, "admin.egg_imported", {
+      eggId: imported.id,
+      name: imported.name,
+      sourceId: payload.sourceId,
+      path: payload.path,
+    });
+    return { data: imported };
   }
 
   @Get("egg-sources")
@@ -1375,24 +1660,33 @@ export class AdminController {
 
   @Post("egg-sources")
   @UseGuards(AdminWriteGuard)
-  async addEggSource(@Body() body: unknown) {
+  async addEggSource(@Req() request: AdminRequest, @Body() body: unknown) {
     const payload = body as { name?: unknown; url?: unknown; branch?: unknown };
     if (typeof payload?.name !== "string" || typeof payload?.url !== "string") {
       throw new BadRequestException("Nom et adresse du dépôt attendus.");
     }
-    return {
-      data: await this.eggImport.addSource({
-        name: payload.name,
-        url: payload.url,
-        branch: typeof payload.branch === "string" ? payload.branch : undefined,
-      }),
+    const input = {
+      name: payload.name,
+      url: payload.url,
+      branch: typeof payload.branch === "string" ? payload.branch : undefined,
     };
+    const created = await this.eggImport.addSource(input);
+    // Un dépôt suivi fournit des scripts exécutés sur les nodes : d'où il
+    // vient, et qui l'a ajouté, se relisent le jour où l'un d'eux surprend.
+    await this.trace(request, "admin.egg_source_added", {
+      sourceId: created.id,
+      name: input.name,
+      url: input.url,
+      branch: input.branch ?? null,
+    });
+    return { data: created };
   }
 
   @Delete("egg-sources/:sourceId")
   @UseGuards(AdminWriteGuard)
-  async removeEggSource(@Param("sourceId") sourceId: string) {
+  async removeEggSource(@Req() request: AdminRequest, @Param("sourceId") sourceId: string) {
     await this.eggImport.removeSource(sourceId);
+    await this.trace(request, "admin.egg_source_removed", { sourceId });
     return { data: { removed: true } };
   }
 
@@ -1406,8 +1700,51 @@ export class AdminController {
    */
   @Post("egg-sources/:sourceId/sync")
   @UseGuards(AdminWriteGuard)
-  async syncEggSource(@Param("sourceId") sourceId: string) {
-    return { data: await this.eggImport.syncSource(sourceId) };
+  async syncEggSource(@Req() request: AdminRequest, @Param("sourceId") sourceId: string) {
+    const report = await this.eggImport.syncSource(sourceId);
+    await this.trace(request, "admin.egg_source_synced", {
+      sourceId,
+      created: report.created,
+      updated: report.updated,
+      skippedLocallyModified: report.skippedLocallyModified,
+      failed: report.failed.length,
+    });
+    return { data: report };
+  }
+
+  /**
+   * Consigne un geste d'administration, sous le nom de qui l'a fait.
+   *
+   * **Chaque route qui écrit passe par ici** (NC-11 du rapport ASVS) : les
+   * gestes qui comptent le plus — rôle, suppression de compte, réglages de la
+   * plateforme, suspension — ne laissaient aucune trace, et « qui a désactivé
+   * la seconde preuve du personnel » n'avait pas de réponse.
+   * `admin-activity-coverage.test.ts` refuse une route d'écriture qui n'y
+   * passe pas.
+   *
+   * Après le geste, jamais avant : une ligne écrite pour une action refusée
+   * dirait qu'elle a eu lieu. `record()` n'échoue jamais, pour la raison
+   * qu'elle donne.
+   *
+   * Aucune valeur secrète dans `properties` : le journal est lu par le
+   * support et exporté. Chaque appelant choisit ce qu'il y met.
+   */
+  private async trace(
+    request: AdminRequest,
+    event: string,
+    properties: Record<string, unknown>,
+    serverId: string | null = null,
+  ): Promise<void> {
+    await this.activityLog.record({
+      event,
+      serverId,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      userAgent: headerValue(request.headers?.["user-agent"]),
+      properties,
+    });
   }
 
   /** Voir `ServerRuntimeController.relay` : un node muet n'est pas un bogue du panel. */
