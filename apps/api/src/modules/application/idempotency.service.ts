@@ -18,6 +18,10 @@ import { DATABASE } from "../../common/database.provider";
  * même clé, même corps ⇒ la réponse d'origine, sans rien refaire. Même clé,
  * corps différent ⇒ refus, parce que ce n'est pas une reprise mais deux
  * demandes distinctes portant la même étiquette.
+ *
+ * Le souvenir vit un mois (`RetentionService`) : il porte la réponse complète,
+ * données du compte créé comprises, et une reprise arrive en secondes ou en
+ * heures. Passé ce délai, une clé rejouée est une demande neuve.
  */
 @Injectable()
 export class IdempotencyService {
