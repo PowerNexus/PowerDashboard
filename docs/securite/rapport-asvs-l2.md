@@ -102,7 +102,7 @@ par cookie refusée depuis une autre origine (`Origin`, `Sec-Fetch-Site`,
 | NC-50 | Corrigée | `c7aa452` | `infra-prod.test.ts`, `response-headers.test.ts` | Pas de `preload` ni d'agrafage OCSP : Let's Encrypt n'en publie plus |
 | NC-51 | Corrigée | `2b886ec` | `auth-cookies.test.ts` (contrats et API) | Avec un défaut trouvé en passant : un effacement sans `Secure` laissait le cookie `__Host-` en place à la déconnexion |
 | NC-52 | Corrigée | `4ae7d01` | `infra-prod.test.ts` | Archive `.tar.enc`, clé `/opt/gamedashboard/backup.key` hors de `env/`, à conserver ailleurs |
-| NC-53 | Corrigée | `633f360` | `design/page.test.tsx` | Captures de référence à reprendre (`captures.yml`) |
+| NC-53 | Corrigée | `633f360` | `design/page.test.tsx` | Captures de référence reprises sur le runner (`88351e9`) : l'entrée « Design system » quitte la navigation, et la rétention de NC-39 ajoute une ligne à la vue d'ensemble de l'administration |
 | NC-54 | Corrigée | `de2626d` | `credentials.integration.test.ts` | |
 | NC-55 | Corrigée | `ba7aaca` | `node-load.test.ts` | |
 | NC-56 | Corrigée | `fb53f8c` | `instatus.service.test.ts`, `platform-settings.test.ts` | |
@@ -150,7 +150,7 @@ par cookie refusée depuis une autre origine (`Origin`, `Sec-Fetch-Site`,
   `verifier-sauvegardes.sh`, `verifier-sftp.sh`, `verifier-transfert.sh` (D-2),
   `verifier-cycle-serveur.sh`, `verifier-console.sh` (adapté par NC-14 : la
   console envoie ses commandes par l'API) ; recharger nginx pour la production
-  locale ; reprendre les captures de référence (`captures.yml`).
+  locale.
 - **À l'exploitation** : jouer l'étape § 4 du runbook de la clé maître (NC-18)
   une fois la version en service ; conserver `backup.key` hors de la machine
   (NC-52).
