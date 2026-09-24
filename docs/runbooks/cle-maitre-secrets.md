@@ -16,7 +16,13 @@ La clé AES est dérivée par `scrypt(APP_SECRET_KEY, sel)`
 précède illisible d'un coup.** Les mots de passe des comptes, les sessions et
 les clés d'API ne sont pas concernés : ils sont hachés, pas chiffrés.
 
-L'API refuse de démarrer sans `APP_SECRET_KEY` (`assertEncryptionKey`).
+L'API refuse de démarrer sans `APP_SECRET_KEY` (`assertEncryptionKey`), et
+avec une clé de moins de 32 caractères : le sel de dérivation est public, une
+clé courte se devinerait donc hors ligne sur une copie de la base. Une
+installation dont la clé est plus courte en change par la rotation du § 1,
+l'ancienne clé dans `APP_SECRET_KEY_OLD` : le script la relit, quelle que soit
+sa longueur, et n'exige le seuil que de la nouvelle.
+
 `deploy.sh` et `install.sh` ne la génèrent qu'une fois et ne la remplacent
 jamais.
 

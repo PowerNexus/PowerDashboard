@@ -1,8 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret, looksEncrypted, MissingEncryptionKeyError } from "./secrets";
+import {
+  assertEncryptionKey,
+  decryptSecret,
+  encryptSecret,
+  looksEncrypted,
+  MissingEncryptionKeyError,
+  WeakEncryptionKeyError,
+} from "./secrets";
 
 const env = { APP_SECRET_KEY: "clé de test, longue et quelconque" } as NodeJS.ProcessEnv;
-const autre = { APP_SECRET_KEY: "une autre clé entièrement" } as NodeJS.ProcessEnv;
+const autre = { APP_SECRET_KEY: "une autre clé entièrement différente" } as NodeJS.ProcessEnv;
 
 describe("encryptSecret / decryptSecret", () => {
   it("restitue exactement la valeur d'origine", () => {
@@ -98,6 +106,41 @@ describe("clé absente", () => {
     const vide = {} as NodeJS.ProcessEnv;
     expect(() => encryptSecret("secret", vide)).toThrow(MissingEncryptionKeyError);
     expect(() => decryptSecret("a:b:c", vide)).toThrow(MissingEncryptionKeyError);
+  });
+});
+
+describe("clé trop courte", () => {
+  /*
+   * Non-régression (audit ASVS, NC-19) : `APP_SECRET_KEY=motdepasse`
+   * démarrait. Le sel de scrypt est public : une copie de la base suffisait
+   * alors à essayer un dictionnaire de clés contre un secret chiffré, hors
+   * ligne et sans limite.
+   */
+  it("refuse de démarrer sous 32 caractères, et le dit", () => {
+    // Hors littéral : `secret-key-samples.test.ts` refuse toute clé d'essai
+    // courte écrite en clair dans un test, et celle-ci l'est à dessein.
+    const motDePasse = "motdepasse";
+    const courte = { APP_SECRET_KEY: motDePasse } as NodeJS.ProcessEnv;
+    expect(() => assertEncryptionKey(courte)).toThrow(/il en faut au moins 32/);
+    expect(() => encryptSecret("secret", courte)).toThrow(WeakEncryptionKeyError);
+    expect(() => decryptSecret("a:b:c", courte)).toThrow(WeakEncryptionKeyError);
+    // Juste sous le seuil : un caractère de moins suffit à refuser.
+    const presque = { APP_SECRET_KEY: "x".repeat(31) } as NodeJS.ProcessEnv;
+    expect(() => assertEncryptionKey(presque)).toThrow(WeakEncryptionKeyError);
+  });
+
+  it("accepte une clé de 32 caractères, et celle que génèrent les installateurs", () => {
+    expect(() =>
+      assertEncryptionKey({ APP_SECRET_KEY: "x".repeat(32) } as NodeJS.ProcessEnv),
+    ).not.toThrow();
+    // `openssl rand -base64 48` : 64 caractères.
+    const installee = { APP_SECRET_KEY: randomBytes(48).toString("base64") } as NodeJS.ProcessEnv;
+    expect(decryptSecret(encryptSecret("secret", installee), installee)).toBe("secret");
+  });
+
+  it("les clés d'essai de ces tests passent elles-mêmes le seuil", () => {
+    expect(env.APP_SECRET_KEY?.length).toBeGreaterThanOrEqual(32);
+    expect(autre.APP_SECRET_KEY?.length).toBeGreaterThanOrEqual(32);
   });
 });
 

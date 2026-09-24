@@ -31,6 +31,30 @@ export class MissingEncryptionKeyError extends Error {
 }
 
 /**
+ * Longueur minimale de `APP_SECRET_KEY`, en caractères.
+ *
+ * Le sel de dérivation est public (il est écrit plus bas) : qui obtient une
+ * copie de la base peut donc essayer des clés hors ligne, sans limite, contre
+ * n'importe quel secret chiffré. scrypt ralentit chaque essai, il ne rend pas
+ * un mot du dictionnaire introuvable. Trente-deux caractères écartent les
+ * phrases de passe et les mots de passe d'usage ; les installateurs en
+ * tirent soixante-quatre (`openssl rand -base64 48`).
+ */
+export const MIN_SECRET_KEY_LENGTH = 32;
+
+export class WeakEncryptionKeyError extends Error {
+  constructor(length: number) {
+    super(
+      `APP_SECRET_KEY trop courte (${length} caractères) : il en faut au moins ${MIN_SECRET_KEY_LENGTH}. ` +
+        "Générez-la par « openssl rand -base64 48 ». Si des secrets sont déjà chiffrés avec " +
+        "l'ancienne, ne la remplacez pas à la main : rechiffrez-les d'abord " +
+        "(docs/runbooks/cle-maitre-secrets.md, rotation de la clé maître).",
+    );
+    this.name = "WeakEncryptionKeyError";
+  }
+}
+
+/**
  * Dérive la clé de chiffrement depuis l'environnement.
  *
  * `scrypt` sur une valeur d'environnement plutôt que la valeur brute : la clé
@@ -72,6 +96,7 @@ const derivedKeys = new Map<string, Buffer>();
 function derivedKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   const secret = env.APP_SECRET_KEY;
   if (!secret) throw new MissingEncryptionKeyError();
+  if (secret.length < MIN_SECRET_KEY_LENGTH) throw new WeakEncryptionKeyError(secret.length);
 
   const cached = derivedKeys.get(secret);
   if (cached) return cached;
@@ -82,7 +107,7 @@ function derivedKey(env: NodeJS.ProcessEnv = process.env): Buffer {
 }
 
 /**
- * Vérifie au démarrage que la clé est là et se dérive.
+ * Vérifie au démarrage que la clé est là, assez longue, et se dérive.
  *
  * Sans cet appel, l'API démarre, répond « en bonne santé », et casse au
  * premier geste qui chiffre — c'est-à-dire au premier appel d'un node, dont

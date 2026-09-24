@@ -41,7 +41,7 @@ describe("écriture des réglages", () => {
   });
 
   it("chiffre un secret avant de l'écrire", async () => {
-    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue";
+    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue-pour-vitest";
     const { svc, written } = service();
     await svc.save({ "smtp.password": "mon-mot-de-passe" });
 
@@ -102,7 +102,7 @@ describe("écriture des réglages", () => {
 
 describe("lecture des réglages", () => {
   beforeEach(() => {
-    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue";
+    process.env.APP_SECRET_KEY ??= "cle-de-test-suffisamment-longue-pour-vitest";
   });
 
   it("ne rend jamais la valeur d'un secret", async () => {

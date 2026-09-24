@@ -5,7 +5,9 @@ import type { Denial, DenialLogService } from "../activity/denial-log.service";
 import type { NodeIdentity, NodeRepository } from "./node.repository";
 import { NodeTokenGuard } from "./node-token.guard";
 
-const ENV = { APP_SECRET_KEY: "clé de test des gardes" } as NodeJS.ProcessEnv;
+const ENV = {
+  APP_SECRET_KEY: "clé de test des gardes, factice et assez longue",
+} as NodeJS.ProcessEnv;
 process.env.APP_SECRET_KEY = ENV.APP_SECRET_KEY;
 
 const SECRET = generateToken();

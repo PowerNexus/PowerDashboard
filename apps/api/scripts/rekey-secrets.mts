@@ -53,6 +53,19 @@ if (!SECRET) {
   console.error("APP_SECRET_KEY absente : impossible de relire quoi que ce soit.");
   process.exit(1);
 }
+/*
+ * La clé d'arrivée passe le seuil de l'API (`MIN_SECRET_KEY_LENGTH`, redit
+ * ici pour la raison donnée plus haut) : rechiffrer vers une clé que l'API
+ * refusera au démarrage laisserait la base lisible par personne. La clé de
+ * départ, elle, peut être courte : sortir d'une clé trop courte est justement
+ * l'un des usages de ce script.
+ */
+if (SECRET.length < 32) {
+  console.error(
+    `APP_SECRET_KEY trop courte (${SECRET.length} caractères) : il en faut au moins 32. openssl rand -base64 48.`,
+  );
+  process.exit(1);
+}
 const OLD_SECRET = process.env.APP_SECRET_KEY_OLD ?? SECRET;
 if (OLD_SECRET === SECRET && FROM_SALT === TO_SALT) {
   console.error("Rien à reprendre : même clé et même sel des deux côtés.");
