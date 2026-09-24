@@ -945,6 +945,7 @@
   "billingSso": {
     "eyebrow": "Connexion",
     "title": "Accès au panel",
+    "secondFactor": "Votre compte est protégé par un second facteur : confirmez qu'il s'agit bien de vous pour entrer.",
     "failedTitle": "Lien de connexion expiré",
     "retryHint": "Retournez dans votre espace client et cliquez de nouveau sur « Gérer mon serveur » : un nouveau lien sera créé.",
     "staffSignIn": "Connexion équipe et sous-utilisateurs"

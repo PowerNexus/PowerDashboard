@@ -159,7 +159,9 @@ export async function submitPasskey(
  * réponse à Next. Un second chemin d'ouverture de session finirait par oublier
  * l'une des propriétés du cookie, ou la langue du compte.
  */
-export async function consumeBillingLink(token: string): Promise<{ error: string | null }> {
+export async function consumeBillingLink(
+  token: string,
+): Promise<{ error: string | null; secondFactor: LoginState | null }> {
   const response = await fetch(`${API_URL}/api/v1/auth/billing/consume`, {
     method: "POST",
     headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
@@ -168,11 +170,42 @@ export async function consumeBillingLink(token: string): Promise<{ error: string
 
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { message?: string };
-    return { error: body.message ?? "Ce lien de connexion n'est plus valable." };
+    return {
+      error: body.message ?? "Ce lien de connexion n'est plus valable.",
+      secondFactor: null,
+    };
   }
 
-  await adoptSession(response, await localeOf(response));
-  return { error: null };
+  const body = (await response.json().catch(() => ({}))) as {
+    twoFactorRequired?: boolean;
+    challenge?: string;
+    methods?: { totp: boolean; passkeys: boolean };
+    remainingRecoveryCodes?: number;
+    user?: { locale?: unknown };
+  };
+
+  /*
+   * Le lien est accepté, mais le compte exige son second facteur (NC-05).
+   *
+   * Aucun cookie n'est posé : le défi part au formulaire de la page, qui le
+   * renverra avec la preuve, exactement comme après un mot de passe juste. Le
+   * facturier atteste une identité ; il ne remplace pas la clé que le
+   * titulaire a enregistrée ici.
+   */
+  if (body.twoFactorRequired && body.challenge) {
+    return {
+      error: null,
+      secondFactor: {
+        error: null,
+        challenge: body.challenge,
+        methods: body.methods ?? { totp: true, passkeys: false },
+        remainingRecoveryCodes: body.remainingRecoveryCodes ?? 0,
+      },
+    };
+  }
+
+  await adoptSession(response, body.user?.locale);
+  return { error: null, secondFactor: null };
 }
 
 /**

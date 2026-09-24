@@ -945,6 +945,7 @@
   "billingSso": {
     "eyebrow": "Sign in",
     "title": "Panel access",
+    "secondFactor": "Your account is protected by a second factor: confirm it is really you to get in.",
     "failedTitle": "Sign-in link expired",
     "retryHint": "Go back to your client area and click “Manage my server” again: a new link will be created.",
     "staffSignIn": "Staff and sub-user sign-in"

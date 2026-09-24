@@ -1280,6 +1280,26 @@ export class AuthController {
       return;
     }
 
+    /*
+     * Le second facteur du panel s'applique aussi à ce chemin (NC-05).
+     *
+     * Le facturier atteste une identité, comme l'annuaire ou Google : il ne
+     * prouve pas la possession de la clé enregistrée ici. Sans ce contrôle,
+     * qui tenait l'espace client — ou une clé applicative — entrait dans un
+     * compte protégé comme dans un autre. Le défi scelle la méthode : la
+     * session ouverte au second facteur se dit venue de la facturation.
+     */
+    const status = await this.twoFactor.status(consumed.userId);
+    if (status.enabled) {
+      reply.status(200).send({
+        twoFactorRequired: true,
+        challenge: issueChallenge("login", consumed.userId, { method: "billing_sso" }),
+        methods: { totp: status.totp, passkeys: status.passkeys > 0 },
+        remainingRecoveryCodes: status.remainingRecoveryCodes,
+      });
+      return;
+    }
+
     await this.issueSession(consumed.userId, request, reply, "billing_sso");
   }
 
