@@ -181,7 +181,18 @@ export class AdminController {
 
   /* --- Réglages de la plateforme ------------------------------------------ */
 
+  /**
+   * Les réglages, secrets masqués.
+   *
+   * **Sous `AdminWriteGuard` bien qu'il s'agisse d'une lecture.** Les secrets
+   * n'en sortent jamais, mais les identifiants qui les accompagnent si : clé
+   * d'accès S3, identifiant client de l'annuaire, hôtes SMTP et S3. Ce sont
+   * les moitiés publiques de paires dont le panel garde l'autre, et le
+   * support n'en a besoin pour répondre à aucun client. L'écran lui montre
+   * les presets de sous-utilisateurs, qu'il lit par leur propre route.
+   */
   @Get("settings")
+  @UseGuards(AdminWriteGuard)
   async settings() {
     return { data: await this.platform.all() };
   }

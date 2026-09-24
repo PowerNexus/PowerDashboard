@@ -411,7 +411,9 @@
     "features": "Fonctionnalités",
     "featuresHint": "Activation progressive des modules. Prend effet immédiatement.",
     "featureOn": "Actif",
-    "featureOff": "Inactif"
+    "featureOff": "Inactif",
+    "reservedTitle": "Réglages réservés aux administrateurs",
+    "reservedBody": "Marque, courrier, stockage, connexion et facturation ne sont lisibles que par un administrateur : ils portent les identifiants des services de la plateforme. Vous pouvez consulter ci-dessous les presets de sous-utilisateurs."
   },
   "adminUsers": {
     "create": "Créer un compte",

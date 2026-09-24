@@ -24,17 +24,50 @@ import { savePlatformSettings, setFeatureFlag, testSmtp } from "@/server/api/adm
 /**
  * Réglages de la plateforme.
  *
- * Les secrets — mot de passe SMTP, clé S3 — ne sont **jamais relus** : l'API
- * ne renvoie qu'un « configuré ou non ». Le champ est donc toujours vide, et
- * le laisser vide signifie « ne change rien ». Sans cette convention,
- * enregistrer la couleur d'accent effacerait la configuration SMTP.
+ * `initial` vaut `null` pour le support : l'API lui refuse la lecture des
+ * réglages (identifiants S3, SMTP, annuaire), et l'écran ne lui montre que les
+ * sections qu'il peut lire — les presets de sous-utilisateurs —, avec une
+ * phrase qui dit pourquoi le reste manque plutôt qu'une page en erreur.
  */
 export function AdminSettings({
   initial,
   children,
 }: {
-  initial: PlatformSettings;
+  initial: PlatformSettings | null;
   /** Sections qui ont leur propre organisme — les presets de sous-utilisateurs. */
+  children?: ReactNode;
+}) {
+  const t = useTranslations("adminSettings");
+
+  if (initial === null) {
+    return (
+      <PageTemplate
+        header={<PageHeader icon={<Settings />} title={t("title")} subtitle={t("subtitle")} />}
+      >
+        <AlertBanner variant="info" title={t("reservedTitle")}>
+          {t("reservedBody")}
+        </AlertBanner>
+        {children}
+      </PageTemplate>
+    );
+  }
+
+  return <PlatformSettingsForm initial={initial}>{children}</PlatformSettingsForm>;
+}
+
+/**
+ * Le formulaire lui-même.
+ *
+ * Les secrets — mot de passe SMTP, clé S3 — ne sont **jamais relus** : l'API
+ * ne renvoie qu'un « configuré ou non ». Le champ est donc toujours vide, et
+ * le laisser vide signifie « ne change rien ». Sans cette convention,
+ * enregistrer la couleur d'accent effacerait la configuration SMTP.
+ */
+function PlatformSettingsForm({
+  initial,
+  children,
+}: {
+  initial: PlatformSettings;
   children?: ReactNode;
 }) {
   const t = useTranslations("adminSettings");

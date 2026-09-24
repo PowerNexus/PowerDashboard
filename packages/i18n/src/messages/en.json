@@ -411,7 +411,9 @@
     "features": "Features",
     "featuresHint": "Gradual module rollout. Takes effect immediately.",
     "featureOn": "On",
-    "featureOff": "Off"
+    "featureOff": "Off",
+    "reservedTitle": "Settings reserved to administrators",
+    "reservedBody": "Branding, email, storage, sign-in and billing can only be read by an administrator: they hold the credentials of the platform's services. You can review the sub-user presets below."
   },
   "adminUsers": {
     "create": "Create an account",

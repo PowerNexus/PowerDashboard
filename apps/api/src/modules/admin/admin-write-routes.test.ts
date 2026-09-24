@@ -15,7 +15,18 @@ import { AdminWriteGuard } from "./admin-write.guard";
  * marcherait, simplement pour une personne de trop. D'où ce contrôle, qui
  * lit les gardes réellement posés sur chaque méthode.
  */
-const RESERVED = ["exportActivity", "saveSubuserPresets", "resetSubuserPresets"] as const;
+const RESERVED = [
+  "exportActivity",
+  "saveSubuserPresets",
+  "resetSubuserPresets",
+  /*
+   * Une lecture, et pourtant réservée : les secrets n'en sortent jamais, mais
+   * les identifiants qui les accompagnent si — clé d'accès S3, identifiant
+   * client de l'annuaire, hôtes SMTP et S3. Le support n'en a pas besoin pour
+   * répondre à un client (NC-40).
+   */
+  "settings",
+] as const;
 
 function guardsOf(method: (typeof RESERVED)[number]): unknown[] {
   return Reflect.getMetadata(GUARDS_METADATA, AdminController.prototype[method]) ?? [];
