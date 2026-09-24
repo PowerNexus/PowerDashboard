@@ -1,7 +1,7 @@
 import "server-only";
-import { type NextRequest, NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { forwardedIdentityHeaders } from "@/server/api/forwarded";
-import { concludeSignIn } from "@/server/ceremony";
+import { concludeSignIn, redirectWithin } from "@/server/ceremony";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 
@@ -24,13 +24,8 @@ type BillingLinkFailure = "expired" | "suspended" | "failed";
  * Le second facteur du compte, que le lien ne remplace pas (NC-05), se passe
  * sur la page de connexion, comme au retour d'un fournisseur d'identité.
  */
-export async function arriveByBillingLink(
-  request: NextRequest,
-  token: string,
-): Promise<NextResponse> {
-  const origin = request.nextUrl.origin;
-  const refuse = (reason: BillingLinkFailure) =>
-    NextResponse.redirect(new URL(`/sso?refus=${reason}`, origin));
+export async function arriveByBillingLink(token: string): Promise<NextResponse> {
+  const refuse = (reason: BillingLinkFailure) => redirectWithin(`/sso?refus=${reason}`);
 
   let response: Response;
   try {
@@ -51,5 +46,5 @@ export async function arriveByBillingLink(
   if (response.status === 403) return refuse("suspended");
   if (!response.ok) return refuse("failed");
 
-  return concludeSignIn(origin, response);
+  return concludeSignIn(response);
 }

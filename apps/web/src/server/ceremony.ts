@@ -19,6 +19,22 @@ import {
 } from "@/server/api/sso";
 
 /**
+ * Redirige vers un chemin du panel, sur le domaine où le navigateur se trouve.
+ *
+ * **Une adresse relative, jamais bâtie sur `request.nextUrl.origin`.** Next
+ * construit cette origine sur son adresse d'écoute, pas sur l'hôte demandé :
+ * derrière nginx, `https://localhost:3210`. Le navigateur repartait vers sa
+ * propre machine, et le cookie de session, posé pour le domaine du panel, ne
+ * le suivait pas. Relative, la redirection reste là où le client est arrivé —
+ * domaine de la plateforme ou d'un revendeur — sans avoir à le connaître.
+ *
+ * 307, comme `NextResponse.redirect` : la méthode de la requête est gardée.
+ */
+export function redirectWithin(path: string): NextResponse {
+  return new NextResponse(null, { status: 307, headers: { location: path } });
+}
+
+/**
  * Départ d'une cérémonie OAuth : l'annuaire (`/auth/sso/start`) ou Google
  * (`/auth/google/start`).
  *
@@ -71,7 +87,6 @@ export async function finishCeremony(
   ceremony: Ceremony,
   request: NextRequest,
 ): Promise<NextResponse> {
-  const origin = request.nextUrl.origin;
   /*
    * Toute sortie en échec efface la cérémonie, comme le succès.
    *
@@ -83,7 +98,7 @@ export async function finishCeremony(
    * connexion, qui en ouvre une neuve.
    */
   const fail = (reason: string) => {
-    const refus = NextResponse.redirect(new URL(`/login?sso=${reason}`, origin));
+    const refus = redirectWithin(`/login?sso=${reason}`);
     refus.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
     return refus;
   };
@@ -120,7 +135,7 @@ export async function finishCeremony(
     return fail(refus?.noAccount ? "noAccount" : "refused");
   }
 
-  const conclusion = await concludeSignIn(origin, response);
+  const conclusion = await concludeSignIn(response);
   // La cérémonie est terminée : le vérificateur n'a plus rien à protéger et
   // ne doit pas resservir.
   conclusion.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
@@ -136,9 +151,10 @@ export async function finishCeremony(
  * faisait, et chaque arrivée sans second facteur finissait en erreur 500 —
  * jeton consommé et session ouverte côté API, jamais remise au navigateur.
  *
- * `response` est la réponse, réussie, de l'API.
+ * `response` est la réponse, réussie, de l'API. Les redirections restent sur
+ * le domaine d'arrivée : voir `redirectWithin`.
  */
-export async function concludeSignIn(origin: string, response: Response): Promise<NextResponse> {
+export async function concludeSignIn(response: Response): Promise<NextResponse> {
   const body = (await response.json().catch(() => ({}))) as {
     twoFactorRequired?: boolean;
     challenge?: string;
@@ -159,14 +175,14 @@ export async function concludeSignIn(origin: string, response: Response): Promis
    * proposerait une clé d'accès à qui n'en a pas.
    */
   if (body.twoFactorRequired && body.challenge) {
-    const destination = new URL("/login", origin);
+    const preuves = new URLSearchParams();
     // Le défi voyage en cookie, pas dans l'URL : une adresse se retrouve dans
     // l'historique, les journaux du proxy et le Referer, un cookie non.
-    if (body.methods?.totp) destination.searchParams.set("totp", "1");
-    if (body.methods?.passkeys) destination.searchParams.set("passkeys", "1");
-    destination.searchParams.set("recovery", String(body.remainingRecoveryCodes ?? 0));
+    if (body.methods?.totp) preuves.set("totp", "1");
+    if (body.methods?.passkeys) preuves.set("passkeys", "1");
+    preuves.set("recovery", String(body.remainingRecoveryCodes ?? 0));
 
-    const redirect = NextResponse.redirect(destination);
+    const redirect = redirectWithin(`/login?${preuves}`);
     redirect.cookies.set(SSO_CHALLENGE_COOKIE, body.challenge, {
       path: "/login",
       httpOnly: true,
@@ -178,7 +194,7 @@ export async function concludeSignIn(origin: string, response: Response): Promis
     return redirect;
   }
 
-  const redirect = NextResponse.redirect(new URL("/", origin));
+  const redirect = redirectWithin("/");
   const setCookie = response.headers.get("set-cookie");
   const token = setCookie?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
   if (token) {

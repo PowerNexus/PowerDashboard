@@ -104,6 +104,31 @@ describe("lien de la facturation", () => {
     expect(destination(await arrivee())).toBe("/sso?refus=suspended");
   });
 
+  it("reste sur le domaine où le client est arrivé", async () => {
+    /*
+     * Next bâtit l'URL de la requête sur son adresse d'écoute, pas sur l'hôte
+     * demandé : derrière nginx, `https://localhost:3210`. Une redirection
+     * bâtie dessus envoyait le client sur sa propre machine, sans le cookie
+     * posé pour le domaine du panel — celui de la plateforme, ou d'un
+     * revendeur. Le parcours e2e (`e2e/facturation.spec.ts`) le voit aussi.
+     */
+    api(
+      Response.json(
+        { user: { locale: "fr" } },
+        { headers: { "set-cookie": `${SESSION_COOKIE}=jeton-de-session; Path=/; HttpOnly` } },
+      ),
+    );
+
+    const reponse = await GET(
+      new NextRequest("https://localhost:3210/sso/jeton-de-la-facturation", {
+        headers: { host: "panel.revendeur.test" },
+      }),
+      { params: Promise.resolve({ token: "jeton-de-la-facturation" }) },
+    );
+
+    expect(reponse.headers.get("location")).toBe("/");
+  });
+
   it("n'échoue pas en page d'erreur quand l'API ne répond pas", async () => {
     vi.stubGlobal(
       "fetch",
