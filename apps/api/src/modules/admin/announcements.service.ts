@@ -32,6 +32,9 @@ export interface Announcement {
 
 const LEVELS = new Set(["info", "warning", "critical"]);
 
+/** Longueur maximale du texte d'une annonce. */
+export const ANNOUNCEMENT_BODY_MAX = 20_000;
+
 /** Rôles auxquels une annonce peut s'adresser. */
 const ROLES = new Set(["user", "reseller", "support", "admin"]);
 
@@ -99,6 +102,14 @@ export class AnnouncementsService {
 
     if (title === "") throw new BadRequestException("Donnez un titre à l'annonce.");
     if (bodyMd === "") throw new BadRequestException("Une annonce sans texte n'annonce rien.");
+    // Bornée (rapport ASVS, NC-23) : la colonne est un `text`, et le texte
+    // part dans la coquille de **chaque page** tant que l'annonce est active.
+    // Sans borne, c'était le mégaoctet que Fastify laisse passer.
+    if (bodyMd.length > ANNOUNCEMENT_BODY_MAX) {
+      throw new BadRequestException(
+        `Le texte d'une annonce tient en ${ANNOUNCEMENT_BODY_MAX} caractères : renvoyez vers une page pour le reste.`,
+      );
+    }
 
     const level = input.level ?? "info";
     if (!LEVELS.has(level)) throw new BadRequestException("Niveau inconnu.");

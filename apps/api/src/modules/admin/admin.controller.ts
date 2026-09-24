@@ -2,8 +2,12 @@ import { Readable } from "node:stream";
 import {
   AuditExportQuery,
   AuditFilters,
+  LocationInput,
+  NodeCreateInput,
   SETTING_BY_KEY,
   ServerLimitsPatch,
+  ServerRuntimeInput,
+  UserRoleChange,
 } from "@gamedashboard/contracts";
 import {
   BadRequestException,
@@ -37,6 +41,7 @@ import { WingsUnavailableError } from "../wings/wings-client.service";
 import { AdminGuard } from "./admin.guard";
 import { AdminService } from "./admin.service";
 import { AdminActionsService } from "./admin-actions.service";
+import { parseBody } from "./admin-input";
 import { AdminServerService } from "./admin-server.service";
 import { AdminWriteGuard } from "./admin-write.guard";
 import { AnnouncementsService } from "./announcements.service";
@@ -774,8 +779,7 @@ export class AdminController {
     @Param("userId") userId: string,
     @Body() body: unknown,
   ) {
-    const role = (body as { role?: unknown })?.role;
-    if (typeof role !== "string") throw new BadRequestException("Rôle manquant.");
+    const { role } = parseBody(UserRoleChange, body);
     const { previous, email } = await this.actions.setUserRole(request.user.id, userId, role);
     await this.trace(request, "admin.user_role_changed", {
       userId,
@@ -962,16 +966,7 @@ export class AdminController {
     @Param("serverId") serverId: string,
     @Body() body: unknown,
   ) {
-    const payload = (body ?? {}) as {
-      dockerImage?: unknown;
-      startup?: unknown;
-      oomKiller?: unknown;
-    };
-    const runtime = {
-      dockerImage: typeof payload.dockerImage === "string" ? payload.dockerImage : undefined,
-      startup: typeof payload.startup === "string" ? payload.startup : undefined,
-      oomKiller: typeof payload.oomKiller === "boolean" ? payload.oomKiller : undefined,
-    };
+    const runtime = parseBody(ServerRuntimeInput, body);
     await this.adminServers.setRuntime(serverId, runtime);
     // La commande et l'image en entier : ce sont les deux leviers qui font
     // exécuter autre chose au conteneur, et ce qu'on relit après un incident.
@@ -1256,10 +1251,7 @@ export class AdminController {
   @Post("locations")
   @UseGuards(AdminWriteGuard)
   async createLocation(@Req() request: AdminRequest, @Body() body: unknown) {
-    const payload = (body ?? {}) as Record<string, unknown>;
-    const text = (key: string): string =>
-      typeof payload[key] === "string" ? (payload[key] as string) : "";
-    const input = { short: text("short"), long: text("long"), countryCode: text("countryCode") };
+    const input = parseBody(LocationInput, body);
     const created = await this.infrastructure.createLocation(input);
     await this.trace(request, "admin.location_created", { locationId: created.id, ...input });
     return { data: created };
@@ -1284,28 +1276,9 @@ export class AdminController {
   @Post("nodes")
   @UseGuards(AdminWriteGuard)
   async createNode(@Req() request: AdminRequest, @Body() body: unknown) {
-    const payload = (body ?? {}) as Record<string, unknown>;
-    const text = (key: string): string =>
-      typeof payload[key] === "string" ? (payload[key] as string) : "";
-    const num = (key: string, fallback: number): number =>
-      typeof payload[key] === "number" ? (payload[key] as number) : fallback;
-
-    const input = {
-      name: text("name"),
-      locationId: text("locationId"),
-      // Chaîne vide vaut « non classé » : c'est un choix possible, pas un
-      // champ oublié.
-      category: text("category") || null,
-      subcategory: text("subcategory") || null,
-      fqdn: text("fqdn"),
-      scheme: text("scheme") || "https",
-      daemonPort: num("daemonPort", 8080),
-      daemonSftpPort: num("daemonSftpPort", 2022),
-      memoryMb: num("memoryMb", 0),
-      diskMb: num("diskMb", 0),
-      cpuCores: num("cpuCores", 0),
-      isPublic: payload.isPublic !== false,
-    };
+    // Le schéma du contrat, et non une lecture champ par champ : un champ du
+    // mauvais type est refusé en le nommant, plutôt que remplacé par un défaut.
+    const input = parseBody(NodeCreateInput, body);
     const created = await this.infrastructure.createNode(input);
 
     // L'identifiant du jeton, jamais le jeton : il est rendu une fois, ici,

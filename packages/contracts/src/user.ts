@@ -43,6 +43,16 @@ export const AdminUserPatch = z.object({
 export type AdminUserPatch = z.infer<typeof AdminUserPatch>;
 
 /**
+ * Changement de rôle depuis l'administration.
+ *
+ * Un schéma plutôt qu'un `typeof role === "string"` (rapport ASVS, NC-23) :
+ * la liste des rôles est celle du contrat, et un rôle inconnu est refusé
+ * avec les valeurs admises avant d'atteindre le service.
+ */
+export const UserRoleChange = z.object({ role: UserRole });
+export type UserRoleChange = z.infer<typeof UserRoleChange>;
+
+/**
  * Suspension d'un compte, ou sa levée.
  *
  * Le motif est exigé à la suspension : c'est la première chose que le support

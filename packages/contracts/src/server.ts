@@ -187,6 +187,20 @@ export const ServerLimitsPatch = z
 
 export type ServerLimitsPatch = z.infer<typeof ServerLimitsPatch>;
 
+/**
+ * Image de conteneur et commande de démarrage, réglées par l'administration.
+ *
+ * Bornées (rapport ASVS, NC-23) : l'image par sa colonne (255), qu'un texte
+ * plus long faisait tomber en erreur 500 ; la commande comme dans l'éditeur
+ * d'eggs (`EggDraft.startup`), où elle naît. Absent vaut « ne touche pas ».
+ */
+export const ServerRuntimeInput = z.object({
+  dockerImage: z.string().max(255).optional(),
+  startup: z.string().max(10_000).optional(),
+  oomKiller: z.boolean().optional(),
+});
+export type ServerRuntimeInput = z.infer<typeof ServerRuntimeInput>;
+
 export const ServerFeatureLimits = z.object({
   backups: z.number().int().nonnegative(),
   databases: z.number().int().nonnegative(),

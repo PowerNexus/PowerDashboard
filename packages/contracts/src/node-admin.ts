@@ -48,6 +48,51 @@ export const NodeBindingInput = z.object({
 });
 export type NodeBindingInput = z.infer<typeof NodeBindingInput>;
 
+/** Classement libre : vide vaut « non classé », un choix possible et non un champ oublié. */
+const OptionalLabel = z
+  .string()
+  .trim()
+  .max(60)
+  .nullish()
+  .transform((value) => value || null);
+
+/**
+ * Déclaration d'une machine : réglages et liaison, d'un seul corps.
+ *
+ * La route lisait ce corps champ par champ, par `typeof`, et retombait sur un
+ * défaut pour tout ce qui n'avait pas le bon type ; un nom de plus de cent
+ * caractères traversait jusqu'à la colonne, qui le refusait en erreur 500
+ * (rapport ASVS, NC-23). Les bornes sont celles des colonnes et de
+ * `NodeSettingsInput` ; les défauts, ceux que la route appliquait.
+ */
+export const NodeCreateInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  locationId: z.string().uuid(),
+  category: OptionalLabel,
+  subcategory: OptionalLabel,
+  fqdn: z.string().trim().toLowerCase().min(1).max(255),
+  scheme: z.enum(["http", "https"]).default("https"),
+  daemonPort: Port.default(8080),
+  daemonSftpPort: Port.default(2022),
+  memoryMb: z.number().int().positive(),
+  diskMb: z.number().int().positive(),
+  cpuCores: z.number().positive().max(1024),
+  isPublic: z.boolean().default(true),
+});
+export type NodeCreateInput = z.infer<typeof NodeCreateInput>;
+
+/**
+ * Une localisation, bornée comme ses colonnes. La forme du code pays (deux
+ * lettres ISO) et l'unicité du code court restent tranchées par le service,
+ * qui sait dire laquelle est déjà prise.
+ */
+export const LocationInput = z.object({
+  short: z.string().trim().min(1).max(20),
+  long: z.string().trim().min(1).max(120),
+  countryCode: z.string().trim().length(2),
+});
+export type LocationInput = z.infer<typeof LocationInput>;
+
 /** Les champs de liaison, dans l'ordre où l'écran les présente. */
 export const NODE_BINDING_FIELDS = ["fqdn", "scheme", "daemonPort", "daemonSftpPort"] as const;
 export type NodeBindingField = (typeof NODE_BINDING_FIELDS)[number];

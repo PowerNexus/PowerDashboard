@@ -157,7 +157,14 @@ describe("lignes du journal d'administration", () => {
       nameFirst: "A",
       nameLast: "B",
     });
-    await instance.createNode(request as never, { name: "N1", fqdn: "n1.test", locationId: "l" });
+    await instance.createNode(request as never, {
+      name: "N1",
+      fqdn: "n1.test",
+      locationId: "7b0c8f7e-3f1a-4c7e-9a51-2f7d6d1c0b11",
+      memoryMb: 8192,
+      diskMb: 102_400,
+      cpuCores: 4,
+    });
 
     const [compte, node] = trace();
     expect(compte).toMatchObject({
