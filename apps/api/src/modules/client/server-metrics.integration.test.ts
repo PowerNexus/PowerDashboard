@@ -10,10 +10,14 @@ import {
   NO_DATABASE_REASON,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import type { DenialLogService } from "../activity/denial-log.service";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { ServerAccessService } from "./server-access.service";
 import { ServerMetricsController } from "./server-metrics.controller";
 import { ServerMetricsService } from "./server-metrics.service";
+
+/** Le journal des refus, muet : ces tests portent sur les mesures. */
+const silence = { record: async () => {} } as unknown as DenialLogService;
 
 /**
  * L'historique des mesures, contre une vraie base.
@@ -42,7 +46,7 @@ describe.skipIf(!HAS_DATABASE)("historique des mesures d'un serveur (intégratio
     throwaway = await createThrowawayDatabase();
     db = throwaway.db;
     service = new ServerMetricsService(db);
-    controller = new ServerMetricsController(new ServerAccessService(db), service);
+    controller = new ServerMetricsController(new ServerAccessService(db, silence), service);
   }, 60_000);
 
   afterAll(async () => {

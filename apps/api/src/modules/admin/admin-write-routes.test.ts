@@ -2,6 +2,7 @@ import "reflect-metadata";
 import type { ExecutionContext } from "@nestjs/common";
 import { GUARDS_METADATA } from "@nestjs/common/constants";
 import { describe, expect, it } from "vitest";
+import type { DenialLogService } from "../activity/denial-log.service";
 import { AdminController } from "./admin.controller";
 import { AdminGuard } from "./admin.guard";
 import { AdminWriteGuard } from "./admin-write.guard";
@@ -20,6 +21,9 @@ function guardsOf(method: (typeof RESERVED)[number]): unknown[] {
   return Reflect.getMetadata(GUARDS_METADATA, AdminController.prototype[method]) ?? [];
 }
 
+/** Le journal des refus, muet : le sujet est ici le rôle, pas la trace. */
+const silence = { record: async () => {} } as unknown as DenialLogService;
+
 function context(request: unknown): ExecutionContext {
   return { switchToHttp: () => ({ getRequest: () => request }) } as unknown as ExecutionContext;
 }
@@ -37,7 +41,7 @@ describe("routes d'administration réservées", () => {
     // Le support lit le journal pour répondre à un client ; l'emporter entier
     // hors du panel est un autre geste.
     const support = { user: { id: "x", role: "support" }, scopes: null };
-    expect(new AdminGuard().canActivate(context(support))).toBe(true);
+    expect(new AdminGuard(silence).canActivate(context(support))).toBe(true);
     expect(() => new AdminWriteGuard().canActivate(context(support))).toThrow(
       "rôle administrateur",
     );

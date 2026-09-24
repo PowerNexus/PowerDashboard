@@ -21,6 +21,8 @@ import {
 } from "@nestjs/common";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import type { RequestOrigin } from "../../common/request-origin";
+import { DenialLogService } from "../activity/denial-log.service";
 
 /**
  * Qui demande, et sous quelle restriction.
@@ -47,7 +49,15 @@ export interface AccessPrincipal {
   id: string;
   /** `null` = session de navigateur, sans restriction. Voir `AuthenticatedRequest`. */
   scopes: string[] | null;
+  /**
+   * Route et adresse de la demande, pour le journal des refus seulement.
+   * Absente, le refus est consigné quand même, sans elles.
+   */
+  origin?: RequestOrigin;
 }
+
+/** Origine d'une demande dont l'appelant n'a rien dit. */
+const UNKNOWN_ORIGIN: RequestOrigin = { ip: null, route: "?" };
 
 /**
  * Droits d'un utilisateur sur un serveur.
@@ -58,7 +68,10 @@ export interface AccessPrincipal {
  */
 @Injectable()
 export class ServerAccessService {
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    @Inject(DenialLogService) private readonly denials: DenialLogService,
+  ) {}
 
   /**
    * Vérifie l'accès et la permission demandée.
@@ -70,8 +83,35 @@ export class ServerAccessService {
    * Lève `ForbiddenException` quand il a accès mais pas *cette* permission :
    * la distinction est alors légitime, puisqu'il sait déjà que le serveur
    * existe et qu'il y a accès.
+   *
+   * **Chaque refus est consigné** (NC-12) : un compte qui essayait les
+   * identifiants de serveur un à un, ou un sous-utilisateur qui forçait une
+   * action retirée, ne laissait rien. La réponse, elle, ne change pas — un
+   * 404 d'inconnu reste un 404 — et la trace part sans être attendue.
    */
   async require(
+    principal: AccessPrincipal,
+    serverId: string,
+    permission: ServerPermission,
+  ): Promise<{ isOwner: boolean }> {
+    try {
+      return await this.decide(principal, serverId, permission);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        void this.denials.record({
+          event: "access.denied",
+          actorId: principal.id,
+          actorType: principal.scopes === null ? "user" : "api_key",
+          origin: principal.origin ?? UNKNOWN_ORIGIN,
+          properties: { server: serverId, permission, status: error.getStatus() },
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** La décision elle-même : voir `require`. */
+  private async decide(
     principal: AccessPrincipal,
     serverId: string,
     permission: ServerPermission,

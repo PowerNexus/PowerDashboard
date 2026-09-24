@@ -1,3 +1,4 @@
+import { apiKeyPrefix } from "@gamedashboard/auth";
 import { type ApplicationScope, hasApplicationScope } from "@gamedashboard/contracts";
 import {
   type CanActivate,
@@ -9,7 +10,17 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
+import { type RequestOrigin, requestOrigin } from "../../common/request-origin";
+import { DenialLogService } from "../activity/denial-log.service";
 import { ApplicationKeyRepository, type ApplicationPrincipal } from "./application-key.repository";
+
+/**
+ * Forme d'un préfixe de clé émis par le panel (`generateApiKey`).
+ *
+ * Seul un préfixe de cette forme est consigné : une clé mal collée pourrait
+ * sinon faire entrer un morceau de secret dans le journal.
+ */
+const KEY_PREFIX_SHAPE = /^gd_[a-z]+_[0-9a-f]{12}$/;
 
 /** Requête de l'API applicative, une fois la clé reconnue. */
 export interface ApplicationRequest {
@@ -60,12 +71,16 @@ export class ApplicationGuard implements CanActivate {
   constructor(
     @Inject(ApplicationKeyRepository) private readonly keys: ApplicationKeyRepository,
     @Inject(Reflector) private readonly reflector: Reflector,
+    @Inject(DenialLogService) private readonly denials: DenialLogService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
       headers?: Record<string, string | string[] | undefined>;
       ip?: string;
+      method?: string;
+      url?: string;
+      routeOptions?: { url?: string };
       application?: ApplicationPrincipal;
     }>();
 
@@ -73,12 +88,31 @@ export class ApplicationGuard implements CanActivate {
     // 401 explicite plutôt qu'un `false` : un système tiers doit pouvoir
     // distinguer « ma clé est refusée » de « cette route n'existe pas », sans
     // quoi la mise en service se fait à l'aveugle.
+    // Pas de trace ici : rien n'a été présenté, c'est le bruit d'Internet que
+    // le journal d'accès de nginx tient déjà.
     if (!bearer) throw new UnauthorizedException("Clé applicative manquante.");
 
     const principal = await this.keys.resolve(bearer, request.ip);
-    if (!principal) throw new UnauthorizedException("Clé applicative refusée.");
+    if (!principal) {
+      /*
+       * Consigné (NC-12) : une clé révoquée que la boutique présente encore,
+       * ou une clé essayée au hasard, ne laissait aucune trace. Le préfixe
+       * désigne la clé dans l'écran des clés ; le secret, lui, n'est jamais
+       * écrit. Sans attendre : le refus coûte le même temps qu'avant.
+       */
+      const prefix = apiKeyPrefix(bearer);
+      void this.denials.record({
+        event: "application.key_rejected",
+        actorId: null,
+        actorType: "system",
+        origin: requestOrigin(request),
+        properties: { prefix: prefix && KEY_PREFIX_SHAPE.test(prefix) ? prefix : null },
+      });
+      throw new UnauthorizedException("Clé applicative refusée.");
+    }
 
     request.application = principal;
+    const origin = requestOrigin(request);
 
     /*
      * Le périmètre avant les portées.
@@ -95,6 +129,7 @@ export class ApplicationGuard implements CanActivate {
       context.getClass(),
     ]);
     if (platformOnly !== undefined && principal.resellerId !== null) {
+      this.denied(principal, origin, { platformOnly: true });
       throw new ForbiddenException(
         `Cette clé est bornée à un revendeur : ${platformOnly} relève de la plateforme.`,
       );
@@ -117,17 +152,39 @@ export class ApplicationGuard implements CanActivate {
       context.getClass(),
     ]);
     if (required === undefined) {
+      this.denied(principal, origin, { undeclared: true });
       throw new ForbiddenException("Cette route ne déclare aucune portée.");
     }
 
     const missing = required.filter((scope) => !hasApplicationScope(principal.scopes, scope));
     if (missing.length > 0) {
+      this.denied(principal, origin, { missing });
       // La portée manquante est nommée : l'appelant ne peut pas la deviner, et
       // la connaître ne lui apprend rien qu'il ne puisse lire dans la doc.
       throw new ForbiddenException(`Portée manquante : ${missing.join(", ")}.`);
     }
 
     return true;
+  }
+
+  /**
+   * Une clé valide qui demande hors de son périmètre : refus d'accès,
+   * consigné au nom de la clé comme ses autres gestes
+   * (`application:<nom>`, sans compte).
+   */
+  private denied(
+    principal: ApplicationPrincipal,
+    origin: RequestOrigin,
+    properties: Record<string, unknown>,
+  ): void {
+    void this.denials.record({
+      event: "access.denied",
+      actorId: null,
+      actorType: "api_key",
+      actorLabel: `application:${principal.name}`,
+      origin,
+      properties: { key: principal.keyId, ...properties },
+    });
   }
 }
 

@@ -73,6 +73,18 @@ Administration › Journal, filtré sur le compte, le serveur ou l'adresse IP, �
 partir de l'heure notée. L'export (CSV ou JSON) est réservé aux
 administrateurs, et **l'export lui-même est consigné**.
 
+Les **refus** y figurent aussi : `access.denied` (serveur, permission ou
+espace d'administration refusés à un compte ou à une clé),
+`application.key_rejected` (clé applicative présentée et refusée, par son
+préfixe) et `node.token_rejected` (jeton de daemon refusé, par son
+identifiant). Ils ne sont rattachés à aucun serveur — le serveur visé est
+dans le détail de la ligne : les chercher par événement (préfixe
+`access.`, `application.key`, `node.token`) ou par adresse, pas par
+serveur. Un refus répété ne s'écrit qu'à sa 1ʳᵉ, 10ᵉ, 100ᵉ… occurrence en
+dix minutes, avec le compte (`occurrences`), et trois cents lignes de refus
+au plus par tranche de dix minutes : au-delà, seul le journal de l'API le
+dit.
+
 Questions à trancher :
 
 - **Par où** : mot de passe deviné, session volée, clé d'API, SFTP,

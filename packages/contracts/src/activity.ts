@@ -185,6 +185,18 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   "account.impersonation_ended": { category: "account", label: "Fin de la prise en main" },
 
   /**
+   * Refus consignés (NC-12), au journal de la plateforme seulement.
+   *
+   * Les gardes refusaient en silence : un jeton de node volé essayé
+   * d'ailleurs, un compte qui parcourt les identifiants de serveur, une clé
+   * révoquée encore présentée — rien ne s'en voyait. Un refus répété ne
+   * s'écrit qu'à sa 1ʳᵉ, 10ᵉ, 100ᵉ… occurrence (`occurrences`).
+   */
+  "access.denied": { category: "access", label: "Accès refusé" },
+  "application.key_rejected": { category: "access", label: "Clé applicative refusée" },
+  "node.token_rejected": { category: "access", label: "Jeton de node refusé" },
+
+  /**
    * Gestes d'administration de la plateforme.
    *
    * Classés en `access` quand ils créent ou retirent un moyen d'entrer, en

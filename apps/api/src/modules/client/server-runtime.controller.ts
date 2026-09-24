@@ -19,6 +19,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from "@nestjs/common";
+import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
 import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
@@ -39,7 +40,8 @@ type ClientRequest = AuthenticatedRequest & { ip?: string };
  * droits de son propriétaire.
  */
 function principalOf(request: ClientRequest) {
-  return { id: request.user.id, scopes: request.scopes };
+  // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
+  return { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) };
 }
 
 /**

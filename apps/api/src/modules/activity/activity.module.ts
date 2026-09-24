@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { databaseProvider } from "../../common/database.provider";
 import { ActivityService } from "./activity.service";
+import { DenialLogService } from "./denial-log.service";
 
 /**
  * Le journal d'audit.
@@ -10,7 +11,9 @@ import { ActivityService } from "./activity.service";
  * dans le même journal. Deux implémentations donneraient deux histoires.
  */
 @Module({
-  providers: [databaseProvider, ActivityService],
-  exports: [ActivityService],
+  // `DenialLogService` vit ici, et une seule fois : ses regroupements sont en
+  // mémoire, et une instance par module compterait chacune de son côté.
+  providers: [databaseProvider, ActivityService, DenialLogService],
+  exports: [ActivityService, DenialLogService],
 })
 export class ActivityModule {}

@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { databaseProvider } from "../../common/database.provider";
+import { ActivityModule } from "../activity/activity.module";
 import { AdminModule } from "../admin/admin.module";
 import { SshKeyRepository } from "../auth/ssh-key.repository";
 import { NotificationsModule } from "../notifications/notifications.module";
@@ -25,7 +26,9 @@ import { SftpAuthService } from "./sftp-auth.service";
 @Module({
   // `StorageModule` pour le dépôt distant des sauvegardes : le daemon ne peut
   // ni ouvrir ni clore un dépôt fractionné, faute de nos identifiants.
-  imports: [NotificationsModule, WebhooksModule, AdminModule, StorageModule],
+  // `ActivityModule` pour le journal des refus : un jeton de node refusé s'y
+  // consigne.
+  imports: [NotificationsModule, WebhooksModule, AdminModule, StorageModule, ActivityModule],
   controllers: [RemoteController],
   providers: [
     databaseProvider,
