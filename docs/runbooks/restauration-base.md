@@ -10,10 +10,29 @@ correspond plus à la base.
 
 La sauvegarde se prend avec `gamedashboard backup` (voir
 [installation, § 8](../installation.md)). Un fichier
-`/opt/gamedashboard/backups/gamedashboard-<date>.tar` contient `base.dump`,
+`/opt/gamedashboard/backups/gamedashboard-<date>.tar.enc` contient `base.dump`,
 `env/` (dont `APP_SECRET_KEY`) et `RELEASE`, la version qui tournait. **Une base
 sans son `env/` ne se restaure pas** : tous les secrets chiffrés seraient
 illisibles ([clé maître](./cle-maitre-secrets.md#3-la-clé-est-perdue)).
+
+L'archive est **chiffrée** (AES-256, `openssl enc`) avec la clé des
+sauvegardes, `/opt/gamedashboard/backup.key` : tirée à la première
+sauvegarde, jamais remplacée, lisible par root seul, et **hors** de
+l'archive. Elle se garde hors de la machine, une fois pour toutes, et à part
+des sauvegardes (gestionnaire de secrets) : une sauvegarde volée ne livre
+alors rien, mais **sans cette clé, aucune sauvegarde ne se relit** — la
+machine perdue, c'est la copie gardée ailleurs qui sert. Les archives `.tar`
+d'avant le chiffrement sont en clair ; elles partent avec la rotation.
+
+Toutes les commandes ci-dessous lisent l'archive par ce déchiffrement :
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -pass file:/opt/gamedashboard/backup.key -in <fichier>
+```
+
+Ces réglages sont ceux de `CHIFFRE` dans `infra/prod/app.sh`, vérifiés
+contre cette page par `infra-prod.test.ts`. `bad decrypt` veut dire : pas la
+bonne clé, ou fichier abîmé.
 
 ## Avant de restaurer
 
@@ -21,8 +40,12 @@ illisibles ([clé maître](./cle-maitre-secrets.md#3-la-clé-est-perdue)).
    `sudo gamedashboard backup`. C'est la seule façon de revenir sur une
    restauration faite avec le mauvais fichier, et la seule preuve s'il s'agit
    d'un incident ([incident de sécurité](./incident-securite.md)).
-2. **Choisir le fichier** : le plus récent d'avant le problème.
-   `tar -xOf <fichier> RELEASE` donne la version qui l'a produit.
+2. **Choisir le fichier** : le plus récent d'avant le problème. La version
+   qui l'a produit :
+   ```bash
+   sudo openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -pass file:/opt/gamedashboard/backup.key \
+     -in <fichier> | tar -xO ./RELEASE
+   ```
 3. **Noter ce qui va se perdre**, pour le refaire ou le signaler :
    - le journal d'activité entre la sauvegarde et maintenant
      (Administration › Journal, « Exporter en CSV ») ;
@@ -37,7 +60,9 @@ Données effacées par erreur, base corrompue, sans changement de version :
 
 ```bash
 sudo gamedashboard stop
-sudo mkdir -p /tmp/restauration && sudo tar -xf <fichier> -C /tmp/restauration
+sudo mkdir -p /tmp/restauration
+sudo openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -pass file:/opt/gamedashboard/backup.key \
+  -in <fichier> | sudo tar -x -C /tmp/restauration
 sudo cp -a /tmp/restauration/env/. /opt/gamedashboard/env/
 sudo -u postgres pg_restore --clean --if-exists -d gamedashboard < /tmp/restauration/base.dump
 sudo gamedashboard setup      # réaligne le mot de passe de la base et redémarre
@@ -45,8 +70,9 @@ sudo rm -rf /tmp/restauration
 ```
 
 Le dump passe par l'entrée standard : le dossier extrait n'est lisible que par
-root, et c'est voulu. La table des migrations (schéma `drizzle`) est dans le
-dump : la base revient avec l'état de migration qui allait avec.
+root, et c'est voulu — il contient la clé maître en clair, d'où le `rm -rf`
+final. La table des migrations (schéma `drizzle`) est dans le dump : la base
+revient avec l'état de migration qui allait avec.
 
 ### Après une mise à jour ratée
 
@@ -67,7 +93,15 @@ version ne doit **jamais** tourner sur le schéma de la nouvelle.
 
 Installer le panel sur une machine neuve **avec le même domaine**
 ([installation, étape 4](../installation.md)), dans la version de `RELEASE`
-(`GD_VERSION=<vX.Y.Z>`), puis restaurer comme dans le premier cas. Les daemons appellent le panel par
+(`GD_VERSION=<vX.Y.Z>`). Remettre la clé des sauvegardes, depuis la copie
+gardée hors de la machine, **avant** toute sauvegarde sur la machine neuve
+(sinon la première en tirerait une autre) :
+
+```bash
+sudo install -m 600 -o root -g root backup.key /opt/gamedashboard/backup.key
+```
+
+Puis restaurer comme dans le premier cas. Les daemons appellent le panel par
 son domaine : un autre domaine les laisserait parler dans le vide.
 
 ## Remettre la base d'accord avec les nodes

@@ -141,31 +141,58 @@ export class ServerResizeService {
       diskMb: suivant.diskMb - actuel.diskMb,
     };
 
-    if (croissance.memoryMb > 0 || croissance.diskMb > 0) {
-      await this.assertNodeRoom(requester, row.nodeId, row.resellerId, croissance);
+    const grandit = croissance.memoryMb > 0 || croissance.diskMb > 0;
+    if (grandit) await this.assertNodeRoom(requester, row.nodeId, row.resellerId, croissance);
+
+    await this.db.transaction(async (tx) => {
+      /*
+       * La ligne du serveur d'abord, relue sous verrou : deux redimensionnements
+       * du même serveur partiraient sinon de la même taille « actuelle », et la
+       * croissance comptée par le second serait fausse de celle du premier.
+       * Le plus lent attend, relit, et voit la taille que l'autre a écrite.
+       */
+      const [verrouille] = await tx
+        .select({ memoryMb: servers.memoryMb, diskMb: servers.diskMb })
+        .from(servers)
+        .where(eq(servers.id, serverId))
+        .for("update");
+      if (!verrouille) throw new NotFoundException("Serveur introuvable.");
 
       /*
        * L'enveloppe du revendeur **auquel le serveur se rattache**, et non du
        * demandeur : un agrandissement fait par la plateforme sur la machine
        * d'un revendeur est compté dans sa consommation, il doit donc l'être
        * aussi dans son refus.
+       *
+       * **Dans la transaction qui écrit**, sous le verrou de l'enveloppe
+       * (`assertGrowth`) : contrôlé avant, il laissait N agrandissements
+       * simultanés de serveurs différents lire tous la même consommation, et
+       * passer tous là où un seul tenait.
        */
-      if (row.resellerId) await this.quotas.assertGrowth(row.resellerId, croissance);
-    }
+      if (row.resellerId) {
+        const reelle = {
+          memoryMb: suivant.memoryMb - verrouille.memoryMb,
+          diskMb: suivant.diskMb - verrouille.diskMb,
+        };
+        if (reelle.memoryMb > 0 || reelle.diskMb > 0) {
+          await this.quotas.assertGrowth(row.resellerId, reelle, tx);
+        }
+      }
 
-    await this.db
-      .update(servers)
-      .set({
-        memoryMb: suivant.memoryMb,
-        diskMb: suivant.diskMb,
-        cpuPct: suivant.cpuPct,
-        swapMb: suivant.swapMb,
-        allocationLimit: suivant.allocations,
-        backupLimit: suivant.backups,
-        databaseLimit: suivant.databases,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(servers.id, serverId));
+      await tx
+        .update(servers)
+        .set({
+          memoryMb: suivant.memoryMb,
+          diskMb: suivant.diskMb,
+          cpuPct: suivant.cpuPct,
+          swapMb: suivant.swapMb,
+          allocationLimit: suivant.allocations,
+          backupLimit: suivant.backups,
+          databaseLimit: suivant.databases,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(servers.id, serverId));
+    });
 
     /*
      * Sans attendre l'issue, comme partout ailleurs : un node injoignable ne

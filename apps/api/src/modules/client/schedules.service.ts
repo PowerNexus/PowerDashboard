@@ -141,6 +141,26 @@ export class SchedulesService {
       .where(eq(schedules.id, scheduleId));
   }
 
+  /**
+   * Les étapes d'une tâche **de ce serveur**, dans l'ordre.
+   *
+   * Pour que le contrôleur exige le droit de faire chacune avant de lancer ou
+   * de réactiver la tâche : c'est le jeton du panel qui les exécutera, pas les
+   * droits de qui appuie sur le bouton.
+   */
+  async tasksOf(
+    serverId: string,
+    scheduleId: string,
+  ): Promise<{ action: SupportedAction; payload: string }[]> {
+    await this.mustFind(serverId, scheduleId);
+    const rows = await this.db
+      .select({ action: scheduleTasks.action, payload: scheduleTasks.payload })
+      .from(scheduleTasks)
+      .where(eq(scheduleTasks.scheduleId, scheduleId))
+      .orderBy(asc(scheduleTasks.sequence));
+    return rows.map((row) => ({ action: row.action as SupportedAction, payload: row.payload }));
+  }
+
   /** Avance l'échéance à maintenant : c'est le planificateur qui exécutera. */
   async runNow(serverId: string, scheduleId: string): Promise<void> {
     await this.mustFind(serverId, scheduleId);

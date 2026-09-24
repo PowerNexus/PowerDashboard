@@ -24,6 +24,7 @@ export * from "./components/logo";
 export * from "./components/navigation-progress";
 export * from "./components/notification-center";
 export * from "./components/page-header";
+export * from "./components/password-strength";
 export * from "./components/permission-matrix";
 export * from "./components/power-controls";
 export * from "./components/progress";

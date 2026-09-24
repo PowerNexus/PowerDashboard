@@ -1,4 +1,9 @@
-import { ServerLimitsPatch } from "@gamedashboard/contracts";
+import {
+  ApplicationServerCreate,
+  ApplicationUserCreate,
+  ApplicationUserUpdate,
+  ServerLimitsPatch,
+} from "@gamedashboard/contracts";
 import {
   BadRequestException,
   Body,
@@ -8,6 +13,7 @@ import {
   Get,
   Headers,
   Inject,
+  Logger,
   NotFoundException,
   Param,
   Patch,
@@ -25,7 +31,7 @@ import { BillingSsoService } from "../auth/billing-sso.service";
 import { ServerResizeService } from "../client/server-resize.service";
 import { BrandingService } from "../reseller/branding.service";
 import { ResellerQuotaService } from "../reseller/reseller-quota.service";
-import { WingsUnavailableError } from "../wings/wings-client.service";
+import { DAEMON_UNAVAILABLE_MESSAGE, WingsUnavailableError } from "../wings/wings-client.service";
 import {
   ApplicationGuard,
   type ApplicationRequest,
@@ -36,40 +42,13 @@ import { ApplicationService } from "./application.service";
 import { IdempotencyService } from "./idempotency.service";
 import { ResellerScopeService } from "./reseller-scope.service";
 
-const CreateUser = z.object({
-  email: z.string().min(3),
-  nameFirst: z.string().min(1),
-  nameLast: z.string().min(1),
-  /** Identifiant du client chez l'appelant. C'est par lui qu'il se retrouvera. */
-  externalId: z.string().min(1).optional(),
-});
-
-const UpdateUser = z.object({
-  nameFirst: z.string().min(1).optional(),
-  nameLast: z.string().min(1).optional(),
-  externalId: z.string().min(1).nullable().optional(),
-});
-
-const Resources = z.object({
-  memoryMb: z.number().int(),
-  diskMb: z.number().int(),
-  cpuPct: z.number().int(),
-  swapMb: z.number().int(),
-  allocations: z.number().int(),
-  backups: z.number().int(),
-  databases: z.number().int(),
-});
-
-const CreateServer = z.object({
-  ownerId: z.string().min(1),
-  eggId: z.string().min(1),
-  name: z.string().min(1),
-  variables: z.record(z.string(), z.string()).optional(),
-  planId: z.string().optional(),
-  locationId: z.string().optional(),
-  nodeId: z.string().optional(),
-  resources: Resources.optional(),
-});
+/*
+ * Création et correction de comptes et de serveurs : schémas bornés, partagés
+ * par `@gamedashboard/contracts` (NC-23). Ils vivaient ici sans aucune borne.
+ */
+const CreateUser = ApplicationUserCreate;
+const UpdateUser = ApplicationUserUpdate;
+const CreateServer = ApplicationServerCreate;
 
 const Suspension = z.object({
   suspended: z.boolean(),
@@ -118,6 +97,8 @@ const CertificateResult = z.object({
 @Controller("api/v1/application")
 @UseGuards(ApplicationGuard)
 export class ApplicationController {
+  private readonly logger = new Logger(ApplicationController.name);
+
   constructor(
     @Inject(ApplicationService) private readonly app: ApplicationService,
     @Inject(AdminActionsService) private readonly actions: AdminActionsService,
@@ -552,7 +533,10 @@ export class ApplicationController {
       return await call();
     } catch (error) {
       if (error instanceof WingsUnavailableError) {
-        throw new ServiceUnavailableException(error.message);
+        // Le nom interne du node et la cause brute ne sortent pas du panel,
+        // pas plus vers une boutique que vers un navigateur.
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

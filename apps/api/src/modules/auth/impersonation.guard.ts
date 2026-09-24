@@ -31,8 +31,30 @@ import type { AuthenticatedRequest } from "./session.guard";
  * SFTP durable au nom du client. Seuls `logout` et `impersonation/stop` en
  * sont exempts, puisqu'ils ferment la prise en main. Les routes
  * d'administration sont hors d'atteinte de toute façon : la session porte le
- * rôle du client.
+ * rôle du client, et `AdminGuard` refuse une session empruntée même quand la
+ * cible a été promue en cours de route.
  */
+/**
+ * Les propriétés d'une ligne de journal, **plus l'agent** pendant une prise en
+ * main.
+ *
+ * Le garde laisse passer les `GET`, et certains ont un effet : tirer un lien
+ * de téléchargement de fichier ou de sauvegarde fait sortir des données du
+ * panel. Consignés au nom du client — c'est sa session —, ils lui étaient
+ * imputés : un agent emportait l'archive d'un serveur, et le journal disait
+ * que le client l'avait fait. L'acteur reste le client (c'est son compte qui
+ * agit) ; l'agent est nommé à côté, en clair, pour qu'on le lise sans
+ * recouper les sessions.
+ */
+export function withImpersonator(
+  request: Pick<AuthenticatedRequest, "user">,
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  const agent = request.user.impersonator;
+  if (!agent) return properties;
+  return { ...properties, impersonator: agent.email, impersonatorId: agent.id };
+}
+
 @Injectable()
 export class ImpersonationReadOnlyGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {

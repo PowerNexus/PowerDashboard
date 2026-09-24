@@ -5,6 +5,7 @@ import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { BrandingService } from "../reseller/branding.service";
+import { WingsModule } from "../wings/wings.module";
 import { AccountMailService } from "./account-mail.service";
 import { ApiKeyRepository } from "./api-key.repository";
 import { AuthController } from "./auth.controller";
@@ -13,6 +14,7 @@ import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
 import { PasskeyRepository } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import { SecurityAlertRepository } from "./security-alert.repository";
 import { SecurityAlertService } from "./security-alert.service";
 import { SessionGuard } from "./session.guard";
@@ -26,8 +28,10 @@ import { UserRepository } from "./user.repository";
 
 @Module({
   // Les notifications, pour la cloche des alertes de sécurité. Le module ne
-  // dépend de rien : l'importer ne forme aucun cycle.
-  imports: [ActivityModule, NotificationsModule],
+  // dépend de rien : l'importer ne forme aucun cycle. Wings non plus : la
+  // déconnexion ferme les consoles de la session, et le registre des jetons
+  // émis doit être **le même** que celui qui les a signés.
+  imports: [ActivityModule, NotificationsModule, WingsModule],
   controllers: [AuthController],
   providers: [
     databaseProvider,
@@ -52,6 +56,9 @@ import { UserRepository } from "./user.repository";
     // par le fabricant de sessions et par le contrôleur, jamais attendues.
     SecurityAlertService,
     SecurityAlertRepository,
+    // Le mot de passe redemandé avant un geste sensible, et le verrou qu'il
+    // partage avec la connexion.
+    PasswordConfirmationService,
     // Le lien de connexion remis au plugin de facturation. Ici et non dans le
     // module applicatif : il émet et consomme un jeton d'authentification, et
     // l'y loger aurait formé un cycle, `ApplicationModule` important déjà
@@ -91,6 +98,12 @@ import { UserRepository } from "./user.repository";
     // Sort pour la suspension d'un compte : les liens déjà envoyés meurent
     // avec elle, et la règle vit avec les jetons.
     AuthTokenRepository,
+    // Sort pour l'administration, qui change l'adresse d'un compte : l'avis à
+    // l'ancienne boîte part du même service que les autres alertes.
+    SecurityAlertService,
+    // Sort pour le module client : la création d'une clé d'API redemande le
+    // mot de passe, avec le même verrou que la connexion.
+    PasswordConfirmationService,
     databaseProvider,
   ],
 })

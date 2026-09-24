@@ -126,6 +126,22 @@ const RULES: readonly RetentionRule[] = [
     reason: "un mois de comptes rendus ; les livraisons en attente restent",
   },
   {
+    /*
+     * Réponses mémorisées de l'idempotence (audit ASVS, NC-39).
+     *
+     * Elles portent la réponse complète d'une création — adresse et nom du
+     * compte créé compris — et n'étaient jamais purgées. Leur seul usage est
+     * de rendre la même réponse à une reprise : quelques secondes pour un
+     * délai réseau, quelques heures pour une file ou un clic sur « Create »
+     * dans la facturation. Un mois couvre ces reprises avec une marge large.
+     * Au-delà, une clé rejouée est traitée comme une demande neuve.
+     */
+    table: "idempotency_records",
+    column: "created_at",
+    days: 30,
+    reason: "un mois de reprises possibles ; au-delà, la réponse n'a plus à être rendue",
+  },
+  {
     table: "auth_tokens",
     column: "expires_at",
     days: 30,
@@ -381,8 +397,11 @@ export class RetentionService implements OnModuleInit, OnModuleDestroy {
       const result = (await this.db.transaction(async (tx) => {
         await tx.execute(sql`select set_config('gamedashboard.retention', 'on', true)`);
         return await tx.execute(statement);
-      })) as unknown as { rowCount?: number };
-      const removed = result.rowCount ?? 0;
+      })) as unknown as { count?: number };
+      // `count` et non `rowCount` : c'est le nom que lui donne postgres-js. Lu
+      // sous l'autre nom, chaque tranche valait zéro — l'écran annonçait
+      // « 0 ligne » quoi qu'il arrive, et la boucle s'arrêtait à la première.
+      const removed = result.count ?? 0;
       total += removed;
 
       // Moins qu'une tranche pleine : il ne reste rien à retirer pour cette

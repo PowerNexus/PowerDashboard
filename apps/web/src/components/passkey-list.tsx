@@ -33,9 +33,12 @@ import {
  */
 export function PasskeyList({
   initial,
+  localPassword,
   onRecoveryCodes,
 }: {
   initial: Passkey[];
+  /** Le compte a un mot de passe à redonner avant d'enregistrer une clé. */
+  localPassword: boolean;
   /** Appelé quand l'enregistrement a créé le premier lot de codes de secours. */
   onRecoveryCodes: (codes: string[]) => void;
 }) {
@@ -55,13 +58,14 @@ export function PasskeyList({
    *
    * Le nom est demandé **avant** la cérémonie : après, la boîte de dialogue du
    * navigateur a déjà disparu et on ne se souvient plus de quelle clé on vient
-   * de toucher.
+   * de toucher. Le mot de passe aussi, pour la même raison : c'est le seul
+   * moment où l'écran a encore la main.
    */
   const enroll = async () => {
     setBusy(true);
     setError(null);
     try {
-      const options = await passkeyRegistrationOptions();
+      const options = await passkeyRegistrationOptions(password);
       if (options.error || !options.options) {
         setError(options.error ?? t("passkeyFailed"));
         return;
@@ -78,6 +82,7 @@ export function PasskeyList({
 
       setAdding(false);
       setLabel("");
+      setPassword("");
       if (result.recoveryCodes) onRecoveryCodes(result.recoveryCodes);
       router.refresh();
     } catch {
@@ -87,6 +92,17 @@ export function PasskeyList({
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * Ouvre l'une des deux boîtes, champ du mot de passe vidé : il est partagé
+   * entre l'ajout et le retrait, et celui tapé pour l'un ne doit pas
+   * réapparaître, déjà rempli, dans l'autre.
+   */
+  const open = (show: () => void) => {
+    setPassword("");
+    setError(null);
+    show();
   };
 
   const remove = () =>
@@ -123,7 +139,7 @@ export function PasskeyList({
             <p className="text-xs text-muted">{t("passkeysHint")}</p>
           </div>
         </div>
-        <Button variant="secondary" disabled={busy} onClick={() => setAdding(true)}>
+        <Button variant="secondary" disabled={busy} onClick={() => open(() => setAdding(true))}>
           <Plus /> {t("passkeyAdd")}
         </Button>
       </div>
@@ -159,7 +175,7 @@ export function PasskeyList({
                 variant="danger-ghost"
                 size="sm"
                 disabled={pending}
-                onClick={() => setToRemove(passkey)}
+                onClick={() => open(() => setToRemove(passkey))}
               >
                 <Trash2 /> {tc("delete")}
               </Button>
@@ -177,7 +193,7 @@ export function PasskeyList({
               <Button variant="secondary" onClick={() => setAdding(false)}>
                 {tc("cancel")}
               </Button>
-              <Button loading={busy} onClick={enroll}>
+              <Button loading={busy} disabled={localPassword && password === ""} onClick={enroll}>
                 {t("passkeyContinue")}
               </Button>
             </>
@@ -199,6 +215,19 @@ export function PasskeyList({
                 />
               )}
             </FormField>
+            {localPassword ? (
+              <FormField label={t("confirmPassword")} description={t("confirmPasswordHint")}>
+                {(id) => (
+                  <PasswordInput
+                    id={id}
+                    leadingIcon={<Lock />}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                )}
+              </FormField>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

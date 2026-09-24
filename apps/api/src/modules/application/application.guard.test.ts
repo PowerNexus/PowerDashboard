@@ -1,8 +1,21 @@
 import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Denial, DenialLogService } from "../activity/denial-log.service";
 import { ApplicationGuard } from "./application.guard";
 import type { ApplicationKeyRepository } from "./application-key.repository";
+
+/** Ce que la garde a confié au journal des refus. */
+const refus: Denial[] = [];
+const denials = {
+  record: vi.fn(async (denial: Denial) => {
+    refus.push(denial);
+  }),
+} as unknown as DenialLogService;
+
+beforeEach(() => {
+  refus.length = 0;
+});
 
 /**
  * Une clé d'intégration ordinaire : tout le parc, autant d'usages qu'on veut.
@@ -41,7 +54,7 @@ function guardWith(
   request: Record<string, unknown>,
 ) {
   const { reflector, context } = contextFor(request, required);
-  const guard = new ApplicationGuard({ resolve } as ApplicationKeyRepository, reflector);
+  const guard = new ApplicationGuard({ resolve } as ApplicationKeyRepository, reflector, denials);
   return { guard, context };
 }
 
@@ -128,6 +141,62 @@ describe("ApplicationGuard", () => {
     });
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
+  });
+
+  it("consigne une clé refusée par son préfixe, jamais en entier (NC-12)", async () => {
+    // Une clé révoquée que la boutique présente encore, ou une clé devinée :
+    // le refus était silencieux, et rien ne permettait de le voir.
+    const { guard, context } = guardWith(refuses, ["servers.create"], {
+      headers: { authorization: "Bearer gd_live_ab12cd34ef56_le-secret-de-la-cle" },
+      ip: "203.0.113.10",
+      method: "POST",
+      url: "/api/v1/application/servers",
+      routeOptions: { url: "/api/v1/application/servers" },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(refus).toEqual([
+      expect.objectContaining({
+        event: "application.key_rejected",
+        actorId: null,
+        origin: { ip: "203.0.113.10", route: "POST /api/v1/application/servers" },
+        properties: { prefix: "gd_live_ab12cd34ef56" },
+      }),
+    ]);
+    expect(JSON.stringify(refus)).not.toContain("le-secret-de-la-cle");
+  });
+
+  it("ne consigne pas une requête qui ne présente aucune clé", async () => {
+    // Rien de présenté, rien de refusé : c'est le bruit d'Internet, déjà au
+    // journal d'accès de nginx.
+    const { guard, context } = guardWith(accepts, ["servers.create"], { headers: {} });
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(refus).toEqual([]);
+  });
+
+  it("consigne une portée refusée comme un refus d'accès de la clé", async () => {
+    const { guard, context } = guardWith(accepts, ["servers.delete"], {
+      headers: { authorization: "Bearer gd_app_x_y" },
+    });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refus).toEqual([
+      expect.objectContaining({
+        event: "access.denied",
+        actorType: "api_key",
+        actorLabel: "application:Boutique",
+        properties: { key: "k1", missing: ["servers.delete"] },
+      }),
+    ]);
+  });
+
+  it("ne consigne rien pour une clé acceptée", async () => {
+    const { guard, context } = guardWith(accepts, ["servers.create"], {
+      headers: { authorization: "Bearer gd_app_x_y" },
+    });
+    await guard.canActivate(context);
+    expect(refus).toEqual([]);
   });
 
   it("transmet l'adresse du client au dépôt, pour la liste d'adresses autorisées", async () => {

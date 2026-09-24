@@ -1,7 +1,11 @@
 import {
   ChmodRequest,
+  consoleCommandTrace,
+  MAX_CONSOLE_COMMAND_LENGTH,
+  PATH_REFUSAL_MESSAGES,
   PowerSignal,
   RenameRequest,
+  refusePath,
   WINGS_RENAME_COLLISION,
 } from "@gamedashboard/contracts";
 import {
@@ -12,6 +16,7 @@ import {
   Delete,
   Get,
   Inject,
+  Logger,
   Param,
   Post,
   Query,
@@ -19,12 +24,17 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from "@nestjs/common";
+import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
-import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
+import { ImpersonationReadOnlyGuard, withImpersonator } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { EulaService } from "../marketplace/eula.service";
-import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
+import {
+  DAEMON_UNAVAILABLE_MESSAGE,
+  WingsClientService,
+  WingsUnavailableError,
+} from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
 import { FileUploadService } from "./file-upload.service";
 import { ServerAccessService } from "./server-access.service";
@@ -39,7 +49,24 @@ type ClientRequest = AuthenticatedRequest & { ip?: string };
  * droits de son propriétaire.
  */
 function principalOf(request: ClientRequest) {
-  return { id: request.user.id, scopes: request.scopes };
+  // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
+  return { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) };
+}
+
+/**
+ * Refuse, avant tout relais, un chemin qui remonterait au-dessus du volume ou
+ * porterait un octet nul (`refusePath`). Les `paths` se lisent depuis `base`,
+ * comme le daemon lit les entrées d'un `root`.
+ *
+ * Défense en profondeur : le confinement reste le travail de Wings (§4.3).
+ * Mais le panel relayait tout, et la sûreté de chaque serveur tenait à une
+ * seule ligne de défense, dans un programme qu'il ne contrôle pas.
+ */
+function confine(base: string, ...paths: string[]): void {
+  const refus = [refusePath(base), ...paths.map((path) => refusePath(path, base))].find(
+    (raison) => raison !== null,
+  );
+  if (refus) throw new BadRequestException(PATH_REFUSAL_MESSAGES[refus]);
 }
 
 /**
@@ -51,6 +78,8 @@ function principalOf(request: ClientRequest) {
 @Controller("api/v1/client/servers/:id")
 @UseGuards(SessionGuard, ImpersonationReadOnlyGuard)
 export class ServerRuntimeController {
+  private readonly logger = new Logger(ServerRuntimeController.name);
+
   constructor(
     @Inject(ServerAccessService) private readonly access: ServerAccessService,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
@@ -131,12 +160,18 @@ export class ServerRuntimeController {
     if (typeof command !== "string" || command.trim() === "") {
       throw new BadRequestException("Commande vide.");
     }
+    if (command.length > MAX_CONSOLE_COMMAND_LENGTH) {
+      throw new BadRequestException(
+        `Commande trop longue (${MAX_CONSOLE_COMMAND_LENGTH} caractères au plus).`,
+      );
+    }
     await this.access.require(principalOf(request), id, "console.send");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.sendCommand(id, command));
-    // La commande est consignée telle quelle : sur un serveur de jeu, « op »
-    // ou « ban » sont précisément ce quon veut retrouver dans un journal.
-    await this.log(request, id, "server.command", { command });
+    // Le premier mot seulement, et la longueur du reste : « op » ou « ban »
+    // sont ce qu'on veut retrouver dans un journal, mais c'est dans les
+    // arguments que passent les mots de passe (`consoleCommandTrace`).
+    await this.log(request, id, "server.command", { ...consoleCommandTrace(command) });
     return { data: { sent: true } };
   }
 
@@ -150,6 +185,11 @@ export class ServerRuntimeController {
    * Les permissions effectives sont scellées dans le jeton signé. Le navigateur
    * ne peut donc pas s'en attribuer d'autres : c'est Wings qui vérifie, avec la
    * liste que nous avons signée.
+   *
+   * **Le jeton ne sert qu'à lire** (`toWingsWebsocketPermissions`). Commandes
+   * et signaux passent par `POST command` et `POST power`, qui vérifient que le
+   * serveur peut obéir et consignent le geste ; les sceller ici en faisait une
+   * seconde porte, qui ne vérifiait ni l'un ni l'autre.
    */
   @Post("websocket")
   async websocket(@Req() request: ClientRequest, @Param("id") id: string) {
@@ -159,10 +199,10 @@ export class ServerRuntimeController {
 
     /*
      * Une clé d'API ne scelle jamais plus que ses portées. `require` a borné
-     * cette requête, mais le jeton vit dix minutes et ouvre commandes et
-     * signaux d'alimentation sans repasser par ici : le propriétaire y
-     * recevrait « * » alors que sa clé ne porte que « console.read ». Les
-     * portées s'appliquent donc aussi ici, en intersection pour un invité.
+     * cette requête, mais le jeton vit dix minutes sans repasser par ici : le
+     * propriétaire y recevrait « * », donc le suivi des sauvegardes, alors que
+     * sa clé ne porte que « console.read ». Les portées s'appliquent donc
+     * aussi ici, en intersection pour un invité.
      */
     const permissions =
       principal.scopes === null
@@ -193,7 +233,16 @@ export class ServerRuntimeController {
      */
     const withInstall = isOwner ? [...permissions, "admin.websocket.install"] : permissions;
 
-    return { data: await this.tokens.websocketGrant(id, request.user.id, withInstall) };
+    // La session qui demande est rangée avec le jeton : sa déconnexion fermera
+    // cette console (NC-43). Une clé d'API n'en a pas.
+    return {
+      data: await this.tokens.websocketGrant(
+        id,
+        request.user.id,
+        withInstall,
+        request.sessionToken ?? null,
+      ),
+    };
   }
 
   @Get("files")
@@ -202,11 +251,13 @@ export class ServerRuntimeController {
     @Param("id") id: string,
     @Query("directory") directory?: string,
   ) {
+    const dossier = directory ?? "/";
+    // Wings confine le chemin au volume du serveur, et c'est lui qui fait foi
+    // (§4.3). Le panel refuse seulement ce qui n'a rien à y faire — sortie du
+    // volume, octet nul —, en seconde ligne.
+    confine(dossier);
     await this.access.require(principalOf(request), id, "files.read");
-    // Le chemin part tel quel vers Wings, qui le confine au volume du serveur.
-    // Le valider ici en plus donnerait l'illusion que la protection est de
-    // notre côté, alors qu'elle est chez le daemon — et c'est tant mieux (§4.3).
-    return { data: await this.relay(() => this.wings.listDirectory(id, directory ?? "/")) };
+    return { data: await this.relay(() => this.wings.listDirectory(id, dossier)) };
   }
 
   @Get("files/contents")
@@ -216,6 +267,7 @@ export class ServerRuntimeController {
     @Query("file") file?: string,
   ) {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
+    confine(file);
     await this.access.require(principalOf(request), id, "files.read");
     return { data: { content: await this.relay(() => this.wings.readFile(id, file)) } };
   }
@@ -237,6 +289,7 @@ export class ServerRuntimeController {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
     const content = (body as { content?: unknown })?.content;
     if (typeof content !== "string") throw new BadRequestException("Contenu manquant.");
+    confine(file);
 
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
@@ -255,6 +308,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || typeof name !== "string" || name.trim() === "") {
       throw new BadRequestException("Dossier ou nom manquant.");
     }
+    confine(root, name);
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.createDirectory(id, root, name));
@@ -278,6 +332,7 @@ export class ServerRuntimeController {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? "Renommage incomplet.");
     }
     const { root, from, to } = parsed.data;
+    confine(root, from, to);
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     try {
@@ -316,6 +371,7 @@ export class ServerRuntimeController {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? "Permissions invalides.");
     }
     const { root, files } = parsed.data;
+    confine(root, ...files.map((entry) => entry.file));
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.chmodFiles(id, root, files));
@@ -336,6 +392,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || !Array.isArray(files) || files.length === 0) {
       throw new BadRequestException("Rien à supprimer.");
     }
+    confine(root, ...files.map(String));
     await this.access.require(principalOf(request), id, "files.delete");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.deleteFiles(id, root, files.map(String)));
@@ -361,6 +418,9 @@ export class ServerRuntimeController {
     @Query("file") file?: string,
   ) {
     if (!file) throw new BadRequestException("Chemin de fichier manquant.");
+    // Le chemin est scellé dans le jeton que le daemon honorera : c'est le
+    // dernier moment où le panel peut le refuser.
+    confine(file);
     await this.access.require(principalOf(request), id, "files.read");
     // L'identité vient de la session, jamais de l'URL : le jeton remis au
     // daemon porte le compte au nom duquel le fichier est tiré.
@@ -425,9 +485,11 @@ export class ServerRuntimeController {
       throw new BadRequestException("Nom de fichier manquant.");
     }
     if (typeof payload.size !== "number") throw new BadRequestException("Taille manquante.");
+    const directory = typeof payload.directory === "string" ? payload.directory : "/";
+    confine(directory);
 
     const session = await this.uploads.open(id, request.user.id, {
-      directory: typeof payload.directory === "string" ? payload.directory : "/",
+      directory,
       fileName: payload.fileName,
       size: payload.size,
     });
@@ -528,6 +590,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || !Array.isArray(files) || files.length === 0) {
       throw new BadRequestException("Rien à compresser.");
     }
+    confine(root, ...files.map(String));
     await this.access.require(principalOf(request), id, "files.archive");
     await this.access.requireOperable(id);
     const entry = await this.relay(() => this.wings.compressFiles(id, root, files.map(String)));
@@ -554,6 +617,7 @@ export class ServerRuntimeController {
     if (typeof root !== "string" || typeof file !== "string" || file.trim() === "") {
       throw new BadRequestException("Archive manquante.");
     }
+    confine(root, file);
     await this.access.require(principalOf(request), id, "files.archive");
     await this.access.requireOperable(id);
     await this.relay(() => this.wings.decompressFile(id, root, file));
@@ -589,7 +653,8 @@ export class ServerRuntimeController {
       actorType: request.scopes === null ? "user" : "api_key",
       actorLabel: await this.activity.labelFor(request.user.id),
       ip: request.ip ?? null,
-      properties,
+      // L'agent d'une prise en main est nommé : voir `withImpersonator`.
+      properties: withImpersonator(request, properties),
     });
   }
 
@@ -609,7 +674,10 @@ export class ServerRuntimeController {
          * tel quel, en 400.
          */
         if (error.isRefusal && error.detail) throw new BadRequestException(error.detail);
-        throw new ServiceUnavailableException(error.message);
+        // Nom interne du node et cause brute pour l'exploitant, une phrase pour
+        // le client : voir `DAEMON_UNAVAILABLE_MESSAGE`.
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

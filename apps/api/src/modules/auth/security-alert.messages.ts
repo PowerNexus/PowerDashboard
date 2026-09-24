@@ -110,6 +110,54 @@ export function failureAlertTexts(input: {
   };
 }
 
+/**
+ * Ce qui a changé dans les preuves d'identité d'un compte (ASVS 2.2.3, 2.5.5).
+ *
+ * Les clés du catalogue, telles quelles : un changement qui n'y figurerait pas
+ * ne compilerait pas, plutôt que de partir sans titre.
+ */
+export type CredentialChange = keyof Texts["credentialChange"];
+
+/**
+ * Avis d'un changement d'authentifiant.
+ *
+ * Le changement d'adresse est à part : ce message part vers l'**ancienne**
+ * boîte, et l'on se connecte désormais avec la nouvelle. Un lien vers la page
+ * de sécurité n'y servirait qu'à celui qui a fait le changement ; c'est vers
+ * le support qu'il faut renvoyer le titulaire.
+ */
+export function credentialChangeTexts(input: {
+  locale: string;
+  brand: string;
+  kind: CredentialChange;
+  /** Adresse d'où le geste a été fait ; nulle quand elle n'a pas à sortir. */
+  ip: string | null;
+  when: string;
+  link: string;
+}): AlertTexts {
+  const { t } = texts(input.locale);
+  const change = t.credentialChange[input.kind];
+  const body = t.credentialBody[input.kind];
+
+  const details = [
+    // Sans adresse, la ligne disparaît : écrire « inconnue » laisserait croire
+    // qu'on aurait pu la connaître.
+    ...(input.ip ? [fill(t.detailIp, { ip: input.ip })] : []),
+    fill(t.detailTime, { time: input.when }),
+  ];
+  const advice =
+    input.kind === "emailChanged" ? [t.emailChangedAdvice] : [t.credentialAdvice, input.link];
+
+  return {
+    title: change,
+    summary: body,
+    subject: fill(t.credentialSubject, { change, brand: input.brand }),
+    text: [body, "", ...details, "", ...advice, "", t.credentialReassure, "", t.footer, ""].join(
+      "\n",
+    ),
+  };
+}
+
 export function newDeviceAlertTexts(input: {
   locale: string;
   brand: string;

@@ -1,6 +1,7 @@
 export * from "./ip-allowlist";
 export * from "./password";
 export * from "./policy";
+export * from "./provisional";
 export * from "./recovery";
 export * from "./secrets";
 export * from "./ssh-key";

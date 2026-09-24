@@ -1,8 +1,14 @@
 import { generateApiKey, isAllowlistEntry } from "@gamedashboard/auth";
 import { SERVER_PERMISSIONS, type ServerPermission } from "@gamedashboard/contracts";
-import { apiKeys, type Database } from "@gamedashboard/db";
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { apiKeys, type Database, users } from "@gamedashboard/db";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 export interface ClientApiKey {
@@ -13,16 +19,35 @@ export interface ClientApiKey {
   scopes: string[];
   allowedIps: string[];
   lastUsedAt: string | null;
-  /** `null` : sans fin. Une clé de script vit tant qu'on ne la révoque pas. */
+  /**
+   * Toujours posée à la création (un an au plus). `null` ne se voit que sur une
+   * clé créée avant que l'échéance devienne obligatoire.
+   */
   expiresAt: string | null;
   createdAt: string;
 }
 
-/** Forme d'une entrée acceptable dans la liste d'autorisation : adresse, ou bloc CIDR. */
-const IP_PATTERN = /^[0-9a-fA-F:.]{3,45}(\/\d{1,3})?$/;
-
-/** Durée maximale proposée à la création : un an, comme les clés applicatives. */
+/**
+ * Durée maximale d'une clé, et durée posée quand aucune n'est demandée : un
+ * an, comme les clés applicatives.
+ */
 export const CLIENT_KEY_MAX_DAYS = 365;
+
+/**
+ * Clés actives au plus par compte, personnelles comme applicatives (audit
+ * ASVS, NC-38).
+ *
+ * Sans plafond, une session volée ou un script en boucle semait des clés sans
+ * limite, chacune une porte de plus à retrouver et à fermer. Vingt couvre
+ * largement un usage réel — un bot, quelques scripts, une clé par machine — et
+ * une clé révoquée ou échue libère sa place.
+ */
+export const ACTIVE_KEYS_MAX = 20;
+
+/** Message du refus, le même pour les deux sortes de clés. */
+export function activeKeysLimitMessage(): string {
+  return `Ce compte a déjà ${ACTIVE_KEYS_MAX} clés actives, le plafond. Révoquez-en une avant d'en créer une autre.`;
+}
 
 @Injectable()
 export class ApiKeysService {
@@ -67,7 +92,7 @@ export class ApiKeysService {
     name: string,
     scopes: string[],
     allowedIps: string[],
-    /** Nombre de jours de validité, ou `null` pour une clé sans fin. */
+    /** Nombre de jours de validité ; `null` pose `CLIENT_KEY_MAX_DAYS`. */
     expiresInDays: number | null = null,
   ): Promise<{ key: ClientApiKey; plaintext: string }> {
     const unknown = scopes.filter((s) => !SERVER_PERMISSIONS.includes(s as ServerPermission));
@@ -81,36 +106,64 @@ export class ApiKeysService {
       throw new BadRequestException("Choisissez au moins une portée.");
     }
 
-    const invalid = allowedIps.filter((ip) => !IP_PATTERN.test(ip) || !isAllowlistEntry(ip));
+    // Adresse, ou bloc CIDR de préfixe non nul : la règle est celle de
+    // `isAllowlistEntry`, commune aux clés applicatives.
+    const invalid = allowedIps.filter((ip) => !isAllowlistEntry(ip));
     if (invalid.length > 0) {
       throw new BadRequestException(`Adresse invalide : ${invalid.join(", ")}.`);
     }
 
-    if (
-      expiresInDays !== null &&
-      (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > CLIENT_KEY_MAX_DAYS)
-    ) {
+    /*
+     * Une échéance, toujours.
+     *
+     * Sans durée demandée, la clé ne finissait jamais (audit ASVS, NC-36) :
+     * collée dans un script puis oubliée, elle restait valable des années
+     * après que plus personne ne savait où elle traînait. Le champ vide pose
+     * désormais le maximum, comme pour les clés applicatives ; qui veut plus
+     * court le dit.
+     */
+    const days = expiresInDays ?? CLIENT_KEY_MAX_DAYS;
+    if (!Number.isInteger(days) || days < 1 || days > CLIENT_KEY_MAX_DAYS) {
       throw new BadRequestException(`La validité va de 1 à ${CLIENT_KEY_MAX_DAYS} jours.`);
     }
-    const expiresAt =
-      expiresInDays === null
-        ? null
-        : new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
     const generated = generateApiKey("live");
 
-    const [row] = await this.db
-      .insert(apiKeys)
-      .values({
-        userId,
-        name: name.trim(),
-        prefix: generated.prefix,
-        keyHash: generated.hash,
-        scopes: [...new Set(scopes)],
-        allowedIps,
-        expiresAt,
-      })
-      .returning();
+    const row = await this.db.transaction(async (tx) => {
+      /*
+       * Compter et insérer sous le verrou du compte : sans lui, des créations
+       * simultanées comptaient toutes sous le plafond et passaient toutes.
+       */
+      await tx.execute(sql`select 1 from ${users} where ${users.id} = ${userId} for update`);
+      const [actives] = await tx
+        .select({ n: count() })
+        .from(apiKeys)
+        .where(
+          and(
+            eq(apiKeys.userId, userId),
+            isNull(apiKeys.revokedAt),
+            or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`)),
+          ),
+        );
+      if ((actives?.n ?? 0) >= ACTIVE_KEYS_MAX) {
+        throw new ConflictException(activeKeysLimitMessage());
+      }
+
+      const [inserted] = await tx
+        .insert(apiKeys)
+        .values({
+          userId,
+          name: name.trim(),
+          prefix: generated.prefix,
+          keyHash: generated.hash,
+          scopes: [...new Set(scopes)],
+          allowedIps,
+          expiresAt,
+        })
+        .returning();
+      return inserted;
+    });
 
     if (!row) throw new BadRequestException("Clé non enregistrée.");
 

@@ -38,7 +38,8 @@ Selon la porte, un geste, parfois plusieurs.
 | Clé applicative (facturation, boutique) | **Révoquer**, puis en émettre une nouvelle au système tiers | Administration › Clés applicatives |
 | Secret de signature d'un rappel sortant | Le régénérer | Administration › Rappels sortants |
 | `config.yml` d'un daemon, jeton de node | [Rotation du jeton de node](./rotation-jeton-node.md) | Administration › Nodes |
-| `api.env`, sauvegarde, `APP_SECRET_KEY` | [Rotation de la clé maître](./cle-maitre-secrets.md#1-rotation-de-la-clé-maître), puis rotation de **chaque** jeton de node | machine du panel |
+| `api.env`, `APP_SECRET_KEY`, sauvegarde **avec** sa clé (`backup.key`), ou archive `.tar` d'avant le chiffrement | [Rotation de la clé maître](./cle-maitre-secrets.md#1-rotation-de-la-clé-maître), puis rotation de **chaque** jeton de node | machine du panel |
+| Sauvegarde `.tar.enc` seule, sans sa clé | Rien à rotation : elle ne se lit pas. Vérifier que `backup.key` n'est pas sortie avec elle | — |
 | Serveur de jeu utilisé à mauvais escient | Suspendre le serveur | Administration › Serveurs › le serveur |
 
 **Ce que fait la suspension d'un compte**, dès la validation : plus aucune
@@ -73,10 +74,25 @@ Administration › Journal, filtré sur le compte, le serveur ou l'adresse IP, �
 partir de l'heure notée. L'export (CSV ou JSON) est réservé aux
 administrateurs, et **l'export lui-même est consigné**.
 
+Les **refus** y figurent aussi : `access.denied` (serveur, permission ou
+espace d'administration refusés à un compte ou à une clé),
+`application.key_rejected` (clé applicative présentée et refusée, par son
+préfixe) et `node.token_rejected` (jeton de daemon refusé, par son
+identifiant). Ils ne sont rattachés à aucun serveur — le serveur visé est
+dans le détail de la ligne : les chercher par événement (préfixe
+`access.`, `application.key`, `node.token`) ou par adresse, pas par
+serveur. Un refus répété ne s'écrit qu'à sa 1ʳᵉ, 10ᵉ, 100ᵉ… occurrence en
+dix minutes, avec le compte (`occurrences`), et trois cents lignes de refus
+au plus par tranche de dix minutes : au-delà, seul le journal de l'API le
+dit.
+
 Questions à trancher :
 
 - **Par où** : mot de passe deviné, session volée, clé d'API, SFTP,
-  prise en main du compte par un administrateur ?
+  prise en main du compte par un administrateur ? En SFTP, le mot de passe
+  suffit **même avec la double authentification** (le protocole ne sait pas
+  demander de code, [ADR 0001](../adr/0001-wings-conserve.md)) : un mot de
+  passe connu ouvre les fichiers sans passer par le second facteur.
 - **Quoi** : serveurs touchés, fichiers lus ou modifiés, sous-utilisateurs
   invités, clés ajoutées, rôle changé ?
 - **Depuis quand** : la première action de l'adresse ou de l'appareil

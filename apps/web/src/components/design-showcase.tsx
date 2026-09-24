@@ -17,6 +17,7 @@ import {
   MetricBar,
   PageHeader,
   PasswordInput,
+  PasswordStrengthMeter,
   RelativeTime,
   SelectMenu,
   SparkChart,
@@ -245,6 +246,19 @@ export function DesignShowcase() {
             </FormField>
             <FormField label="Mot de passe" error="12 caractères minimum.">
               {(id) => <PasswordInput id={id} invalid placeholder="••••••••" />}
+            </FormField>
+            <FormField label="Nouveau mot de passe">
+              {(id) => (
+                <>
+                  <PasswordInput id={id} defaultValue="cheval agrafe" />
+                  <PasswordStrengthMeter
+                    level={3}
+                    tone="success"
+                    label="Bon"
+                    hint="il sera aussi comparé aux fuites connues"
+                  />
+                </>
+              )}
             </FormField>
           </CardBody>
         </Card>

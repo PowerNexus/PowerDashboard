@@ -4,7 +4,14 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { WingsClientService } from "../wings/wings-client.service";
 
 /**
@@ -52,6 +59,18 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
 /** Passé ce délai sans nouvelle, une session inachevée est du déchet. */
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Sessions ouvertes au plus, pour un même compte sur un même serveur.
+ *
+ * `MAX_FILE_SIZE` borne un envoi, pas leur nombre : chaque session garde ses
+ * morceaux sur le disque du panel jusqu'à l'assemblage, et n'est balayée
+ * qu'après six heures d'inactivité. Sans compteur, un seul compte ouvrait
+ * autant de sessions de 5 Gio qu'il voulait et remplissait le disque du panel
+ * — celui de tous les serveurs. L'interface envoie un fichier à la fois ;
+ * cinq laisse de la place aux envois interrompus qu'on reprendra.
+ */
+export const MAX_OPEN_UPLOADS = 5;
+
 interface SessionMeta {
   readonly serverId: string;
   readonly userId: string;
@@ -76,6 +95,16 @@ export interface UploadSession {
 export class FileUploadService {
   private readonly logger = new Logger(FileUploadService.name);
   private readonly racine = process.env.UPLOAD_TMP_DIR ?? join(tmpdir(), "gamedashboard-uploads");
+
+  /**
+   * Ouvertures en cours, par couple compte et serveur.
+   *
+   * Compter puis créer en deux temps laisserait passer N ouvertures
+   * simultanées au plafond moins un — toutes compteraient avant qu'aucune
+   * n'écrive. Elles passent donc une à une pour un même couple ; les autres
+   * comptes ne s'attendent pas entre eux.
+   */
+  private readonly ouvertures = new Map<string, Promise<unknown>>();
 
   constructor(@Inject(WingsClientService) private readonly wings: WingsClientService) {}
 
@@ -116,8 +145,16 @@ export class FileUploadService {
       createdAt: new Date().toISOString(),
     };
 
-    await mkdir(this.dossier(id), { recursive: true });
-    await writeFile(join(this.dossier(id), "meta.json"), JSON.stringify(meta), "utf8");
+    await this.uneAUne(`${serverId}:${userId}`, async () => {
+      if ((await this.ouvertesPour(serverId, userId)) >= MAX_OPEN_UPLOADS) {
+        throw new ConflictException(
+          `Trop d'envois en cours sur ce serveur (${MAX_OPEN_UPLOADS} au plus). ` +
+            "Terminez ou annulez-en un ; un envoi abandonné se libère de lui-même au bout de six heures.",
+        );
+      }
+      await mkdir(this.dossier(id), { recursive: true });
+      await writeFile(join(this.dossier(id), "meta.json"), JSON.stringify(meta), "utf8");
+    });
 
     // Le balayage est fait ici plutôt que par un minuteur : l'ouverture d'une
     // session est le seul moment où l'on sait qu'il y a du trafic, et une
@@ -125,6 +162,45 @@ export class FileUploadService {
     void this.balayer();
 
     return { id, chunkSize: CHUNK_SIZE, chunks, received: [] };
+  }
+
+  /**
+   * Sessions encore vivantes de ce compte sur ce serveur.
+   *
+   * Une session inactive depuis plus de six heures ne compte pas : le
+   * balayage l'effacera, et la compter enfermerait dehors quelqu'un dont le
+   * seul tort est d'avoir fermé un onglet.
+   */
+  private async ouvertesPour(serverId: string, userId: string): Promise<number> {
+    const limite = Date.now() - SESSION_TTL_MS;
+    const noms = await readdir(this.racine).catch(() => [] as string[]);
+    let ouvertes = 0;
+    for (const nom of noms) {
+      if (!/^[0-9a-f]{32}$/.test(nom)) continue;
+      const info = await stat(join(this.racine, nom)).catch(() => null);
+      if (!info?.isDirectory() || info.mtimeMs < limite) continue;
+      try {
+        const meta = JSON.parse(
+          await readFile(join(this.racine, nom, "meta.json"), "utf8"),
+        ) as SessionMeta;
+        if (meta.serverId === serverId && meta.userId === userId) ouvertes += 1;
+      } catch {
+        // Session en cours de création ou déjà effacée : elle ne compte pas.
+      }
+    }
+    return ouvertes;
+  }
+
+  /** Exécute `travail` après ceux déjà en file pour la même clé. */
+  private async uneAUne<T>(cle: string, travail: () => Promise<T>): Promise<T> {
+    const avant = this.ouvertures.get(cle) ?? Promise.resolve();
+    const tour = avant.catch(() => undefined).then(travail);
+    this.ouvertures.set(cle, tour);
+    try {
+      return await tour;
+    } finally {
+      if (this.ouvertures.get(cle) === tour) this.ouvertures.delete(cle);
+    }
   }
 
   /** Où en est une session : c'est cette liste que le navigateur consulte pour reprendre. */

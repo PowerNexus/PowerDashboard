@@ -9,6 +9,53 @@ import { z } from "zod";
  * la même règle finiraient par ne plus dire la même chose.
  */
 
+/* --- Chemins relayés au daemon --------------------------------------------- */
+
+/**
+ * Pourquoi un chemin est refusé avant d'atteindre le daemon.
+ *
+ * - `nullByte` : un octet nul, qu'aucun nom de fichier ne contient et que
+ *   des couches de code différentes lisent différemment — l'une s'arrête à
+ *   lui, l'autre non ;
+ * - `outsideVolume` : un segment `..` qui, résolu, remonte au-dessus de la
+ *   racine du volume.
+ */
+export type PathRefusal = "nullByte" | "outsideVolume";
+
+/**
+ * Refuse un chemin qui n'a rien à faire chez le daemon.
+ *
+ * **Défense en profondeur, pas confinement.** Le confinement au volume est le
+ * travail de Wings, et il le fait (§4.3) ; mais le panel relayait tout, et la
+ * sûreté de chaque serveur tenait à une seule ligne de défense, dans un
+ * programme qu'il ne contrôle pas. Celle-ci en est une seconde.
+ *
+ * `path` est lu depuis `base` quand il ne commence pas par `/` : c'est ainsi
+ * que le daemon lit les entrées d'un `root`. Un `..` qui **reste** dans le
+ * volume passe — `../a.jar` depuis `/plugins` est un déplacement que l'écran
+ * propose (`renameRefusal`) ; seul celui qui en sortirait est refusé. Les
+ * segments se coupent sur `/` seulement : le daemon tourne sous Linux, où
+ * l'antislash est un caractère de nom comme un autre.
+ */
+export function refusePath(path: string, base = "/"): PathRefusal | null {
+  if (path.includes("\0") || base.includes("\0")) return "nullByte";
+
+  const complet = path.startsWith("/") ? path : `${base}/${path}`;
+  let profondeur = 0;
+  for (const segment of complet.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    profondeur += segment === ".." ? -1 : 1;
+    if (profondeur < 0) return "outsideVolume";
+  }
+  return null;
+}
+
+/** La phrase qui accompagne chaque refus, côté API comme côté écran. */
+export const PATH_REFUSAL_MESSAGES: Record<PathRefusal, string> = {
+  nullByte: "Chemin invalide : il contient un caractère nul.",
+  outsideVolume: "Chemin invalide : il remonte au-dessus du dossier du serveur.",
+};
+
 /* --- Permissions (chmod) --------------------------------------------------- */
 
 /**
@@ -150,9 +197,20 @@ const RENAME_REFUSAL_MESSAGES: Record<RenameRefusal, string> = {
   unchanged: "Le nouveau nom est identique à l'ancien.",
 };
 
+/**
+ * Longueur maximale d'un chemin, en caractères : `PATH_MAX` sous Linux, où
+ * tourne le daemon. Au-delà, le système le refuserait de toute façon — après
+ * un aller-retour et un message qui ne dirait rien.
+ */
+export const MAX_PATH_LENGTH = 4096;
+
 /** Corps de `POST /api/v1/client/servers/:id/files/rename`. */
 export const RenameRequest = z
-  .object({ root: z.string(), from: EntryName, to: z.string() })
+  .object({
+    root: z.string(),
+    from: EntryName,
+    to: z.string().max(MAX_PATH_LENGTH, "Nouveau nom trop long."),
+  })
   .superRefine((value, ctx) => {
     const refus = renameRefusal(value.from, value.to);
     if (refus) {

@@ -1,33 +1,44 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { decryptSecret } from "@gamedashboard/auth";
+import { hashToken } from "@gamedashboard/auth";
 import { type Database, nodes, servers } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Traduit nos permissions dans celles que Wings vérifie sur le websocket
- * (`router/websocket/websocket.go`) : `websocket.connect` pour ouvrir,
- * `control.console` pour envoyer, `control.start|stop|restart` pour
- * l'alimentation, `backup.read` pour suivre une sauvegarde.
+ * (`router/websocket/websocket.go`) — **celles qui servent à lire, et elles
+ * seules** :
  *
- * Sans cette traduction, un jeton de sous-utilisateur portait `console.read`,
- * que Wings ne connaît pas : il refusait la connexion. Fermé par défaut, mais
- * faux — et la correction tentante, `*` pour tout le monde, aurait été une
- * escalade. `*` reste réservé au propriétaire et au personnel : Wings en
- * exclut lui-même les droits `admin.*`.
+ * - `websocket.connect` pour s'authentifier. Console, statistiques et état
+ *   partent ensuite vers tout jeton connecté, sans autre contrôle ;
+ * - `backup.read` pour les événements de sauvegarde, que Wings filtre ;
+ * - `admin.websocket.install` pour la sortie d'installation, que Wings filtre
+ *   aussi et que son joker `*` exclut. Scellée seulement quand l'appelant la
+ *   nomme : le contrôleur la réserve au propriétaire.
+ *
+ * **Aucun `control.*`, et plus de `*`.** Le jeton scellait `control.console`
+ * et `control.start|stop|restart` pour qui avait `console.send` ou `power.*`,
+ * et `*`, qui les contient, pour le propriétaire. C'était une porte
+ * parallèle : `send command` et `set state` sur la socket passaient à côté
+ * de `requireOperable` (serveur suspendu, en installation, en transfert) et
+ * du journal du panel. L'interface et le SDK envoient commandes et signaux
+ * par l'API ; la socket ne leur sert qu'à recevoir. Le `*` ne donnait rien
+ * d'autre à lire que les deux permissions nommées ici — et il avalait
+ * `admin.websocket.install`, rendu ici `["*"]` seul : la sortie
+ * d'installation n'arrivait jamais au propriétaire.
+ *
+ * La traduction reste nécessaire : un jeton de sous-utilisateur portait
+ * `console.read`, que Wings ne connaît pas, et il refusait la connexion.
  */
 export function toWingsWebsocketPermissions(granted: readonly string[]): string[] {
-  if (granted.includes("*")) return ["*"];
+  const tout = granted.includes("*");
 
   const wings = new Set<string>();
-  if (granted.includes("console.read")) wings.add("websocket.connect");
-  if (granted.includes("console.send")) wings.add("control.console");
-  if (granted.includes("power.start")) wings.add("control.start");
-  // `kill` est un arrêt forcé : Wings ne distingue pas, c'est `control.stop`.
-  if (granted.includes("power.stop") || granted.includes("power.kill")) wings.add("control.stop");
-  if (granted.includes("power.restart")) wings.add("control.restart");
-  if (granted.includes("backups.read")) wings.add("backup.read");
+  if (tout || granted.includes("console.read")) wings.add("websocket.connect");
+  if (tout || granted.includes("backups.read")) wings.add("backup.read");
+  if (granted.includes("admin.websocket.install")) wings.add("admin.websocket.install");
   return [...wings];
 }
 
@@ -79,6 +90,16 @@ interface IssuedToken {
   jti: string;
   serverId: string;
   userId: string;
+  /**
+   * Condensat de la session qui l'a demandé, ou `null` pour une clé d'API.
+   *
+   * La déconnexion révoque les jetons de **sa** session, pas ceux du compte :
+   * une prise en main porte l'identifiant du client, et la quitter ne doit pas
+   * couper les consoles qu'il a ouvertes lui-même, sur ses propres appareils.
+   * Le condensat plutôt que le jeton : cette liste n'a pas à détenir de quoi
+   * rouvrir une session.
+   */
+  session?: string | null;
   expiresAt: number;
 }
 
@@ -157,6 +178,26 @@ export class WingsTokenService {
     return byServer;
   }
 
+  /**
+   * Tous les jetons vivants demandés par une session, rangés par serveur.
+   *
+   * Sert à la déconnexion (NC-43) : la session tombe en base, mais une console
+   * déjà ouverte vit sur un jeton de dix minutes que Wings ne revérifie pas.
+   */
+  revocableForSession(sessionToken: string): Map<string, string[]> {
+    this.purge();
+    const session = hashToken(sessionToken);
+    const byServer = new Map<string, string[]>();
+    for (let i = this.issued.length - 1; i >= 0; i--) {
+      const token = this.issued[i];
+      if (token && token.session === session) {
+        byServer.set(token.serverId, [...(byServer.get(token.serverId) ?? []), token.jti]);
+        this.issued.splice(i, 1);
+      }
+    }
+    return byServer;
+  }
+
   private purge(): void {
     const now = Math.floor(Date.now() / 1000);
     for (let i = this.issued.length - 1; i >= 0; i--) {
@@ -164,13 +205,20 @@ export class WingsTokenService {
     }
   }
 
+  /**
+   * `sessionToken` : la session qui demande la console, pour que sa
+   * déconnexion la ferme. Absent pour une clé d'API, qui n'a pas de
+   * déconnexion.
+   */
   async websocketGrant(
     serverId: string,
     userId: string,
     permissions: readonly string[],
+    sessionToken: string | null = null,
   ): Promise<WebsocketGrant> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -188,7 +236,13 @@ export class WingsTokenService {
     const expiresAt = now + WEBSOCKET_TOKEN_TTL_SECONDS;
 
     this.purge();
-    this.issued.push({ jti, serverId, userId, expiresAt });
+    this.issued.push({
+      jti,
+      serverId,
+      userId,
+      session: sessionToken ? hashToken(sessionToken) : null,
+      expiresAt,
+    });
 
     const payload = {
       // `jti` et `iat` servent la liste de révocation du daemon : après un
@@ -207,7 +261,7 @@ export class WingsTokenService {
     };
 
     return {
-      token: signHs256(payload, decryptSecret(row.token)),
+      token: signHs256(payload, nodeToken(row)),
       socket: `${row.scheme === "https" ? "wss" : "ws"}://${row.fqdn}:${row.port}/api/servers/${serverId}/ws`,
     };
   }
@@ -226,6 +280,7 @@ export class WingsTokenService {
   async backupDownloadGrant(serverId: string, backupId: string, userId: string): Promise<string> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -254,7 +309,7 @@ export class WingsTokenService {
         backup_uuid: backupId,
         user_uuid: userId,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return `${row.scheme}://${row.fqdn}:${row.port}/download/backup?token=${encodeURIComponent(token)}`;
@@ -276,6 +331,7 @@ export class WingsTokenService {
   async fileDownloadGrant(serverId: string, userId: string, filePath: string): Promise<string> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -303,7 +359,7 @@ export class WingsTokenService {
         user_uuid: userId,
         file_path: filePath,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return `${row.scheme}://${row.fqdn}:${row.port}/download/file?token=${encodeURIComponent(token)}`;
@@ -329,6 +385,7 @@ export class WingsTokenService {
   async uploadGrant(serverId: string, userId: string): Promise<{ token: string; url: string }> {
     const [row] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -364,7 +421,7 @@ export class WingsTokenService {
         server_uuid: serverId,
         user_uuid: userId,
       },
-      decryptSecret(row.token),
+      nodeToken(row),
     );
 
     return { token, url: `${row.scheme}://${row.fqdn}:${row.port}/upload/file` };
@@ -390,6 +447,7 @@ export class WingsTokenService {
   async transferGrant(serverId: string, toNodeId: string): Promise<TransferGrant> {
     const [target] = await this.db
       .select({
+        nodeId: nodes.id,
         scheme: nodes.scheme,
         fqdn: nodes.fqdn,
         port: nodes.daemonPort,
@@ -434,7 +492,7 @@ export class WingsTokenService {
        * ne pouvait le voir : la divergence est entre ce que le panel remet et
        * ce que deux programmes distincts en font.
        */
-      token: `Bearer ${signHs256(payload, decryptSecret(target.token))}`,
+      token: `Bearer ${signHs256(payload, nodeToken(target))}`,
       url: `${target.scheme}://${target.fqdn}:${target.port}/api/transfers`,
     };
   }
@@ -459,4 +517,9 @@ function signHs256(payload: Record<string, unknown>, secret: string): string {
 
 function base64url(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
+}
+
+/** Jeton du node en clair, relu sous le contexte de sa ligne : c'est la clé de signature. */
+function nodeToken(row: { nodeId: string; token: string }): string {
+  return decryptRowSecret("nodes.daemon_token_enc", row.nodeId, row.token);
 }

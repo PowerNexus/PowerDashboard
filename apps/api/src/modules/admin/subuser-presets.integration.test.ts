@@ -15,6 +15,7 @@ import {
   NO_DATABASE_REASON,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import type { DenialLogService } from "../activity/denial-log.service";
 import { ServerAccessService } from "../client/server-access.service";
 import type { ServerInvitesService } from "../client/server-invites.service";
 import { SubusersService } from "../client/subusers.service";
@@ -22,6 +23,9 @@ import type { NotificationsService } from "../notifications/notifications.servic
 import type { WingsClientService } from "../wings/wings-client.service";
 import type { WingsTokenService } from "../wings/wings-token.service";
 import { PlatformSettingsService } from "./platform-settings.service";
+
+/** Le journal des refus, muet : ces tests portent sur les droits accordés. */
+const silence = { record: async () => {} } as unknown as DenialLogService;
 
 /**
  * Presets de sous-utilisateurs redéfinis par l'administration, contre une
@@ -109,7 +113,7 @@ describe.skipIf(!HAS_DATABASE)("presets de sous-utilisateurs (intégration)", ()
       ancien = await seedUser(db);
       const nodeId = await seedNode(db, { locationId: await seedLocation(db) });
       serverId = await seedServer(db, { nodeId, ownerId: owner });
-      access = new ServerAccessService(db);
+      access = new ServerAccessService(db, silence);
 
       // Le vrai service d'invitation : c'est lui qui décide de recopier les
       // permissions dans la ligne, et c'est ce qu'on veut voir tenir.

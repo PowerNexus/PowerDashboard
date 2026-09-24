@@ -10,14 +10,19 @@
  *
  * `'strict-dynamic'` étend la confiance aux scripts qu'un script de confiance
  * charge lui-même : c'est ainsi que passent Turnstile (`next/script`, injecté
- * par Next) et Monaco (son chargeur ajoute ses balises depuis le CDN). Un
+ * par Next) et les morceaux que Next charge à la demande, Monaco compris. Un
  * navigateur qui comprend `'strict-dynamic'` ignore alors `'self'` et les
  * hôtes de la liste ; ils restent pour ceux qui ne le comprennent pas.
  *
+ * **Aucun CDN** (NC-22). Monaco se chargeait depuis `cdn.jsdelivr.net`, sans
+ * empreinte d'intégrité, et ce CDN figurait ici en `script-src`, `style-src`
+ * et `font-src` : sa compromission exécutait un script dans le panel. Monaco
+ * est désormais compilé avec l'interface (`lib/monaco.ts`) : scripts, styles
+ * et police codicon viennent de `/_next/static`, sous `'self'`.
+ *
  * Ce que chaque autre source autorise, et pourquoi elle est là :
- * - `cdn.jsdelivr.net` : Monaco, que `@monaco-editor/react` charge depuis ce
- *   CDN par défaut (scripts, feuilles de style, police codicon). Ses workers
- *   sont des `blob:`.
+ * - `worker-src 'self' blob:` : les workers de Monaco sont des fichiers du
+ *   panel, créés en module ; `blob:` reste pour ceux qu'il enveloppe.
  * - `challenges.cloudflare.com` : Turnstile, un script et un cadre.
  * - `connect-src https: wss:` : la console et les envois de fichiers parlent
  *   **directement** aux nodes Wings, dont les hôtes sont ceux que l'admin
@@ -32,10 +37,10 @@
 export function contentSecurityPolicy(nonce: string, production: boolean): string {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${production ? "" : " 'unsafe-eval'"} https://cdn.jsdelivr.net https://challenges.cloudflare.com`,
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${production ? "" : " 'unsafe-eval'"} https://challenges.cloudflare.com`,
+    "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data: https://cdn.jsdelivr.net",
+    "font-src 'self' data:",
     `connect-src 'self' https: wss:${production ? "" : " http: ws:"}`,
     "worker-src 'self' blob:",
     "frame-src https://challenges.cloudflare.com",

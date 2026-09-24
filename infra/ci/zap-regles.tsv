@@ -11,7 +11,7 @@
 # Cross-Origin-Embedder-Policy reste absent par choix : voir next.config.ts.
 10044	IGNORE	(Grosse redirection) Le corps de la redirection / → /login est le catalogue de traductions embarqué dans chaque page : du texte public, aucune donnée de compte.
 10055	IGNORE	(CSP) Sources larges voulues : connect-src https: wss: pour la console et les envois qui parlent directement aux nodes Wings, img-src https: pour les logos des revendeurs ; style-src 'unsafe-inline' pour les styles en ligne de React. Les scripts, eux, ne passent que par un nonce (apps/web/src/proxy.ts).
-10202	IGNORE	(Jeton anti-CSRF) Les formulaires passent par des Server Actions de Next, qui refusent toute requête dont l'origine n'est pas l'hôte ; l'API vérifie Origin et un jeton en double soumission (PLAN §5.4).
+10202	IGNORE	(Jeton anti-CSRF) Pas de jeton, par choix : cookie SameSite=Lax ; les formulaires passent par des Server Actions de Next, qui refusent toute requête dont l'origine n'est pas l'hôte ; les deux relais qui n'en sont pas font le même contrôle ; l'API refuse toute écriture par cookie que le navigateur dit venue d'un autre site (Origin et Sec-Fetch-Site, transmis par Next) — PLAN §5.4, SessionGuard.
 10031	INFO	(Attribut HTML contrôlable) Les champs $ACTION_* renvoyés par /login sont les identifiants des Server Actions de Next ; React échappe tout attribut qu'il écrit. Signalé à faible confiance par ZAP, gardé au rapport.
 10109	INFO	(Application web moderne) Constat, pas une faiblesse : ZAP note que les pages sont rendues par des scripts.
 10111	INFO	(Requête d'authentification repérée) Constat, pas une faiblesse : ZAP a trouvé le formulaire de connexion.

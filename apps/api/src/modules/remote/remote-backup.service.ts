@@ -1,6 +1,6 @@
 import { backups, type Database, servers } from "@gamedashboard/db";
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { and, eq, isNull } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { NotificationsService } from "../notifications/notifications.service";
 import { S3Service } from "../storage/s3.service";
@@ -30,6 +30,8 @@ export interface BackupReport {
  */
 @Injectable()
 export class RemoteBackupService {
+  private readonly logger = new Logger(RemoteBackupService.name);
+
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
@@ -46,6 +48,15 @@ export class RemoteBackupService {
    *
    * L'identifiant du dépôt est retenu en base, car lui seul permettra de
    * recoller les morceaux — ou de les jeter. Le daemon ne le connaît pas.
+   *
+   * **Seulement pour une sauvegarde en cours, et distante dès sa création.**
+   * Sans ces deux conditions, un node compromis rouvrait le dépôt d'une
+   * sauvegarde terminée et en écrasait l'archive — restaurée plus tard, en
+   * confiance, sur un node sain — ou basculait sur le compartiment une
+   * sauvegarde locale. Wings ne demande d'adresses que pour l'adaptateur
+   * `s3`, que `BackupsService.create` choisit en même temps qu'il fixe
+   * `disk` : rien de légitime ne passe hors de ces conditions. Le refus est
+   * un 404, définitif pour le daemon, qui rend alors compte d'un échec.
    */
   async openUpload(
     nodeId: string,
@@ -56,7 +67,14 @@ export class RemoteBackupService {
       .select({ id: backups.id, serverId: backups.serverId, uploadId: backups.uploadId })
       .from(backups)
       .innerJoin(servers, eq(backups.serverId, servers.id))
-      .where(and(eq(backups.id, backupId), eq(servers.nodeId, nodeId)))
+      .where(
+        and(
+          eq(backups.id, backupId),
+          eq(servers.nodeId, nodeId),
+          isNull(backups.completedAt),
+          eq(backups.disk, "s3"),
+        ),
+      )
       .limit(1);
 
     if (!row) throw new NotFoundException("Sauvegarde introuvable.");
@@ -74,10 +92,12 @@ export class RemoteBackupService {
     const ticket = await this.s3.openUpload(key, size);
     if (!ticket) return null;
 
+    // `disk` n'est plus écrit ici : il vaut déjà `s3`, et c'est la condition
+    // pour arriver jusque-là.
     await this.db
       .update(backups)
-      .set({ disk: "s3", uploadId: ticket.uploadId, updatedAt: new Date().toISOString() })
-      .where(eq(backups.id, backupId));
+      .set({ uploadId: ticket.uploadId, updatedAt: new Date().toISOString() })
+      .where(and(eq(backups.id, backupId), isNull(backups.completedAt)));
 
     return { parts: ticket.parts, part_size: ticket.partSize };
   }
@@ -89,6 +109,18 @@ export class RemoteBackupService {
    * condition, un node compromis pourrait marquer réussie une sauvegarde
    * hébergée ailleurs — et la faire restaurer plus tard depuis une archive qui
    * n'existe pas, ou qu'il aurait lui-même fabriquée.
+   *
+   * **Une sauvegarde close ne se rouvre pas.** Le premier compte rendu fait
+   * foi ; un second n'y change rien — ni l'issue, ni la taille, ni
+   * l'empreinte. Sans cela, un node compromis faisait passer pour réussie une
+   * sauvegarde ratée, ou l'inverse, à n'importe quel moment après coup.
+   *
+   * Ce second compte rendu reçoit pourtant un 204, et non un 404. Le cas
+   * ordinaire est un accusé de réception perdu, que Wings rejoue ; or un
+   * refus lui fait **effacer l'archive** (`server/backup.go`, après l'échec
+   * de `notifyPanelOfBackup`), celle-là même que le panel vient de déclarer
+   * réussie. Ignorer sans refuser ne donne rien au node compromis, et ne
+   * coûte rien au node sain.
    */
   async complete(nodeId: string, backupId: string, report: BackupReport): Promise<void> {
     const [row] = await this.db
@@ -97,6 +129,7 @@ export class RemoteBackupService {
         serverId: backups.serverId,
         name: backups.name,
         uploadId: backups.uploadId,
+        completedAt: backups.completedAt,
       })
       .from(backups)
       .innerJoin(servers, eq(backups.serverId, servers.id))
@@ -104,6 +137,10 @@ export class RemoteBackupService {
       .limit(1);
 
     if (!row) throw new NotFoundException("Sauvegarde introuvable.");
+    if (row.completedAt !== null) {
+      this.logger.warn(`Compte rendu ignoré : la sauvegarde ${row.id} est déjà close.`);
+      return;
+    }
 
     let successful = report.successful === true;
 
@@ -135,7 +172,7 @@ export class RemoteBackupService {
       }
     }
 
-    await this.db
+    const [closed] = await this.db
       .update(backups)
       .set({
         isSuccessful: successful,
@@ -150,7 +187,13 @@ export class RemoteBackupService {
         uploadId: null,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(backups.id, backupId));
+      // Deux comptes rendus simultanés passent tous deux la lecture : seul le
+      // premier écrit. Le second ne doit ni réécrire l'issue ni notifier — son
+      // propre recollage a pu échouer, faute de dépôt encore ouvert.
+      .where(and(eq(backups.id, backupId), isNull(backups.completedAt)))
+      .returning({ id: backups.id });
+
+    if (!closed) return;
 
     /**
      * Seul un échec vaut une cloche.

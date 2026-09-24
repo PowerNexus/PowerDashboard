@@ -5,8 +5,8 @@ import {
   needsRehash,
   otpauthUri,
   type PasswordProblem,
+  passwordStanding,
   publicFailureMessage,
-  throttleDecision,
   verifyPassword,
 } from "@gamedashboard/auth";
 import {
@@ -27,21 +27,31 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { ActivityService } from "../activity/activity.service";
-import { isAdminRole } from "../admin/admin.guard";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
+import { requiresStaffSecondFactor } from "../admin/staff-2fa.guard";
 import { MailerService } from "../mail/mailer.service";
+import { WingsClientService } from "../wings/wings-client.service";
+import { WingsTokenService } from "../wings/wings-token.service";
 import { AccountMailService } from "./account-mail.service";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { BrowserSessionGuard } from "./browser-session.guard";
-import { IMPERSONATION_RETURN_COOKIE } from "./impersonation";
+import { impersonationReturnCookie } from "./impersonation";
 import { ImpersonationReadOnlyGuard } from "./impersonation.guard";
-import { consumeChallenge, issueChallenge, readChallenge } from "./login-challenge";
+import { issueChallenge, readChallenge } from "./login-challenge";
 import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
+import {
+  attemptOrigin,
+  type ConfirmedUser,
+  PasswordConfirmationService,
+  pause,
+  type WithoutLocalPassword,
+} from "./password-confirmation.service";
 import { relyingPartyFromEnv } from "./relying-party";
-import { SecurityAlertService } from "./security-alert.service";
-import { SESSION_COOKIE, SessionGuard } from "./session.guard";
+import type { CredentialChange } from "./security-alert.messages";
+import { type FailureStage, SecurityAlertService } from "./security-alert.service";
+import { authCookieOptions, SessionGuard, sessionCookie } from "./session.guard";
 import {
   SESSION_TTL_MS,
   SessionRepository,
@@ -120,8 +130,6 @@ const PasskeyAssertion = z.object({
   challenge: z.string().min(1),
   response: z.unknown(),
 });
-
-const PasswordConfirmation = z.object({ password: z.string().min(1) });
 
 /**
  * Ajout d'une clé publique SSH.
@@ -228,6 +236,11 @@ export class AuthController {
     @Inject(TurnstileService) private readonly turnstile: TurnstileService,
     @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
     @Inject(AccountMailService) private readonly accountMail: AccountMailService,
+    // Les consoles ouvertes par une session se ferment avec elle (NC-43).
+    @Inject(WingsTokenService) private readonly wingsTokens: WingsTokenService,
+    @Inject(WingsClientService) private readonly wings: WingsClientService,
+    @Inject(PasswordConfirmationService)
+    private readonly confirmation: PasswordConfirmationService,
   ) {}
 
   /**
@@ -302,7 +315,7 @@ export class AuthController {
     const valid = await verifyPassword(digest, parsed.data.password);
 
     if (!user || !valid) {
-      await this.recordFailure(parsed.data.email, request, user);
+      await this.recordFailure(parsed.data.email, request, user, "password");
       // Délai progressif : gênant pour une énumération automatisée, invisible
       // pour quelqu'un qui se trompe deux fois. Le verrou, lui, est plus haut.
       await pause(throttle.delayMs);
@@ -310,13 +323,30 @@ export class AuthController {
       return;
     }
 
-    await this.users.recordAttempt(parsed.data.email, request.ip ?? null, true);
-
     // Rehachage progressif : c'est le seul moment où le mot de passe est en
     // clair. Une hausse des paramètres Argon2 se propage ainsi compte par
     // compte, à la connexion suivante, sans réinitialisation générale.
     if (needsRehash(digest)) {
-      await this.users.updatePassword(user.id, await hashPassword(parsed.data.password));
+      await this.users.rehashPassword(user.id, await hashPassword(parsed.data.password));
+    }
+
+    /*
+     * Un mot de passe provisoire expiré ne vaut plus rien (ASVS 2.3.1).
+     *
+     * Tiré au sort par un script et affiché une fois dans un terminal, il ne
+     * doit pas devenir le mot de passe durable du compte. Le refus ne vient
+     * qu'après la preuve : seul qui tient déjà le bon mot de passe apprend
+     * qu'il a expiré, et ce n'est pas compté comme un échec — le secret était
+     * juste.
+     */
+    const standing = passwordStanding(user.passwordExpiresAt);
+    if (standing === "expired") {
+      reply.status(403).send({
+        message:
+          "Ce mot de passe provisoire a expiré. Demandez-en un nouveau à l'exploitant du panel.",
+        passwordExpired: true,
+      });
+      return;
     }
 
     /**
@@ -343,7 +373,17 @@ export class AuthController {
       return;
     }
 
-    await this.issueSession(user.id, request, reply, "password");
+    /*
+     * La réussite n'est consignée qu'ici, une fois **toutes** les preuves
+     * données, et plus dès le mot de passe accepté.
+     *
+     * Elle fait de l'adresse une adresse connue du compte, que le verrou
+     * n'arrête plus (`throttleDecision`). Posée avant le second facteur, elle
+     * aurait exempté du verrou quiconque connaît le mot de passe, au moment
+     * précis où il lui reste six chiffres à deviner.
+     */
+    await this.users.recordAttempt(parsed.data.email, request.ip ?? null, true);
+    await this.issueSession(user.id, request, reply, "password", standing === "provisional");
   }
 
   /**
@@ -367,9 +407,11 @@ export class AuthController {
     }
 
     const sealed = readChallenge("login", parsed.data.challenge);
-    if (!sealed) {
-      // Expiré, tronqué ou forgé : la distinction n'intéresse que celui qui
-      // cherche à deviner le format.
+    // Expiré, tronqué, forgé ou déjà servi : la distinction n'intéresse que
+    // celui qui cherche à deviner le format. Le défi rejoué est refusé ici,
+    // avant tout code : il ne doit ni brûler un code de secours ni compter
+    // comme un échec du titulaire.
+    if (!sealed || (await this.tokens.challengeClaimed(sealed.jti))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
@@ -396,7 +438,7 @@ export class AuthController {
       : await this.twoFactor.verifyCode(sealed.userId, parsed.data.code ?? "");
 
     if (!accepted) {
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "second_factor");
       await pause(throttle.delayMs);
       reply.status(401).send({ message: publicFailureMessage() });
       return;
@@ -418,33 +460,36 @@ export class AuthController {
     }
 
     // Le défi a servi : le même ne doit pas rouvrir une session cinq minutes
-    // durant, depuis un autre onglet ou un autre poste.
-    consumeChallenge(parsed.data.challenge);
-    await this.issueSession(user.id, request, reply, sealed.method ?? "password");
+    // durant, depuis un autre onglet, un autre poste ou une autre instance de
+    // l'API. Consommé en base, atomiquement : de deux demandes simultanées,
+    // une seule ouvre la session.
+    if (!(await this.tokens.claimChallenge(sealed))) {
+      reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
+      return;
+    }
+    // Toutes les preuves sont données : l'adresse devient connue du compte.
+    await this.users.recordAttempt(user.email, request.ip ?? null, true);
+    await this.issueSession(
+      user.id,
+      request,
+      reply,
+      sealed.method ?? "password",
+      (sealed.method ?? "password") === "password" &&
+        passwordStanding(user.passwordExpiresAt) === "provisional",
+    );
   }
 
   /**
    * Consigne un échec, et prévient le titulaire au cinquième d'affilée (§5.1).
-   *
-   * `account` est nul pour une adresse inconnue : il n'y a alors personne à
-   * prévenir. La réponse HTTP, elle, ne dépend pas de ce qui se passe ici —
-   * l'alerte part en tâche détachée, sans rien attendre ni rien renvoyer, si
-   * bien qu'un compte existant et une adresse inventée répondent pareil et
-   * dans le même temps.
+   * La règle vit dans `PasswordConfirmationService.recordFailure`.
    */
   private async recordFailure(
     email: string,
     request: ClientRequest,
     account: { id: string; email: string } | null,
+    stage: FailureStage,
   ): Promise<void> {
-    await this.users.recordAttempt(email, request.ip ?? null, false);
-    if (!account) return;
-    this.alerts.afterFailure({
-      userId: account.id,
-      email: account.email,
-      ip: request.ip ?? null,
-      host: arrivalHost(request),
-    });
+    await this.confirmation.recordFailure(email, attemptOrigin(request), account, stage);
   }
 
   /**
@@ -453,7 +498,9 @@ export class AuthController {
    * Rend le délai à appliquer en cas d'échec, ou `null` après avoir répondu
    * 429 : au-delà de `MAX_ATTEMPTS_PER_ACCOUNT` échecs sur le compte ou de
    * `MAX_ATTEMPTS_PER_IP` depuis l'adresse dans la fenêtre glissante, plus
-   * rien n'est vérifié. Un délai seul ne suffisait pas : il s'attend en
+   * rien n'est vérifié. Le verrou du compte épargne les adresses d'où il a
+   * déjà été ouvert : sans cela, dix échecs volontaires d'un inconnu
+   * enfermaient dehors le titulaire. Un délai seul ne suffisait pas : il s'attend en
    * parallèle, et un million de codes TOTP se parcourt ainsi en une heure.
    *
    * La tentative refusée n'est pas enregistrée : la compter prolongerait le
@@ -464,7 +511,7 @@ export class AuthController {
     ip: string | null,
     reply: Reply,
   ): Promise<{ delayMs: number } | null> {
-    const decision = throttleDecision(await this.users.recentFailures(email, ip));
+    const decision = await this.confirmation.throttle(email, ip);
     if (decision.action === "allow") return { delayMs: decision.delayMs };
 
     reply
@@ -487,6 +534,12 @@ export class AuthController {
     request: ClientRequest,
     reply: Reply,
     authMethod: string,
+    /**
+     * Entré avec un mot de passe provisoire : l'écran doit mener au
+     * changement. Le dire dans la réponse, et non dans la session, laisse la
+     * session telle que toutes les autres.
+     */
+    passwordChangeRequired = false,
   ): Promise<void> {
     const payload = await this.issuer.issue(
       userId,
@@ -505,7 +558,7 @@ export class AuthController {
       reply,
       authMethod,
     );
-    reply.send(payload);
+    reply.send(passwordChangeRequired ? { ...payload, passwordChangeRequired } : payload);
   }
 
   /**
@@ -528,7 +581,11 @@ export class AuthController {
       return;
     }
 
-    if (request.sessionToken) await this.sessions.revoke(request.sessionToken);
+    if (request.sessionToken) {
+      await this.sessions.revoke(request.sessionToken);
+      // Une console ouverte pendant la visite ne lui survit pas.
+      await this.closeConsoles(request.sessionToken);
+    }
 
     // Des deux côtés, comme au départ : un client qui lit « untel est entré »
     // sans jamais lire « untel est sorti » ne saurait pas si la visite dure
@@ -556,24 +613,21 @@ export class AuthController {
      * ferait de ce cookie un moyen d'ouvrir la session de son choix : il
      * suffirait d'y écrire un jeton volé et de passer par ici.
      */
-    const returning = headerCookie(request, IMPERSONATION_RETURN_COOKIE);
+    const returning = headerCookie(request, impersonationReturnCookie());
     const staff = returning ? await this.sessions.resolve(returning) : null;
 
-    reply.clearCookie(IMPERSONATION_RETURN_COOKIE, { path: "/" });
+    reply.clearCookie(impersonationReturnCookie(), authCookieOptions());
 
     if (!staff || staff.id !== user.impersonator.id) {
       // Session de l'agent expirée ou fermée entre-temps : on le déconnecte
       // proprement plutôt que de le laisser sur un compte qui n'est pas le sien.
-      reply.clearCookie(SESSION_COOKIE, { path: "/" }).status(204).send(null);
+      reply.clearCookie(sessionCookie(), authCookieOptions()).status(204).send(null);
       return;
     }
 
     reply
-      .setCookie(SESSION_COOKIE, returning ?? "", {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+      .setCookie(sessionCookie(), returning ?? "", {
+        ...authCookieOptions(),
         maxAge: SESSION_TTL_MS / 1000,
       })
       .status(204)
@@ -583,8 +637,32 @@ export class AuthController {
   @Post("logout")
   @UseGuards(SessionGuard)
   async logout(@Req() request: ClientRequest, @Res() reply: Reply): Promise<void> {
-    if (request.sessionToken) await this.sessions.revoke(request.sessionToken);
-    reply.clearCookie(SESSION_COOKIE, { path: "/" }).status(204).send(null);
+    if (request.sessionToken) {
+      await this.sessions.revoke(request.sessionToken);
+      await this.closeConsoles(request.sessionToken);
+    }
+    reply.clearCookie(sessionCookie(), authCookieOptions()).status(204).send(null);
+  }
+
+  /**
+   * Ferme les consoles ouvertes par une session qui se termine (NC-43).
+   *
+   * Le jeton d'une console vit dix minutes et Wings ne revérifie rien en cours
+   * de route : sans cet appel, une console restait ouverte — lecture et
+   * commandes — après la déconnexion. Seules celles de **cette** session :
+   * les autres appareils du compte gardent les leurs.
+   *
+   * Un node injoignable n'empêche pas de partir : la session est fermée en
+   * base, et le jeton expirera de lui-même. Les nodes sont prévenus en
+   * parallèle, pour qu'un seul muet ne fasse pas attendre la déconnexion de
+   * son délai multiplié par le nombre de consoles.
+   */
+  private async closeConsoles(sessionToken: string): Promise<void> {
+    await Promise.all(
+      [...this.wingsTokens.revocableForSession(sessionToken)].map(([serverId, jtis]) =>
+        this.wings.denyWebsocketTokens(serverId, jtis).catch(() => undefined),
+      ),
+    );
   }
 
   @Get("me")
@@ -637,7 +715,7 @@ export class AuthController {
     if (throttle === null) return;
 
     if (!(await verifyPassword(user.passwordHash, parsed.data.currentPassword))) {
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "reauthentication");
       await pause(throttle.delayMs);
       reply.status(403).send({ message: "Mot de passe actuel incorrect.", problems: [] });
       return;
@@ -671,6 +749,14 @@ export class AuthController {
      */
     const revoked = await this.sessions.revokeOthers(user.id, request.sessionToken);
 
+    /*
+     * Les liens de réinitialisation en attente meurent avec l'ancien mot de
+     * passe, pour la même raison que les sessions : celui qui a demandé un
+     * lien « au cas où », ou qui l'a fait demander par un autre, garderait une
+     * heure durant de quoi reprendre le compte qu'on vient de lui fermer.
+     */
+    await this.tokens.revokePending(user.id, ["password_reset"]);
+
     await this.activity.record({
       event: "account.password",
       serverId: null,
@@ -683,8 +769,28 @@ export class AuthController {
       // d'audit se lit par des gens qui n'ont pas à en apprendre autant.
       properties: { revokedSessions: revoked, pwnedCheckFailed },
     });
+    this.noticeCredentialChange(user.id, "passwordChanged", request);
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
+  }
+
+  /**
+   * Prévient le titulaire d'un changement d'authentifiant (ASVS 2.2.3, 2.5.5).
+   *
+   * Sans rien attendre : l'avis part en tâche détachée, et une panne de
+   * courrier ne défait pas un geste déjà accompli.
+   */
+  private noticeCredentialChange(
+    userId: string,
+    kind: CredentialChange,
+    request: ClientRequest,
+  ): void {
+    this.alerts.afterCredentialChange({
+      userId,
+      kind,
+      ip: request.ip ?? null,
+      host: arrivalHost(request),
+    });
   }
 
   /* --- Mot de passe oublié ------------------------------------------------ */
@@ -734,6 +840,27 @@ export class AuthController {
     // tait. Dire « ce compte passe par le SSO » renseignerait sur son existence.
     if (!user?.passwordHash) return;
 
+    /*
+     * La suite ne s'attend pas (doute D-3 de l'audit ASVS).
+     *
+     * Le corps de la réponse ne dit rien de l'adresse ; le temps le disait :
+     * pour un compte existant, la route attendait l'émission du jeton, le
+     * rendu du courrier et l'écriture au journal — de quoi trier une liste
+     * d'adresses sous charge. Détachée, la réponse part au même instant dans
+     * tous les cas ; seule la lecture du compte, commune aux deux, la précède.
+     */
+    void this.requestPasswordReset(user, request).catch((error: unknown) => {
+      this.logger.error(
+        `Demande de réinitialisation non aboutie : ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+
+  /** Émet le lien de réinitialisation d'un compte existant, et le consigne. */
+  private async requestPasswordReset(
+    user: { id: string; email: string },
+    request: ClientRequest,
+  ): Promise<void> {
     /*
      * Sans courrier, on n'émet **rien**, et plafond atteint vaut le même
      * silence qu'un compte inconnu (voir `AccountMailService`).
@@ -837,6 +964,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { revokedSessions: revoked, pwnedCheckFailed },
     });
+    this.noticeCredentialChange(user.id, "passwordReset", request);
 
     reply.status(200).send({ data: { revokedSessions: revoked, pwnedCheckFailed } });
   }
@@ -1076,9 +1204,12 @@ export class AuthController {
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
   async twoFactorStatus(
     @Req() request: ClientRequest,
-  ): Promise<{ data: TwoFactorStatus & { required: boolean } }> {
+  ): Promise<{ data: TwoFactorStatus & { required: boolean; localPassword: boolean } }> {
     const user = requireUser(request);
-    const status = await this.twoFactor.status(user.id);
+    const [status, account] = await Promise.all([
+      this.twoFactor.status(user.id),
+      this.users.findById(user.id),
+    ]);
 
     /*
      * La plateforme exige-t-elle une seconde preuve de **ce** compte ?
@@ -1089,12 +1220,23 @@ export class AuthController {
      * cherche à expliquer.
      *
      * Faux pour un compte ordinaire, quelle que soit la valeur du réglage : il
-     * ne porte que sur le personnel.
+     * ne porte que sur le personnel et les revendeurs — les rôles dont
+     * `StaffTwoFactorGuard` garde l'espace.
      */
     const required =
-      isAdminRole(user.role) && (await this.platform.boolean("security.staffRequires2fa"));
+      requiresStaffSecondFactor(user.role) &&
+      (await this.platform.boolean("security.staffRequires2fa"));
 
-    return { data: { ...status, required } };
+    /*
+     * Le compte a-t-il un mot de passe local à redonner ?
+     *
+     * Les gestes sensibles le redemandent ; un compte venu d'un fournisseur
+     * d'identité ou de la facturation n'en a pas, et l'écran ne doit pas lui
+     * présenter un champ qu'il ne saurait pas remplir.
+     */
+    const localPassword = Boolean(account?.passwordHash);
+
+    return { data: { ...status, required, localPassword } };
   }
 
   /**
@@ -1104,11 +1246,22 @@ export class AuthController {
    * fourni : une préparation abandonnée à mi-chemin — onglet fermé, téléphone à
    * plat — ne doit pas laisser un compte protégé par un secret que personne
    * n'a.
+   *
+   * Le mot de passe est redemandé (ASVS 3.7.1) : sans lui, une session volée
+   * enrôlait son propre TOTP, et le titulaire se retrouvait devant un code
+   * qu'il n'a jamais eu. Un compte sans mot de passe local passe, faute de
+   * secret à redonner (voir `WithoutLocalPassword`).
    */
   @Post("2fa/setup")
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
-  async twoFactorSetup(@Req() request: ClientRequest, @Res() reply: Reply): Promise<void> {
-    const user = requireUser(request);
+  async twoFactorSetup(
+    @Body() body: unknown,
+    @Req() request: ClientRequest,
+    @Res() reply: Reply,
+  ): Promise<void> {
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const status = await this.twoFactor.status(user.id);
     if (status.enabled) {
       // Repartir d'un secret neuf effacerait celui qui fonctionne, sur une
@@ -1165,6 +1318,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: {},
     });
+    this.noticeCredentialChange(user.id, "twoFactorEnabled", request);
 
     reply.status(200).send({ data: { recoveryCodes } });
   }
@@ -1232,6 +1386,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { remainingPasskeys: remaining.length },
     });
+    this.noticeCredentialChange(user.id, "twoFactorDisabled", request);
 
     reply.status(204).send(null);
   }
@@ -1276,6 +1431,26 @@ export class AuthController {
     if (!consumed) {
       reply.status(401).send({
         message: "Ce lien de connexion n'est plus valable. Reprenez depuis votre espace client.",
+      });
+      return;
+    }
+
+    /*
+     * Le second facteur du panel s'applique aussi à ce chemin (NC-05).
+     *
+     * Le facturier atteste une identité, comme l'annuaire ou Google : il ne
+     * prouve pas la possession de la clé enregistrée ici. Sans ce contrôle,
+     * qui tenait l'espace client — ou une clé applicative — entrait dans un
+     * compte protégé comme dans un autre. Le défi scelle la méthode : la
+     * session ouverte au second facteur se dit venue de la facturation.
+     */
+    const status = await this.twoFactor.status(consumed.userId);
+    if (status.enabled) {
+      reply.status(200).send({
+        twoFactorRequired: true,
+        challenge: issueChallenge("login", consumed.userId, { method: "billing_sso" }),
+        methods: { totp: status.totp, passkeys: status.passkeys > 0 },
+        remainingRecoveryCodes: status.remainingRecoveryCodes,
       });
       return;
     }
@@ -1511,7 +1686,11 @@ export class AuthController {
       return;
     }
 
-    const user = requireUser(request);
+    // Une clé SSH ouvre les fichiers de tous les serveurs du compte, et survit
+    // à la session qui l'a posée : le mot de passe est redemandé.
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const key = await this.sshKeys.add(user.id, parsed.data.name, parsed.data.publicKey);
 
     await this.activity.record({
@@ -1565,13 +1744,22 @@ export class AuthController {
    * Le défi aléatoire ne part pas seul : il revient dans un jeton chiffré que
    * l'API pourra relire. Le garder en mémoire côté serveur supposerait une
    * seule instance d'API, ce que la première mise à l'échelle démentirait.
+   *
+   * Le mot de passe est redemandé ici, au début de la cérémonie : c'est le
+   * seul moment où l'écran peut encore le demander, avant que la boîte de
+   * dialogue du navigateur ne prenne la main. Le défi scellé qui en sort vaut
+   * ensuite confirmation pour l'enregistrement.
    */
   @Post("2fa/passkeys/options")
   @UseGuards(SessionGuard, BrowserSessionGuard, ImpersonationReadOnlyGuard)
   async passkeyRegistrationOptions(
+    @Body() body: unknown,
     @Req() request: ClientRequest,
-  ): Promise<{ data: { options: unknown; challenge: string } }> {
-    const user = requireUser(request);
+    @Res() reply: Reply,
+  ): Promise<void> {
+    const user = await this.confirmedUser(body, request, reply, "allow");
+    if (!user) return;
+
     const rp = relyingPartyFromEnv();
     const options = await this.passkeyService.registrationOptions(rp, {
       id: user.id,
@@ -1579,12 +1767,12 @@ export class AuthController {
       name: `${user.nameFirst} ${user.nameLast}`.trim(),
     });
 
-    return {
+    reply.status(200).send({
       data: {
         options,
         challenge: issueChallenge("passkey-register", user.id, { webauthn: options.challenge }),
       },
-    };
+    });
   }
 
   /** Vérifie l'enregistrement et range la clé. */
@@ -1603,10 +1791,14 @@ export class AuthController {
 
     const user = requireUser(request);
     const sealed = readChallenge("passkey-register", parsed.data.challenge);
-    // Consommé à la lecture : une réponse WebAuthn est valide ou à refaire,
-    // et le défi qu'elle signe ne doit pas resservir.
-    consumeChallenge(parsed.data.challenge);
-    if (!sealed || sealed.userId !== user.id || !sealed.webauthn) {
+    // Consommé à la lecture, en base : une réponse WebAuthn est valide ou à
+    // refaire, et le défi qu'elle signe ne doit resservir nulle part.
+    if (
+      !sealed ||
+      sealed.userId !== user.id ||
+      !sealed.webauthn ||
+      !(await this.tokens.claimChallenge(sealed))
+    ) {
       reply.status(401).send({ message: "Demande expirée. Recommencez." });
       return;
     }
@@ -1646,6 +1838,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { label: parsed.data.label.trim() || DEFAULT_PASSKEY_LABEL },
     });
+    this.noticeCredentialChange(user.id, "passkeyAdded", request);
 
     reply.status(201).send({ data: { recoveryCodes } });
   }
@@ -1696,6 +1889,7 @@ export class AuthController {
       userAgent: headerValue(request.headers["user-agent"]),
       properties: { remaining: status.passkeys },
     });
+    this.noticeCredentialChange(user.id, "passkeyRemoved", request);
 
     reply.status(204).send(null);
   }
@@ -1715,7 +1909,8 @@ export class AuthController {
     }
 
     const sealed = readChallenge("login", parsed.data.challenge);
-    if (!sealed) {
+    // Un défi déjà servi n'ouvre pas non plus de cérémonie.
+    if (!sealed || (await this.tokens.challengeClaimed(sealed.jti))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
@@ -1728,8 +1923,11 @@ export class AuthController {
         options,
         // Nouveau jeton, de nature « passkey-login » : celui de la connexion ne
         // porte pas le défi aléatoire, et l'un ne doit pas valoir pour l'autre.
+        // Il emporte l'identité du défi de connexion, consommé avec lui quand
+        // la clé ouvre la session (NC-32).
         challenge: issueChallenge("passkey-login", sealed.userId, {
           webauthn: options.challenge,
+          parent: { jti: sealed.jti, expiresAt: sealed.expiresAt },
         }),
       },
     });
@@ -1749,14 +1947,16 @@ export class AuthController {
     }
 
     const sealed = readChallenge("passkey-login", parsed.data.challenge);
-    consumeChallenge(parsed.data.challenge);
     if (!sealed?.webauthn) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
 
     const user = await this.users.findById(sealed.userId);
-    if (!user) {
+    // Consommé à la lecture, en base, une fois le compte relu (la trace s'y
+    // rattache) : l'assertion est valide ou à refaire, et le défi qu'elle
+    // signe ne doit resservir sur aucune instance.
+    if (!user || !(await this.tokens.claimChallenge(sealed))) {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
@@ -1772,53 +1972,64 @@ export class AuthController {
       // Pas de délai progressif : une signature ne se devine pas par essais
       // successifs, contrairement à six chiffres. Le ralentissement viserait
       // un risque qui n'existe pas ici.
-      await this.recordFailure(user.email, request, user);
+      await this.recordFailure(user.email, request, user, "passkey");
       reply.status(401).send({ message: publicFailureMessage() });
       return;
     }
 
+    /*
+     * Le défi de connexion d'où vient la cérémonie a servi lui aussi (NC-32).
+     *
+     * Seul le défi `passkey-login` était consommé : le défi `login` restait
+     * valable cinq minutes après la connexion, et rouvrait une session avec un
+     * code de secours ou une nouvelle cérémonie. Consommé **après** la
+     * signature vérifiée, pas avant : une clé qui échoue laisse l'utilisateur
+     * réessayer, ou passer au code, sans retaper son mot de passe. Déjà servi
+     * — par un code, dans un autre onglet —, la session n'est pas ouverte une
+     * seconde fois.
+     */
+    if (
+      !sealed.parent ||
+      !(await this.tokens.claimChallenge({ ...sealed.parent, userId: sealed.userId }))
+    ) {
+      reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
+      return;
+    }
+
+    // Toutes les preuves sont données : l'adresse devient connue du compte,
+    // comme après un code (NC-29).
+    await this.users.recordAttempt(user.email, request.ip ?? null, true);
     await this.issueSession(user.id, request, reply, "passkey");
   }
 
   /**
    * Relit le compte appelant après confirmation de son mot de passe.
    *
-   * Répond elle-même en cas de refus et rend `null` : les deux routes qui
-   * l'emploient ont le même contrôle à faire, et le dupliquer ferait qu'un jour
-   * l'une des deux l'oublierait.
+   * Répond elle-même en cas de refus et rend `null` : toutes les routes qui
+   * l'emploient ont le même contrôle à faire, et le dupliquer ferait qu'un
+   * jour l'une d'elles l'oublierait. Le contrôle lui-même vit dans
+   * `PasswordConfirmationService`, que la création d'une clé d'API emploie
+   * aussi.
    */
   private async confirmedUser(
     body: unknown,
     request: ClientRequest,
     reply: Reply,
-  ): Promise<{ id: string; email: string } | null> {
-    const parsed = PasswordConfirmation.safeParse(body);
-    if (!parsed.success) {
-      reply.status(422).send({ message: "Mot de passe attendu." });
-      return null;
+    withoutLocalPassword: WithoutLocalPassword = "refuse",
+  ): Promise<ConfirmedUser | null> {
+    const outcome = await this.confirmation.confirm(
+      requireUser(request).id,
+      body,
+      attemptOrigin(request),
+      withoutLocalPassword,
+    );
+    if (outcome.ok) return outcome.user;
+
+    if (outcome.retryAfterSeconds !== undefined) {
+      reply.header("Retry-After", String(outcome.retryAfterSeconds));
     }
-
-    const session = requireUser(request);
-    const user = await this.users.findById(session.id);
-    if (!user?.passwordHash) {
-      reply.status(409).send({ message: "Ce compte n'a pas de mot de passe local." });
-      return null;
-    }
-
-    // Même verrou qu'à la connexion : ces routes retirent le second facteur ou
-    // une passkey, une session volée ne doit pas pouvoir y deviner le mot de
-    // passe sans limite.
-    const throttle = await this.throttle(user.email, request.ip ?? null, reply);
-    if (throttle === null) return null;
-
-    if (!(await verifyPassword(user.passwordHash, parsed.data.password))) {
-      await this.recordFailure(user.email, request, user);
-      await pause(throttle.delayMs);
-      reply.status(403).send({ message: "Mot de passe incorrect." });
-      return null;
-    }
-
-    return user;
+    reply.status(outcome.status).send({ message: outcome.message });
+    return null;
   }
 
   /**
@@ -1866,7 +2077,7 @@ export class AuthController {
      * renverrait à chaque page un cookie que le serveur refuse, c'est-à-dire
      * une déconnexion qui n'a pas l'air d'en être une.
      */
-    if (wasCurrent) reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    if (wasCurrent) reply.clearCookie(sessionCookie(), authCookieOptions());
     reply.status(204).send(null);
   }
 
@@ -1918,10 +2129,6 @@ function isPanelRedirect(redirectUri: string): boolean {
   } catch {
     return false;
   }
-}
-
-function pause(ms: number): Promise<void> {
-  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 /**

@@ -12,12 +12,16 @@
  * l'historique du shell, et un mot de passe choisi pour un compte de secours
  * est presque toujours un mot de passe déjà utilisé ailleurs.
  *
- * Il est à changer à la première connexion. Le script ne crée rien si
- * l'adresse existe déjà : relancer une livraison ne doit jamais réinitialiser
- * le mot de passe d'un compte en service.
+ * Il est **provisoire** : valable vingt-quatre heures, et la connexion demande
+ * d'en changer tant qu'il sert (ASVS 2.3.1, voir `provisionalPassword`). Le
+ * script ne crée rien si l'adresse existe déjà : relancer une livraison ne
+ * doit jamais réinitialiser le mot de passe d'un compte en service.
  */
-import { randomBytes } from "node:crypto";
-import { hashPassword } from "@gamedashboard/auth";
+import {
+  hashPassword,
+  PROVISIONAL_PASSWORD_TTL_MS,
+  provisionalPassword,
+} from "@gamedashboard/auth";
 import { createClient, users } from "@gamedashboard/db";
 import { eq } from "drizzle-orm";
 
@@ -36,12 +40,12 @@ if (existing.length > 0) {
   process.exit(0);
 }
 
-// base64url : pas de caractère qu'un terminal ou un copier-coller abîme.
-const password = randomBytes(24).toString("base64url");
+const { password, expiresAt } = provisionalPassword();
 
 await db.insert(users).values({
   email,
   passwordHash: await hashPassword(password),
+  passwordExpiresAt: expiresAt?.toISOString() ?? null,
   nameFirst,
   nameLast,
   role: "admin",
@@ -52,6 +56,9 @@ await db.insert(users).values({
 });
 
 console.log(`Administrateur créé : ${email}`);
+// Cette ligne est lue telle quelle par `infra/prod/installer.sh`.
 console.log(`Mot de passe provisoire : ${password}`);
-console.log("À changer à la première connexion.");
+console.log(
+  `Valable ${PROVISIONAL_PASSWORD_TTL_MS / 3_600_000} heures : à changer à la première connexion.`,
+);
 process.exit(0);

@@ -83,7 +83,7 @@ say "Environnement"
 # La clé de chiffrement n'est générée qu'une fois. La régénérer rendrait
 # illisibles tous les secrets déjà stockés — jetons de node, mots de passe de
 # bases, secrets de webhooks : il faudrait tous les réémettre, pas seulement
-# remettre une clé.
+# remettre une clé. Elle vit dans ce fichier, sans coffre : ADR 0007.
 if [ ! -f "$ENVDIR/api.env" ]; then
   cat > "$ENVDIR/api.env" <<EOF
 NODE_ENV=production

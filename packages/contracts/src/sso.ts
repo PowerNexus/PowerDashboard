@@ -59,13 +59,20 @@ export function normalizeSsoProfile(raw: unknown): SsoProfile {
   const subject = firstString(claims, ["sub", "id", "user_id", "userId"]);
   if (!subject) throw new SsoProfileError("aucun identifiant stable (« sub »)");
 
-  const email = firstString(claims, ["email", "mail", "preferred_username"]);
+  const declaree = firstString(claims, ["email"]);
+  const email = declaree ?? firstString(claims, ["mail", "preferred_username"]);
 
   // `email_verified` arrive tantôt en booléen, tantôt en chaîne « true » —
   // les deux sont courants, et n'accepter que l'un rejetterait des
   // fournisseurs parfaitement corrects.
+  //
+  // Il atteste la revendication `email`, et elle seule (OIDC Core §5.1).
+  // Une adresse prise faute de mieux dans `mail` ou `preferred_username` —
+  // que bien des annuaires laissent saisir à l'utilisateur — n'est jamais
+  // vérifiée : sinon `admin@…` déclaré à la main se rapprochait du compte de
+  // l'administrateur (NC-27). Elle sert encore d'adresse à un compte créé.
   const verifiedClaim = claims.email_verified ?? claims.emailVerified;
-  const emailVerified = verifiedClaim === true || verifiedClaim === "true";
+  const emailVerified = declaree !== null && (verifiedClaim === true || verifiedClaim === "true");
 
   const { nameFirst, nameLast } = splitName(claims);
   return { subject, email, emailVerified, nameFirst, nameLast };

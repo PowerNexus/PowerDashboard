@@ -25,7 +25,7 @@ import { DATABASE } from "../../common/database.provider";
 import { WingsClientService } from "../wings/wings-client.service";
 import { EngineSourcesService } from "./engine-sources";
 import { EulaService } from "./eula.service";
-import { ModpackSourceService } from "./modpack-source";
+import { isTrustedDownload, ModpackSourceService } from "./modpack-source";
 import { type DetectedRuntime, detectRuntime } from "./server-runtime";
 
 /**
@@ -342,6 +342,15 @@ export class EngineService {
   ): Promise<{ label: string; files: number }> {
     const archive = await this.packs.archiveOf(versionId);
     if (!archive) throw new NotFoundException("Cette version de modpack n'a pas d'archive.");
+    // Même liste que pour les mods de l'index, lus plus bas : l'adresse de
+    // l'archive vient de l'API de Modrinth, et le daemon la suivrait depuis
+    // le réseau du node sans regarder.
+    if (!isTrustedDownload(archive.url)) {
+      this.logger.warn(`Archive de modpack refusée : ${archive.url}`);
+      throw new ConflictException(
+        "L'archive de ce modpack est servie depuis une adresse hors des dépôts connus. Installation refusée.",
+      );
+    }
 
     // 1. L'archive, puis son ouverture, toutes deux dans le conteneur.
     await this.wings.pullFile(serverId, "/", archive.url, archive.fileName);

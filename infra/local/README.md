@@ -76,7 +76,7 @@ bash infra/local/verifier-wings.sh          # le daemon accepte la configuration
 bash infra/local/verifier-cycle-serveur.sh  # créer, installer, démarrer, arrêter, supprimer
 bash infra/local/verifier-sftp.sh           # clé publique, authentification, dépôt de fichier
 bash infra/local/verifier-sauvegardes.sh    # archive, compte rendu, téléchargement, restauration
-bash infra/local/verifier-console.sh        # autorisation, flux, commande envoyée et reçue
+bash infra/local/verifier-console.sh        # autorisation, flux, commande par l'API, socket muette aux ordres
 bash infra/local/verifier-bases.sh          # hôte MySQL, identifiants, connexion réelle, quota
 bash infra/local/verifier-revendeur.sh      # parc, offre complète, enveloppe, périmètre
 bash infra/local/verifier-transfert.sh      # deux daemons, copie, intégrité, nettoyage

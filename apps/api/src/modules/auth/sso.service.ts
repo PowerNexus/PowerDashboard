@@ -333,7 +333,10 @@ export class SsoService {
     const [created] = await this.db
       .insert(users)
       .values({
-        email: profile.email,
+        // En minuscules, comme toutes les autres écritures : l'unicité et
+        // chaque lecture comparent en `lower()`, et une adresse gardée telle
+        // que le fournisseur l'a écrite finissait par côtoyer sa jumelle.
+        email: profile.email.toLowerCase(),
         // Aucun mot de passe local : le compte n'existe que par le
         // fournisseur. Une chaîne vide serait un condensat valide au sens du
         // type et ouvrirait une connexion sans secret.
@@ -364,10 +367,18 @@ export class SsoService {
    * permet d'expliquer une liaison surprenante.
    *
    * Idempotent : rejouer une connexion ne doit pas échouer sur l'index unique.
+   *
+   * **C'est l'index qui tranche**, pas la lecture de `resolveUser` : deux
+   * cérémonies concurrentes, pour deux identités partageant l'adresse,
+   * lisaient toutes deux « aucune liaison » et écrivaient chacune la sienne
+   * (doute D-7 de l'audit). L'unicité `(user_id, provider)` en laisse passer
+   * une ; l'insertion qui n'a rien écrit relit ce qui est lié, et refuse si
+   * ce n'est pas cette identité — sans quoi elle ouvrirait le compte à un
+   * profil qui n'y est pas lié.
    */
   private async link(userId: string, profile: SsoProfile, provider: SsoProvider): Promise<void> {
     const now = new Date().toISOString();
-    await this.db
+    const [ecrite] = await this.db
       .insert(userOauthAccounts)
       .values({
         userId,
@@ -376,7 +387,19 @@ export class SsoService {
         email: profile.email ?? "",
         linkedAt: now,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: userOauthAccounts.id });
+    if (ecrite) return;
+
+    const [liee] = await this.db
+      .select({ providerUserId: userOauthAccounts.providerUserId })
+      .from(userOauthAccounts)
+      .where(and(eq(userOauthAccounts.userId, userId), eq(userOauthAccounts.provider, provider)))
+      .limit(1);
+
+    if (liee?.providerUserId !== profile.subject) {
+      throw new SsoExchangeError("ce compte est déjà lié à une autre identité");
+    }
   }
 
   /**
@@ -398,8 +421,8 @@ export class SsoService {
         ...(profile.nameLast ? { nameLast: profile.nameLast } : {}),
         // L'adresse ne bouge que si le fournisseur atteste l'avoir vérifiée :
         // sans cela, il pourrait réécrire un compte sur une adresse qui n'est
-        // pas à son titulaire.
-        ...(profile.email && profile.emailVerified ? { email: profile.email } : {}),
+        // pas à son titulaire. En minuscules, comme à la création.
+        ...(profile.email && profile.emailVerified ? { email: profile.email.toLowerCase() } : {}),
         // `lastLoginAt` n'est **pas** touché ici : c'est `issueSession` qui le
         // pose, pour toutes les façons d'entrer. Deux écrivains pour la même
         // colonne finiraient par se contredire, et l'un des deux resterait en

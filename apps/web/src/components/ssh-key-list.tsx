@@ -7,9 +7,10 @@ import {
   DialogContent,
   FormField,
   Input,
+  PasswordInput,
   RelativeTime,
 } from "@gamedashboard/ui";
-import { Plus, TerminalSquare, Trash2 } from "lucide-react";
+import { Lock, Plus, TerminalSquare, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
@@ -24,25 +25,34 @@ import { addSshKey, removeSshKey, type SshKey } from "@/server/api/ssh-keys";
  * SFTP se confie à un client tiers, alors qu'une clé ne quitte pas la machine
  * de son porteur.
  */
-export function SshKeyList({ initial }: { initial: SshKey[] }) {
+export function SshKeyList({
+  initial,
+  localPassword,
+}: {
+  initial: SshKey[];
+  /** Le compte a un mot de passe à redonner avant d'ajouter une clé. */
+  localPassword: boolean;
+}) {
   const t = useTranslations("security");
   const tc = useTranslations("common");
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [publicKey, setPublicKey] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const submit = () =>
     startTransition(async () => {
-      const result = await addSshKey(name, publicKey);
+      const result = await addSshKey(name, publicKey, password);
       setError(result.error);
       if (result.error) return;
 
       setAdding(false);
       setName("");
       setPublicKey("");
+      setPassword("");
       router.refresh();
     });
 
@@ -133,7 +143,11 @@ export function SshKeyList({ initial }: { initial: SshKey[] }) {
               <Button variant="secondary" onClick={() => setAdding(false)}>
                 {tc("cancel")}
               </Button>
-              <Button loading={pending} onClick={submit}>
+              <Button
+                loading={pending}
+                disabled={localPassword && password === ""}
+                onClick={submit}
+              >
                 {tc("save")}
               </Button>
             </>
@@ -174,6 +188,22 @@ export function SshKeyList({ initial }: { initial: SshKey[] }) {
             {/* Dit une fois, à l'endroit où l'erreur se commet : c'est le
                 fichier « .pub » qu'on colle, jamais la clé privée. */}
             <AlertBanner variant="info">{t("sshKeyPrivateWarning")}</AlertBanner>
+
+            {/* Une clé ouvre les fichiers de tous les serveurs du compte et
+                survit à la session : elle ne se pose que contre le mot de passe. */}
+            {localPassword ? (
+              <FormField label={t("confirmPassword")} description={t("confirmPasswordHint")}>
+                {(id) => (
+                  <PasswordInput
+                    id={id}
+                    leadingIcon={<Lock />}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                )}
+              </FormField>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

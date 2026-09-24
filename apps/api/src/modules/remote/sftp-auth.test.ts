@@ -1,5 +1,123 @@
-import { describe, expect, it } from "vitest";
-import { splitUsername, toWingsPermissions } from "./sftp-auth.service";
+import { hashPassword } from "@gamedashboard/auth";
+import type { SftpAuthRequest } from "@gamedashboard/contracts";
+import type { Database } from "@gamedashboard/db";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { SshKeyRepository } from "../auth/ssh-key.repository";
+import { SftpAuthService, splitUsername, toWingsPermissions } from "./sftp-auth.service";
+
+const NODE = "11111111-1111-1111-1111-111111111111";
+const SERVER = "1a2b3c4d-0000-4000-8000-000000000000";
+const OWNER = "44444444-4444-4444-4444-444444444444";
+const PASSWORD = "cheval-agrafe-pile-correcte";
+const USERNAME = "client@exemple.fr.1a2b3c4d";
+
+/**
+ * Base simulée : chaque lecture (`…limit(1)`) rend la réponse suivante de la
+ * file, vide une fois la file épuisée. Le compteur dit si la base a été lue —
+ * c'est-à-dire si un refus a été décidé avant ou après vérification.
+ */
+function sftp(reponses: unknown[][] = []) {
+  let lectures = 0;
+  const chain = {
+    from: () => chain,
+    where: () => chain,
+    limit: async () => {
+      lectures += 1;
+      return reponses.shift() ?? [];
+    },
+  };
+  const db = { select: () => chain } as unknown as Database;
+  const svc = new SftpAuthService(db, { markUsed: vi.fn() } as unknown as SshKeyRepository);
+  return { svc, lectures: () => lectures };
+}
+
+const demande = (over: Partial<SftpAuthRequest> = {}): SftpAuthRequest => ({
+  type: "password",
+  username: USERNAME,
+  password: PASSWORD,
+  ip: "82.66.14.201",
+  ...over,
+});
+
+describe("SFTP : état du serveur, limitation, mémoire", () => {
+  let passwordHash: string;
+
+  beforeAll(async () => {
+    passwordHash = await hashPassword(PASSWORD);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Le propriétaire, avec le bon mot de passe, sur un serveur dans cet état. */
+  function proprietaire(state: string | null) {
+    return sftp([
+      [{ id: SERVER, ownerId: OWNER, state }],
+      [{ id: OWNER, email: "client@exemple.fr", passwordHash, suspendedAt: null }],
+    ]);
+  }
+
+  it("ouvre au propriétaire un serveur ordinaire", async () => {
+    // Témoin des deux suivants : sans lui, un refus pourrait venir d'une
+    // doublure mal montée plutôt que de l'état du serveur.
+    const { svc } = proprietaire(null);
+    await expect(svc.authenticate(NODE, demande())).resolves.toMatchObject({
+      server: SERVER,
+      user: OWNER,
+    });
+  });
+
+  it("n'ouvre pas un serveur en cours de transfert", async () => {
+    // Le daemon de départ archive les fichiers pendant ce temps : une
+    // écriture SFTP s'y perdrait, ou arriverait à moitié sur l'autre node.
+    const { svc } = proprietaire("transferring");
+    await expect(svc.authenticate(NODE, demande())).resolves.toBeNull();
+  });
+
+  it("freine un compte éprouvé depuis de nombreuses adresses", async () => {
+    /*
+     * Les compteurs par adresse, et par couple adresse + compte, ne voient
+     * rien d'une attaque répartie : trente adresses, un essai chacune, et
+     * chacune reste sous ses seuils. Le compteur par nom d'utilisateur, lui,
+     * les additionne.
+     */
+    const { svc, lectures } = sftp();
+    for (let i = 0; i < 30; i += 1) {
+      await svc.authenticate(NODE, demande({ ip: `203.0.113.${i}`, password: "faux" }));
+    }
+
+    const avant = lectures();
+    await expect(svc.authenticate(NODE, demande({ ip: "198.51.100.7" }))).resolves.toBeNull();
+    // Refus sans vérification : la base n'a pas été lue.
+    expect(lectures()).toBe(avant);
+  });
+
+  it("oublie les compteurs dont la fenêtre est écoulée", async () => {
+    // La `Map` ne se vidait qu'au passage d'une même adresse : des milliers
+    // d'adresses de passage restaient en mémoire pour toujours.
+    const { svc } = sftp();
+    const failures = (svc as unknown as { failures: Map<string, unknown> }).failures;
+    const debut = Date.now();
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(debut);
+
+    // Identifiants malformés, tous différents : refusés sans lire la base, et
+    // sans qu'aucun compteur n'atteigne son seuil.
+    for (let i = 0; i < 500; i += 1) {
+      await svc.authenticate(
+        NODE,
+        demande({ username: `balayage${i}`, ip: `10.0.${i >> 8}.${i}` }),
+      );
+    }
+    expect(failures.size).toBeGreaterThan(500);
+
+    horloge.mockReturnValue(debut + 11 * 60_000);
+    await svc.authenticate(NODE, demande({ username: "balayage", ip: "10.9.9.9" }));
+
+    // Ne restent que les compteurs de ce dernier essai.
+    expect(failures.size).toBeLessThanOrEqual(3);
+  });
+});
 
 describe("nom d'utilisateur SFTP", () => {
   it("coupe au dernier point, pas au premier", () => {

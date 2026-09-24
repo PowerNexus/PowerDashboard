@@ -370,7 +370,7 @@ export const SESSION_ROUTES: ApiRoute[] = [
   {
     method: "POST",
     path: "/auth/2fa/setup",
-    summary: "Prépare un secret TOTP et rend son URI otpauth.",
+    summary: "Prépare un secret TOTP et rend son URI otpauth. Mot de passe exigé.",
     scope: null,
     group: "Double authentification",
   },
@@ -405,7 +405,7 @@ export const SESSION_ROUTES: ApiRoute[] = [
   {
     method: "POST",
     path: "/auth/2fa/passkeys/options",
-    summary: "Options d'enregistrement WebAuthn et défi scellé.",
+    summary: "Options d'enregistrement WebAuthn et défi scellé. Mot de passe exigé.",
     scope: null,
     group: "Clés d'accès",
   },
@@ -632,16 +632,11 @@ export const REALTIME_EVENTS: RealtimeEvent[] = [
     summary: "Avancement d'une sauvegarde en cours.",
     scope: "backups.read",
   },
-  {
-    name: "console.send",
-    direction: "in",
-    summary: "Envoyer une commande à la console.",
-    scope: "console.send",
-  },
-  {
-    name: "power",
-    direction: "in",
-    summary: "Envoyer un signal d'alimentation.",
-    scope: "power.*",
-  },
+  /*
+   * Aucun événement entrant : le jeton de console ne sert qu'à lire. Commandes
+   * et signaux d'alimentation passent par `POST /servers/{server}/command` et
+   * `POST /servers/{server}/power`, qui vérifient que le serveur peut obéir et
+   * consignent le geste. Les annoncer ici promettait une porte que le daemon
+   * refuse désormais (audit ASVS, NC-14).
+   */
 ];

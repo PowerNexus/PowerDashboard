@@ -7,14 +7,18 @@
 # le relais de Next, l'API qui signe un jeton, et le daemon qui ouvre le flux.
 #
 # Ce que le panel promet ici : « ouvrez la console de votre serveur, tapez une
-# commande, voyez ce qu'il répond ». Quatre questions :
+# commande, voyez ce qu'il répond ». Cinq questions :
 #
 #   1. le relais de Next rend-il une autorisation au navigateur ?
 #   2. refuse-t-il de le faire pour un site tiers ?
 #   3. le daemon accepte-t-il le jeton que l'API a signé ?
 #   4. **une commande envoyée revient-elle sur le flux ?**
+#   5. la socket refuse-t-elle les ordres qu'on lui passe directement ?
 #
-# La quatrième seule prouve que la console sert à quelque chose.
+# La quatrième seule prouve que la console sert à quelque chose. La commande y
+# part **par l'API**, comme depuis l'interface : le jeton de console ne sert
+# qu'à lire (audit ASVS, NC-14), et la cinquième vérifie que Wings, avec ce
+# jeton, ignore bien `send command` et `set state` reçus sur la socket.
 #
 # RÈGLE DE SÛRETÉ — tout est marqué « banc-console » et retiré à la fin.
 
@@ -199,7 +203,10 @@ cat > "$TMP/console.mjs" <<'JS'
 // toutes les consoles restent muettes, sans message d'erreur.
 import { createRequire } from "node:module";
 
-const [cheminWs, adresse, jeton, marqueur, origine] = process.argv.slice(2);
+// `mode` : « ecoute » ne fait que lire, comme l'interface ; « socket » tente
+// en plus de passer des ordres par la socket, ce que le jeton n'autorise plus.
+const [cheminWs, adresse, jeton, marqueur, origine, mode = "ecoute", delai = "20000"] =
+  process.argv.slice(2);
 // `createRequire` et non `import()` : on vise un répertoire de paquet, et
 // seule la résolution CommonJS sait y lire le point d'entrée déclaré.
 const WS = createRequire(import.meta.url)(cheminWs);
@@ -211,7 +218,7 @@ const fin = (code) => {
   console.log(JSON.stringify(vu));
   process.exit(code);
 };
-const minuteur = setTimeout(() => fin(0), 20000);
+const minuteur = setTimeout(() => fin(0), Number(delai));
 
 ws.addEventListener("open", () => {
   ws.send(JSON.stringify({ event: "auth", args: [jeton] }));
@@ -224,8 +231,14 @@ ws.addEventListener("message", (message) => {
 
   if (trame.event === "auth success") {
     vu.auth = true;
-    // Une commande dans le shell du conteneur : il la lit sur son entrée.
-    setTimeout(() => ws.send(JSON.stringify({ event: "send command", args: [`echo ${marqueur}`] })), 500);
+    if (mode === "socket") {
+      // Une commande dans le shell du conteneur, puis un arrêt forcé : deux
+      // ordres que Wings doit ignorer, faute de `control.*` dans le jeton.
+      setTimeout(() => {
+        ws.send(JSON.stringify({ event: "send command", args: [`echo ${marqueur}`] }));
+        ws.send(JSON.stringify({ event: "set state", args: ["kill"] }));
+      }, 500);
+    }
   }
   if (trame.event === "status") vu.statut = true;
   if (trame.event === "console output" && String(trame.args?.[0] ?? "").includes(marqueur)) {
@@ -243,8 +256,20 @@ MARQUEUR="banc-console-$RANDOM"
 # sous sa version, et coder « ws@8.21.3 » ici casserait au prochain relevé.
 CHEMIN_WS=$(ls -d /opt/gamedashboard/app/node_modules/.pnpm/ws@*/node_modules/ws 2>/dev/null | head -1)
 [ -n "$CHEMIN_WS" ] || echo "  ATTENTION paquet ws introuvable — le point 4 ne prouvera rien"
-node "$TMP/console.mjs" "$CHEMIN_WS" "$ADRESSE" "$JETON" "$MARQUEUR" "$WEB" \
-  > "$TMP/console.json" 2>"$TMP/console.err"
+# Le client écoute ; la commande part par l'API, comme depuis l'interface
+# (`sendConsoleCommand`). Le délai laisse au client le temps de s'authentifier.
+node "$TMP/console.mjs" "$CHEMIN_WS" "$ADRESSE" "$JETON" "$MARQUEUR" "$WEB" ecoute 20000 \
+  > "$TMP/console.json" 2>"$TMP/console.err" &
+ECOUTE=$!
+sleep 3
+code=$(cli -o /dev/null -w '%{http_code}' -X POST -d "{\"command\":\"echo $MARQUEUR\"}" \
+  "$API/api/v1/client/servers/$SRV/command")
+# 201 : Nest répond « created » à un POST ; on accepte les deux, comme au point 2.
+case "$code" in
+  200|201) printf '  OK    %-46s %s\n' "la commande part par l'API" "$code" ;;
+  *)       printf '  ÉCHEC %-45s attendu 200 ou 201, obtenu %s\n' "la commande part par l'API" "$code" ;;
+esac
+wait "$ECOUTE"
 verdict "true" "$(jq_ "str(d['auth']).lower()" < "$TMP/console.json")" "le daemon accepte le jeton"
 verdict "true" "$(jq_ "str(d['statut']).lower()" < "$TMP/console.json")" "il annonce l état du serveur"
 verdict "true" "$(jq_ "str(d['sortie']).lower()" < "$TMP/console.json")" "la commande envoyée revient sur le flux"
@@ -256,7 +281,22 @@ echo "    le daemon a noté :"
 grep -iE 'websocket|token|jwt|unauthor' "$TMP/wings.log" | tail -4 | cut -c1-150 | sed 's/^/      /'
 
 # ---------------------------------------------------------------------------
-titre "5. Un jeton étranger ne vaut rien"
+titre "5. La socket n'obéit plus : les ordres passent par l'API"
+# ---------------------------------------------------------------------------
+# Le jeton ne porte que la lecture (`websocket.connect`, `backup.read`,
+# `admin.websocket.install`). Un ordre tapé sur la socket contournait le
+# contrôle d'état du panel (suspendu, en installation, en transfert) et son
+# journal : Wings doit maintenant l'ignorer, commande comme alimentation.
+MARQUEUR_SOCKET="banc-socket-$RANDOM"
+node "$TMP/console.mjs" "$CHEMIN_WS" "$ADRESSE" "$JETON" "$MARQUEUR_SOCKET" "$WEB" socket 8000 \
+  > "$TMP/socket.json" 2>/dev/null
+verdict "true" "$(jq_ "str(d['auth']).lower()" < "$TMP/socket.json")" "le jeton ouvre toujours le flux"
+verdict "false" "$(jq_ "str(d['sortie']).lower()" < "$TMP/socket.json")" "une commande sur la socket est ignorée"
+verdict "oui" "$([ -n "$(docker ps -q --filter "name=$SRV" 2>/dev/null)" ] && echo oui || echo non)" \
+  "un arrêt forcé sur la socket aussi"
+
+# ---------------------------------------------------------------------------
+titre "6. Un jeton étranger ne vaut rien"
 # ---------------------------------------------------------------------------
 # Le jeton est signé pour un serveur précis. Le présenter sur le flux d'un
 # autre doit échouer — sinon toute console ouvrirait toutes les autres.

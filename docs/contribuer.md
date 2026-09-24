@@ -66,7 +66,8 @@ diverger.
   organisme manque.
 - **Aucune couleur en dur** : uniquement les tokens de
   `packages/ui/src/styles/tokens.css`. Chaque composant doit fonctionner dans
-  les deux thèmes, et la vitrine `/design` sert à le vérifier.
+  les deux thèmes, et la vitrine `/design` sert à le vérifier, en
+  développement (`pnpm dev`) : en production elle répond « introuvable ».
 - `SelectMenu` plutôt que `<select>`, `RelativeTime` pour toute date relative
   (voir le README).
 - **Textes** : le français fait foi dans `packages/i18n/src/messages/fr.json`.
@@ -91,10 +92,16 @@ diverger.
   Node 24 tue alors le processus entier.
 - **Hacher ou chiffrer** : ce qu'on ne relit jamais (mots de passe, sessions,
   clés d'API) se hache. Ce qu'il faut présenter à un tiers (jeton de node, mot
-  de passe MySQL, secret de webhook) se chiffre avec `encryptSecret`. Une
-  nouvelle colonne chiffrée **s'ajoute aussi à `TARGETS`** dans
-  `apps/api/scripts/rekey-secrets.mts`, sans quoi une rotation de la clé maître
-  la perd ([runbook](./runbooks/cle-maitre-secrets.md)).
+  de passe MySQL, secret de webhook) se chiffre avec `encryptRowSecret`
+  (`apps/api/src/common/row-secrets.ts`), qui lie la valeur à sa ligne : un
+  chiffré recopié sur une autre ligne ne se relit plus. L'identifiant de la
+  ligne doit donc exister avant l'écriture (`randomUUID()` passé à
+  `values({ id, … })`). Une nouvelle colonne chiffrée **s'ajoute à
+  `SECRET_COLUMNS`** (même fichier) **et à `REKEY_TARGETS`**
+  (`apps/api/src/common/rekey.ts`), sans quoi une rotation de la clé maître la
+  perd
+  ([runbook](./runbooks/cle-maitre-secrets.md)) ; `rekey.test.ts` compare les
+  deux listes.
 
 ### Ajouter une route publique
 
@@ -158,6 +165,12 @@ justifie après un changement structurel, et avant de pousser.
     scores s'écrivent au journal, même au vert ;
   - **les régressions visuelles** (`e2e/visuel.spec.ts`) : chaque écran
     comparé à sa capture de référence, bureau et mobile.
+
+  Le compte d'essai est administrateur, et la seconde preuve du personnel est
+  exigée par défaut : la CI la lève pour sa base jetable seule (étape
+  « Seconde preuve du personnel levée » de `ci.yml`). Sur une base locale
+  jetable, même geste avant `pnpm e2e` :
+  `insert into settings (key, value) values ('security.staffRequires2fa', 'false')`.
 
 On teste ce qui a des règles (seuils, précédences, permissions, formats) ; le
 rendu, lui, n'est tenu que par les captures.

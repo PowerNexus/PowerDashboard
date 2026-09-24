@@ -14,6 +14,7 @@ tenu, puis pourquoi elle a cessé de tenir.
 | [0004](./0004-sdk-ecrit.md) | Le SDK est écrit à la main, pas généré | Acceptée |
 | [0005](./0005-machine-muette.md) | La machine injoignable est un état de premier rang | Acceptée |
 | [0006](./0006-depot-sur-ext4.md) | Le dépôt vit sur ext4, pas sur `drvfs` | Acceptée |
+| [0007](./0007-secrets-et-donnees-au-repos.md) | Données personnelles en clair, clé maître en fichier, sans coffre ni poivre : la machine protège le repos | Acceptée |
 
 ## Format
 

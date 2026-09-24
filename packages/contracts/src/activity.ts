@@ -156,6 +156,12 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   // quand un frontal de confiance l'a fourni : c'est ce qui permet de
   // reconnaître un « nouveau pays » sans colonne dédiée.
   "account.login": { category: "account", label: "Connexion" },
+  // Une preuve refusée, avec l'étape (mot de passe, second facteur, clé
+  // d'accès, confirmation) et jamais le secret essayé. Seulement sur un compte
+  // existant : une adresse inconnue n'a pas d'historique où la ranger.
+  "account.login_failed": { category: "account", label: "Échec de connexion" },
+  // Consigné au franchissement du seuil, pas à chaque tentative refusée.
+  "account.locked": { category: "account", label: "Connexions suspendues après trop d'échecs" },
   "account.password": { category: "account", label: "Mot de passe modifié" },
   "account.2fa_enabled": { category: "account", label: "Double authentification activée" },
   "account.2fa_disabled": { category: "account", label: "Double authentification désactivée" },
@@ -185,6 +191,18 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   "account.impersonation_ended": { category: "account", label: "Fin de la prise en main" },
 
   /**
+   * Refus consignés (NC-12), au journal de la plateforme seulement.
+   *
+   * Les gardes refusaient en silence : un jeton de node volé essayé
+   * d'ailleurs, un compte qui parcourt les identifiants de serveur, une clé
+   * révoquée encore présentée — rien ne s'en voyait. Un refus répété ne
+   * s'écrit qu'à sa 1ʳᵉ, 10ᵉ, 100ᵉ… occurrence (`occurrences`).
+   */
+  "access.denied": { category: "access", label: "Accès refusé" },
+  "application.key_rejected": { category: "access", label: "Clé applicative refusée" },
+  "node.token_rejected": { category: "access", label: "Jeton de node refusé" },
+
+  /**
    * Gestes d'administration de la plateforme.
    *
    * Classés en `access` quand ils créent ou retirent un moyen d'entrer, en
@@ -194,6 +212,78 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
    */
   "admin.incident_opened": { category: "settings", label: "Incident ouvert" },
   "admin.incident_updated": { category: "settings", label: "Incident mis à jour" },
+
+  /*
+   * Chaque route d'écriture de l'administration, consignée (rapport ASVS,
+   * NC-11). Rôle, suppression de compte, réglages de la plateforme,
+   * suspension : aucun de ces gestes ne laissait de trace, et « qui a
+   * désactivé la seconde preuve du personnel » n'avait pas de réponse.
+   */
+  "admin.settings_saved": { category: "settings", label: "Réglages de la plateforme enregistrés" },
+  "admin.feature_flag_set": { category: "settings", label: "Fonctionnalité activée ou coupée" },
+  "admin.announcement_saved": { category: "settings", label: "Annonce publiée ou modifiée" },
+  "admin.announcement_deleted": { category: "settings", label: "Annonce supprimée" },
+  // Un montage ouvre au conteneur un dossier de la machine hôte : c'est un
+  // accès, pas une configuration.
+  "admin.mount_created": { category: "access", label: "Montage créé" },
+  "admin.mount_updated": { category: "access", label: "Montage modifié" },
+  "admin.mount_deleted": { category: "access", label: "Montage supprimé" },
+  "admin.mount_attached": { category: "access", label: "Montage attaché au serveur" },
+  "admin.mount_detached": { category: "access", label: "Montage détaché du serveur" },
+  "admin.database_host_tested": { category: "databases", label: "Hôte de bases éprouvé" },
+  "admin.database_host_created": { category: "databases", label: "Hôte de bases déclaré" },
+  "admin.database_host_updated": { category: "databases", label: "Hôte de bases modifié" },
+  "admin.database_host_deleted": { category: "databases", label: "Hôte de bases supprimé" },
+  "admin.user_created": { category: "account", label: "Compte créé par l'administration" },
+  "admin.user_role_changed": { category: "access", label: "Rôle d'un compte changé" },
+  "admin.reseller_quota_set": {
+    category: "account",
+    label: "Enveloppe de revendeur posée par l'administration",
+  },
+  "admin.user_sessions_revoked": {
+    category: "access",
+    label: "Sessions d'un compte fermées par l'administration",
+  },
+  "admin.user_deleted": { category: "account", label: "Compte supprimé par l'administration" },
+  "admin.server_runtime_changed": {
+    category: "settings",
+    label: "Image ou commande de démarrage changée par l'administration",
+  },
+  "admin.server_egg_changed": {
+    category: "settings",
+    label: "Jeu du serveur changé par l'administration",
+  },
+  "admin.server_transfer_started": { category: "settings", label: "Transfert du serveur lancé" },
+  "admin.server_variable_set": {
+    category: "settings",
+    label: "Variable du serveur écrite par l'administration",
+  },
+  "admin.server_suspended": { category: "power", label: "Serveur suspendu par l'administration" },
+  "admin.server_resumed": { category: "power", label: "Serveur rétabli par l'administration" },
+  "admin.server_deleted": { category: "settings", label: "Serveur supprimé par l'administration" },
+  "admin.node_category_created": { category: "settings", label: "Catégorie de nodes créée" },
+  "admin.node_category_removed": { category: "settings", label: "Catégorie de nodes supprimée" },
+  "admin.node_subcategory_created": {
+    category: "settings",
+    label: "Sous-catégorie de nodes créée",
+  },
+  "admin.node_subcategory_removed": {
+    category: "settings",
+    label: "Sous-catégorie de nodes supprimée",
+  },
+  "admin.location_created": { category: "settings", label: "Localisation créée" },
+  "admin.location_removed": { category: "settings", label: "Localisation supprimée" },
+  // Activer un egg, c'est déclarer avoir relu son script d'installation
+  // (§8.3) ; un dépôt suivi fournit des scripts exécutés sur les nodes.
+  "admin.egg_enabled_set": { category: "settings", label: "Egg activé ou désactivé" },
+  "admin.egg_imported": { category: "settings", label: "Egg importé" },
+  "admin.egg_source_added": { category: "settings", label: "Dépôt d'eggs ajouté" },
+  "admin.egg_source_removed": { category: "settings", label: "Dépôt d'eggs retiré" },
+  "admin.egg_source_synced": { category: "settings", label: "Dépôt d'eggs synchronisé" },
+  "admin.webhook_active_set": {
+    category: "settings",
+    label: "Rappel sortant activé ou suspendu",
+  },
 
   /**
    * Ce que fait le système de facturation, par l'API applicative.
@@ -223,6 +313,11 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     category: "settings",
     label: "Serveur supprimé par la facturation",
   },
+  "application.server_suspended": {
+    category: "power",
+    label: "Serveur suspendu par la facturation",
+  },
+  "application.server_resumed": { category: "power", label: "Serveur rétabli par la facturation" },
   "application.reseller_quota_set": {
     category: "account",
     label: "Enveloppe de revendeur posée par la facturation",
@@ -281,6 +376,23 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Adresse ou ports d'un node : daemon injoignable, rien changé",
   },
   "node.allocations_removed": { category: "network", label: "Ports retirés du stock d'un node" },
+  "node.allocations_added": { category: "network", label: "Ports ajoutés au stock d'un node" },
+  "node.created": { category: "settings", label: "Node déclaré" },
+  "node.removed": { category: "settings", label: "Node supprimé" },
+  "node.maintenance_set": { category: "settings", label: "Maintenance d'un node activée ou levée" },
+  "node.share_set": { category: "settings", label: "Part d'un node accordée à un revendeur" },
+  "node.share_removed": { category: "settings", label: "Part d'un node retirée à un revendeur" },
+  "node.owner_changed": {
+    category: "access",
+    label: "Node attribué à un revendeur ou rendu à la plateforme",
+  },
+  // Nommés par une condition, ils échappaient au contrôle de couverture et
+  // s'affichaient sous leur identifiant brut.
+  "node.token_rotated": { category: "access", label: "Jeton d'un node renouvelé" },
+  "node.token_rotation_failed": {
+    category: "access",
+    label: "Renouvellement du jeton d'un node : daemon injoignable, rien changé",
+  },
   "admin.user_updated": { category: "account", label: "Compte modifié par l'administration" },
   "admin.user_password_reset_sent": {
     category: "access",
@@ -332,8 +444,17 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     category: "settings",
     label: "Secret de rappel du revendeur renouvelé",
   },
+  "reseller.webhook_active_set": {
+    category: "settings",
+    label: "Rappel sortant du revendeur activé ou suspendu",
+  },
   "reseller.branding_saved": { category: "settings", label: "Marque du revendeur enregistrée" },
   "reseller.domain_declared": { category: "network", label: "Domaine de revendeur déclaré" },
+  "reseller.domain_verified": { category: "network", label: "Domaine de revendeur vérifié" },
+  "reseller.domain_check_failed": {
+    category: "network",
+    label: "Vérification du domaine de revendeur en échec",
+  },
 };
 
 export function describeActivity(event: string): ActivityDescriptor {

@@ -286,7 +286,7 @@ S'y ajoute un argument de valeur : personne ne choisit un hébergeur pour son su
 |---|---|
 | Mots de passe | Argon2id, politique 12+ caractères, vérification HaveIBeenPwned (k-anonymity). |
 | 2FA | TOTP + **passkeys WebAuthn** (Face ID, YubiKey). Obligatoire pour admins et revendeurs. Codes de secours. |
-| Sessions | Cookies `HttpOnly; Secure; SameSite=Lax`, session opaque en Redis (révocable), rotation à chaque élévation de privilège. |
+| Sessions | Cookies `HttpOnly; Secure; SameSite=Lax`, session opaque en Redis (révocable), rotation à chaque élévation de privilège. **Trente minutes d'inactivité, douze heures au plus** (ASVS 3.3.2 niveau 2, `session.repository.ts`) ; le cookie meurt avec la session. |
 | Annuaire externe (OIDC) | Un fournisseur OIDC configurable (Authentik, Keycloak, Azure, Google…), pensé pour l'équipe et les sous-utilisateurs (Administration › Paramètres › Annuaire externe). Actif, il devient le **seul** chemin : l'API refuse alors la connexion par mot de passe. Code avec PKCE, `state` vérifié par la couche web. À la première connexion, rapprochement avec un compte existant **seulement** si le fournisseur déclare l'adresse vérifiée ; sinon, création (`sso.service.ts`). Le bouton « Se connecter avec Google », facultatif et ouvert à tous, est une autre porte (§12.4, décision 4). |
 | Se connecter avec Google | Bouton facultatif au-dessus du formulaire (Administration › Paramètres › Connexion avec Google : identifiant et secret d'un client OAuth « Application Web », retour sur `/auth/google/callback`). Même cérémonie et même rapprochement que l'annuaire, liaison `google` : un compte est reconnu par son identifiant Google, sinon par une adresse **vérifiée par Google** ; il n'est créé que si les inscriptions sont ouvertes. Le mot de passe reste possible, et le second facteur du panel s'applique. Absent quand l'annuaire est obligatoire. |
 | **Entrée depuis le site client** | Le client n'a pas de mot de passe sur le panel : son compte vit chez le système de facturation, qui le crée à la commande (`POST /application/users`). Derrière son bouton « Gérer mon serveur », le plugin demande `POST /application/users/sso-link` (clé applicative, portée `users.sso`) et redirige vers le lien rendu : **deux minutes, un seul usage**, seulement pour un compte existant, jamais pour un compte du personnel. Le panel n'est **pas** un serveur OAuth (ni `/authorize`, ni écran de consentement) : le facturier détient déjà des clés qui créent et suppriment des serveurs, et lui demander en plus le consentement du client serait une cérémonie sans contenu (`billing-sso.service.ts`). |
@@ -319,13 +319,13 @@ Cette couche n'est pas de notre ressort : elle est fournie par le daemon amont (
 ### 5.4 Application
 
 - **Headers** : CSP stricte (nonce), HSTS, COOP/COEP, Permissions-Policy.
-- **CSRF** : double-submit token pour les cookies + vérification `Origin`.
+- **CSRF** : pas de jeton anti-CSRF, et c'est un choix. Le cookie de session est `SameSite=Lax` ; le navigateur ne parle qu'à Next, dont les actions serveur refusent une requête dont l'`Origin` n'est pas l'hôte ; les relais qui n'en sont pas (console, envoi par morceaux) font le même contrôle ; et l'API, en défense en profondeur, refuse toute écriture authentifiée par cookie que le navigateur dit venue d'un autre site (`Origin`/`Sec-Fetch-Site`, transmis par Next en `x-gd-origin`/`x-gd-fetch-site` ; règle unique dans `packages/contracts/src/browser-provenance.ts`). nginx ne publie pas l'API cliente.
 - **Validation** : Zod sur 100 % des entrées, sorties filtrées (pas de fuite de champs).
 - **Secrets** : jamais en base en clair (chiffrement AES-256-GCM via clé maître / SOPS), rotation.
 - **Audit log immuable** : chaque action (qui, quoi, où, IP, UA, avant/après) dans une table append-only + export.
 - **Dépendances** : Renovate, `pnpm audit`, SBOM (CycloneDX) par release.
 - **Backups DB** : PITR PostgreSQL (WAL) + snapshot quotidien chiffré hors site.
-- **Tests sécurité** : ZAP baseline en CI, revue OWASP ASVS niveau 2, pentest avant la v1.
+- **Tests sécurité** : ZAP baseline en CI ; revue OWASP ASVS niveau 2 faite et corrigée pour la V1 ([rapport](docs/securite/rapport-asvs-l2.md), §0 pour l'état de chaque point ; [modèle de menace](docs/securite/modele-de-menace.md)). Pentest externe : non fait, recommandé avant une ouverture au public.
 
 ### 5.5 Modèle de confiance panel ↔ Wings
 
@@ -336,7 +336,8 @@ Compensations, puisque le mécanisme lui-même n'est pas renforçable sans modif
 | Mesure | Détail |
 |---|---|
 | Un jeton par node | Une fuite compromet un node, pas la flotte. Jamais de jeton partagé. |
-| Rotation | Rotation planifiée et rotation immédiate sur incident, depuis `/admin/nodes`. Le jeton n'est affiché qu'une fois. |
+| Rotation | Rotation planifiée et rotation immédiate sur incident, depuis `/admin/nodes`. |
+| Lecture du jeton | Le jeton n'est **pas** « affiché une fois » : il est rendu à la création, puis reste lisible dans le `config.yml` que l'administration télécharge pour configurer ou réparer une machine (`GET /admin/nodes/:id/configuration`). Cette lecture est réservée à l'écriture admin (`AdminWriteGuard`, jamais le support ni une clé d'API) et consignée au journal avec l'acteur (`node.configuration_read`), de même que le fichier rendu quand une modification de liaison échoue. C'est le prix d'un node qu'on configure ou répare en un geste, sans rotation ; une fuite se traite par la rotation ([runbook](./docs/runbooks/rotation-jeton-node.md)). |
 | Réseau d'administration isolé | L'API de Wings n'est jamais exposée publiquement : VPN ou VLAN dédié entre le panel et les nodes, filtrage au pare-feu sur l'IP du panel. |
 | Chiffrement au repos | Les jetons de node sont chiffrés en base (AES-256-GCM, clé maître), comme tout secret (§5.4). |
 | Journalisation | Tout appel du panel vers un node est tracé dans l'audit log avec l'acteur à l'origine. |
@@ -413,8 +414,8 @@ Notation : `table (colonnes clés)`. Toutes les tables ont `id uuid`, `created_a
 **Domaine.** L'API est servie par le domaine du panel (`game.gamedashboard.fr`), sous le préfixe `/api`. Pas de sous-domaine séparé.
 
 Conséquences concrètes :
-- Le frontend et l'API partagent la même origine : l'interface s'authentifie par son cookie de session, aucun jeton ne transite par le JavaScript et il n'y a pas de préflight CORS sur les appels du panel.
-- Puisqu'un cookie suffit alors à authentifier, **le jeton anti-CSRF devient obligatoire** sur toute requête mutante (double-submit + vérification de `Origin`).
+- Le frontend et l'API partagent la même origine : l'interface s'authentifie par son cookie de session, aucun jeton ne transite par le JavaScript et il n'y a pas de préflight CORS sur les appels du panel. En pratique, le navigateur ne joint même pas l'API cliente : il parle à Next (actions serveur, deux relais), qui appelle l'API depuis la machine, et nginx ne publie que l'API applicative, `/api/remote`, la spécification et le statut.
+- Puisqu'un cookie suffit alors à authentifier, **toute requête mutante par cookie est contrôlée sur son origine**, sans jeton en double soumission : `SameSite=Lax`, contrôle d'origine des actions serveur de Next et des deux relais, puis `SessionGuard`, qui refuse une écriture par cookie que le navigateur dit venue d'un autre site (§5.4). Une clé `Bearer` n'est pas concernée : aucun navigateur ne la joint de lui-même.
 - CORS n'est ouvert qu'à l'origine du panel (`PANEL_ORIGIN`). Les systèmes tiers appellent l'API applicative de serveur à serveur, avec une clé : ils n'en ont pas besoin.
 
 **Routage Traefik.** Le préfixe `/api/` va au service API ; le chemin exact `/api` reste servi par Next et rend la page de documentation. Deux règles, la plus spécifique l'emportant :

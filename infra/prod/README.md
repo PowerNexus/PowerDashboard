@@ -72,7 +72,12 @@ tuyau, son entrée standard est le script lui-même : les étapes
 interactives lisent donc `/dev/tty`.
 
 `backup` écrit un seul fichier, base (`pg_dump -Fc`) **et** `env/` : l'un sans
-l'autre ne restaure rien. Sept sont gardés (`GD_GARDER`).
+l'autre ne restaure rien. Il contient donc `APP_SECRET_KEY`, et s'écrit
+chiffré (`openssl enc`, AES-256) par la clé des sauvegardes,
+`/opt/gamedashboard/backup.key` : tirée à la première sauvegarde, jamais
+remplacée, hors de l'archive, à garder hors de la machine. Rien n'est
+demandé au clavier, `update` sauvegarde sans terminal. Sept sont gardés
+(`GD_GARDER`). Relire : [restauration de la base](../../docs/runbooks/restauration-base.md).
 
 Côté pnpm, les commandes sont sous `app:`.
 Le préfixe n'est pas décoratif. pnpm fait passer ses propres commandes avant
@@ -125,7 +130,8 @@ l'utilisateur. Une faille de rendu ne donne pas la base.
 rien d'existant n'est modifié, et `nginx -t` précède chaque rechargement. Le
 code de refus des limitations (`limit_req_status`) est posé dans le bloc
 `server` et non au niveau `http`, où il entrerait en conflit avec un autre
-vhost qui le déclarerait déjà.
+vhost qui le déclarerait déjà. `/api/remote/` le remplace par 503 : Wings
+abandonne sur un 4xx, 429 compris, et ne rejoue que les 5xx.
 
 ## Premier administrateur
 

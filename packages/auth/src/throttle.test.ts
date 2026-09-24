@@ -52,6 +52,21 @@ describe("throttleDecision", () => {
     });
   });
 
+  it("ne verrouille pas le compte pour une adresse d'où il a déjà été ouvert", () => {
+    // Sans cette exemption, n'importe qui enferme dehors n'importe quel
+    // titulaire en échouant dix fois sur son adresse.
+    expect(
+      throttleDecision({ account: MAX_ATTEMPTS_PER_ACCOUNT, ip: 0, knownIp: true }),
+    ).toMatchObject({ action: "allow" });
+  });
+
+  it("garde la limite par adresse, même pour une adresse connue", () => {
+    expect(throttleDecision({ account: 0, ip: MAX_ATTEMPTS_PER_IP, knownIp: true })).toMatchObject({
+      action: "block",
+      reason: "ip",
+    });
+  });
+
   it("retient le plus restrictif des deux compteurs pour le délai", () => {
     expect(throttleDecision({ account: 1, ip: 5 })).toEqual({ action: "allow", delayMs: 1_000 });
   });

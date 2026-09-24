@@ -33,6 +33,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
    * opposable : celui-ci ne fait que cesser d'afficher ce qui n'est pas dû.
    */
   if (!ADMIN_ROLES.has(me.role)) notFound();
+  // Une prise en main n'entre pas ici, même si la cible a été promue entre-temps :
+  // l'API la refuse (`AdminGuard`), l'écran n'a pas à en montrer la coquille.
+  // Plus bas, la coquille n'a donc jamais d'emprunteur à nommer.
+  if (me.impersonator) notFound();
 
   /*
    * Seconde preuve exigée du personnel, quand la plateforme le demande.
@@ -56,7 +60,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         userEmail={me.email}
         userRole={me.role}
         userAuthMethod={me.authMethod}
-        impersonatedBy={me.impersonator?.email ?? null}
+        impersonatedBy={null}
         announcements={announcements}
         userAvatarUrl={me.avatarUrl}
       >
@@ -75,7 +79,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       userEmail={me.email}
       userRole={me.role}
       userAuthMethod={me.authMethod}
-      impersonatedBy={me.impersonator?.email ?? null}
+      impersonatedBy={null}
       announcements={announcements}
       userAvatarUrl={me.avatarUrl}
     >

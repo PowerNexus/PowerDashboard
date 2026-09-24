@@ -1,7 +1,13 @@
-import { decryptSecret, tokensMatch } from "@gamedashboard/auth";
+import { tokensMatch } from "@gamedashboard/auth";
 import { parseWingsAuthorization } from "@gamedashboard/contracts";
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from "@nestjs/common";
+import { requestOrigin } from "../../common/request-origin";
+import { decryptRowSecret } from "../../common/row-secrets";
+import { DenialLogService } from "../activity/denial-log.service";
 import { type NodeIdentity, NodeRepository } from "./node.repository";
+
+/** Un identifiant de jeton de node fait seize caractères ; au-delà, on tronque. */
+const MAX_TOKEN_ID = 64;
 
 /**
  * Authentification des routes `/api/remote/*`.
@@ -23,27 +29,42 @@ import { type NodeIdentity, NodeRepository } from "./node.repository";
  */
 @Injectable()
 export class NodeTokenGuard implements CanActivate {
-  constructor(@Inject(NodeRepository) private readonly nodes: NodeRepository) {}
+  constructor(
+    @Inject(NodeRepository) private readonly nodes: NodeRepository,
+    @Inject(DenialLogService) private readonly denials: DenialLogService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
       node?: NodeIdentity;
+      ip?: string;
+      method?: string;
+      url?: string;
+      routeOptions?: { url?: string };
     }>();
 
     const header = request.headers.authorization;
     const token = parseWingsAuthorization(typeof header === "string" ? header : undefined);
-    if (!token) return false;
+    if (!token) {
+      // Sans en-tête, rien n'a été présenté : le bruit d'Internet, déjà au
+      // journal d'accès de nginx. Un en-tête illisible, lui, est une tentative.
+      if (header !== undefined) this.reject(request, null, null);
+      return false;
+    }
 
     const node = await this.nodes.findByTokenId(token.id);
 
     // Un identifiant inconnu et un secret faux doivent coûter le même temps :
     // sans cela, la durée de réponse révèle quels identifiants existent, et il
     // devient possible de les énumérer avant d'attaquer le secret.
-    const expected = node ? safeDecrypt(node.tokenSecret) : "";
+    const expected = node ? safeDecrypt(node.id, node.tokenSecret) : "";
     const matches = tokensMatch(expected, token.secret);
 
-    if (!node || !matches) return false;
+    if (!node || !matches) {
+      this.reject(request, token.id, node?.id ?? null);
+      return false;
+    }
 
     /*
      * Tout appel authentifié vaut signe de vie.
@@ -72,19 +93,42 @@ export class NodeTokenGuard implements CanActivate {
     request.node = node;
     return true;
   }
+
+  /**
+   * Consigne le refus (NC-12) : un jeton volé, essayé d'ailleurs après sa
+   * rotation, ne laissait aucune trace.
+   *
+   * L'identifiant du jeton, et le node qu'il désigne s'il existe — **jamais
+   * le secret**. Sans attendre : le refus doit coûter le même temps, que
+   * l'identifiant existe ou non (voir plus haut).
+   */
+  private reject(
+    request: Parameters<typeof requestOrigin>[0],
+    tokenId: string | null,
+    nodeId: string | null,
+  ): void {
+    void this.denials.record({
+      event: "node.token_rejected",
+      actorId: null,
+      actorType: "system",
+      origin: requestOrigin(request),
+      properties: { tokenId: tokenId?.slice(0, MAX_TOKEN_ID) ?? null, node: nodeId },
+    });
+  }
 }
 
 /**
  * Déchiffre sans propager l'échec.
  *
- * Une valeur illisible — clé changée, colonne corrompue — doit refuser la
- * connexion, pas faire tomber la requête avec une erreur 500 que le daemon
- * réessaierait indéfiniment (§7.4). La chaîne vide ne correspondra à aucun
- * jeton présenté, `parseWingsAuthorization` en refusant déjà les secrets vides.
+ * Une valeur illisible — clé changée, colonne corrompue, chiffré recopié
+ * depuis la ligne d'un autre node — doit refuser la connexion, pas faire
+ * tomber la requête avec une erreur 500 que le daemon réessaierait
+ * indéfiniment (§7.4). La chaîne vide ne correspondra à aucun jeton présenté,
+ * `parseWingsAuthorization` en refusant déjà les secrets vides.
  */
-function safeDecrypt(value: string): string {
+function safeDecrypt(nodeId: string, value: string): string {
   try {
-    return decryptSecret(value);
+    return decryptRowSecret("nodes.daemon_token_enc", nodeId, value);
   } catch {
     return "";
   }

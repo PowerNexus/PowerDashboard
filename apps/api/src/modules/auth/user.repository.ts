@@ -8,6 +8,8 @@ export interface AuthenticatableUser {
   id: string;
   email: string;
   passwordHash: string | null;
+  /** Échéance d'un mot de passe provisoire, nulle sinon. */
+  passwordExpiresAt: string | null;
 }
 
 @Injectable()
@@ -21,7 +23,12 @@ export class UserRepository {
    */
   async findByEmail(email: string): Promise<AuthenticatableUser | null> {
     const [row] = await this.db
-      .select({ id: users.id, email: users.email, passwordHash: users.passwordHash })
+      .select({
+        id: users.id,
+        email: users.email,
+        passwordHash: users.passwordHash,
+        passwordExpiresAt: users.passwordExpiresAt,
+      })
       .from(users)
       .where(sql`lower(${users.email}) = lower(${email})`)
       .limit(1);
@@ -51,6 +58,7 @@ export class UserRepository {
         id: users.id,
         email: users.email,
         passwordHash: users.passwordHash,
+        passwordExpiresAt: users.passwordExpiresAt,
         nameFirst: users.nameFirst,
         nameLast: users.nameLast,
         emailVerifiedAt: users.emailVerifiedAt,
@@ -169,8 +177,29 @@ export class UserRepository {
     return row;
   }
 
-  /** Remplace le condensat du mot de passe. */
+  /**
+   * Remplace le mot de passe par celui que le titulaire vient de choisir.
+   *
+   * L'échéance d'un mot de passe provisoire tombe avec lui : c'est
+   * précisément ce qu'elle attendait.
+   */
   async updatePassword(id: string, passwordHash: string): Promise<void> {
+    await this.db
+      .update(users)
+      .set({ passwordHash, passwordExpiresAt: null, updatedAt: new Date().toISOString() })
+      .where(eq(users.id, id));
+  }
+
+  /**
+   * Réécrit le condensat du **même** mot de passe, sous des paramètres plus
+   * récents.
+   *
+   * Distinct de `updatePassword` : le rehachage à la connexion ne change pas
+   * de secret, et lever l'échéance d'un mot de passe provisoire parce que ses
+   * paramètres Argon2 ont vieilli le rendrait durable sans que personne l'ait
+   * choisi.
+   */
+  async rehashPassword(id: string, passwordHash: string): Promise<void> {
     await this.db
       .update(users)
       .set({ passwordHash, updatedAt: new Date().toISOString() })
@@ -209,16 +238,44 @@ export class UserRepository {
 
   /**
    * Échecs récents sur les deux axes de `throttleDecision` : le compte et
-   * l'adresse. Une IP absente (proxy mal configuré) ne compte pas : elle est
-   * enregistrée sous `0.0.0.0`, et compter cette valeur verrouillerait tout le
-   * monde sur un seul compteur.
+   * l'adresse, et si l'adresse est déjà connue du compte. Une IP absente
+   * (proxy mal configuré) ne compte pas : elle est enregistrée sous `0.0.0.0`,
+   * et compter cette valeur verrouillerait tout le monde sur un seul compteur
+   * — ou, pour l'exemption, exempterait tout le monde à la fois.
    */
-  async recentFailures(email: string, ip: string | null): Promise<{ account: number; ip: number }> {
-    const [account, byIp] = await Promise.all([
+  async recentFailures(
+    email: string,
+    ip: string | null,
+  ): Promise<{ account: number; ip: number; knownIp: boolean }> {
+    const [account, byIp, knownIp] = await Promise.all([
       this.countRecentFailures(email),
       ip === null ? Promise.resolve(0) : this.countRecentFailuresByIp(ip),
+      ip === null ? Promise.resolve(false) : this.hasSucceededFrom(email, ip),
     ]);
-    return { account, ip: byIp };
+    return { account, ip: byIp, knownIp };
+  }
+
+  /**
+   * Le compte a-t-il déjà été ouvert depuis cette adresse ?
+   *
+   * Lu dans les réussites de `login_attempts`, que la rétention garde trente
+   * jours : une adresse revue dans le mois est celle d'un titulaire, pas celle
+   * de l'inconnu qui essaie de le verrouiller. Une réussite n'y est posée
+   * qu'une fois **toutes** les preuves données (voir `AuthController.login`).
+   */
+  async hasSucceededFrom(email: string, ip: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ at: loginAttempts.at })
+      .from(loginAttempts)
+      .where(
+        and(
+          sql`lower(${loginAttempts.email}) = lower(${email})`,
+          eq(loginAttempts.ip, ip),
+          eq(loginAttempts.success, true),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   /** Échecs récents depuis cette adresse, tous comptes confondus. */

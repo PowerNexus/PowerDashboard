@@ -725,7 +725,7 @@
     },
     "/api/v1/auth/2fa/setup": {
       "post": {
-        "summary": "Prépare un secret TOTP et rend son URI otpauth.",
+        "summary": "Prépare un secret TOTP et rend son URI otpauth. Mot de passe exigé.",
         "description": "Session du panel.",
         "tags": [
           "Double authentification"
@@ -903,7 +903,7 @@
     },
     "/api/v1/auth/2fa/passkeys/options": {
       "post": {
-        "summary": "Options d'enregistrement WebAuthn et défi scellé.",
+        "summary": "Options d'enregistrement WebAuthn et défi scellé. Mot de passe exigé.",
         "description": "Session du panel.",
         "tags": [
           "Clés d'accès"

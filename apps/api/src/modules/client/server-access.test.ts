@@ -1,7 +1,11 @@
 import type { Database } from "@gamedashboard/db";
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { Denial, DenialLogService } from "../activity/denial-log.service";
 import { ServerAccessService } from "./server-access.service";
+
+/** Le journal des refus, muet : la plupart de ces tests portent sur la décision. */
+const silence = { record: async () => {} } as unknown as DenialLogService;
 
 const SERVER = "11111111-1111-1111-1111-111111111111";
 const OWNER = "22222222-2222-2222-2222-222222222222";
@@ -23,12 +27,15 @@ const SUBUSER = "33333333-3333-3333-3333-333333333333";
  * `platformAccess` absent vaut « pas de revendeur » : le serveur est à la
  * plateforme, qui ne se limite pas elle-même.
  */
-function service(rows: {
-  owned: boolean;
-  subuser?: { preset: string | null; permissions: string[] };
-  role?: string;
-  platformAccess?: "provision" | "read_only" | "none";
-}) {
+function service(
+  rows: {
+    owned: boolean;
+    subuser?: { preset: string | null; permissions: string[] };
+    role?: string;
+    platformAccess?: "provision" | "read_only" | "none";
+  },
+  denials: DenialLogService = silence,
+) {
   let call = 0;
   const repondre = async () => {
     call += 1;
@@ -50,7 +57,7 @@ function service(rows: {
     }),
   } as unknown as Database;
 
-  return new ServerAccessService(db);
+  return new ServerAccessService(db, denials);
 }
 
 describe("portées d'une clé d'API", () => {
@@ -126,6 +133,80 @@ describe("accès sans portée", () => {
     await expect(
       svc.require({ id: SUBUSER, scopes: null }, SERVER, "power.kill"),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+/**
+ * Refus consignés (NC-12).
+ *
+ * Un compte qui essayait les identifiants de serveur un à un, ou un
+ * sous-utilisateur qui forçait une action retirée, ne laissait rien au
+ * journal. La réponse, elle, ne change pas : un 404 d'inconnu reste un 404.
+ */
+describe("refus consignés", () => {
+  function journal() {
+    const refus: Denial[] = [];
+    const denials = {
+      record: vi.fn(async (denial: Denial) => {
+        refus.push(denial);
+      }),
+    } as unknown as DenialLogService;
+    return { denials, refus };
+  }
+
+  const origin = { ip: "203.0.113.30", route: "POST /api/v1/client/servers/:id/power" };
+
+  it("consigne l'inconnu, sans rien changer à son 404", async () => {
+    const { denials, refus } = journal();
+    const svc = service({ owned: false }, denials);
+
+    await expect(
+      svc.require({ id: SUBUSER, scopes: null, origin }, SERVER, "power.start"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    expect(refus).toEqual([
+      {
+        event: "access.denied",
+        actorId: SUBUSER,
+        actorType: "user",
+        origin,
+        properties: { server: SERVER, permission: "power.start", status: 404 },
+      },
+    ]);
+  });
+
+  it("consigne la permission refusée à un sous-utilisateur", async () => {
+    const { denials, refus } = journal();
+    const svc = service({ owned: false, subuser: { preset: null, permissions: [] } }, denials);
+
+    await expect(
+      svc.require({ id: SUBUSER, scopes: null, origin }, SERVER, "files.delete"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refus[0]?.properties).toEqual({
+      server: SERVER,
+      permission: "files.delete",
+      status: 403,
+    });
+  });
+
+  it("consigne la portée refusée à une clé d'API, comme un refus de la clé", async () => {
+    const { denials, refus } = journal();
+    const svc = service({ owned: true }, denials);
+
+    await expect(
+      svc.require({ id: OWNER, scopes: ["console.read"] }, SERVER, "files.delete"),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(refus[0]).toMatchObject({ actorId: OWNER, actorType: "api_key" });
+  });
+
+  it("ne consigne rien pour un accès accordé", async () => {
+    const { denials, refus } = journal();
+    await service({ owned: true }, denials).require(
+      { id: OWNER, scopes: null, origin },
+      SERVER,
+      "power.kill",
+    );
+    expect(refus).toEqual([]);
   });
 });
 

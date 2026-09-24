@@ -9,11 +9,157 @@ règles y sont définis ; ce rapport ne les répète pas.
 | Méthode | Lecture du code par zone (les onze zones de la consigne), suite de tests existante, puis **instance jetable** de l'API attaquée avec `curl` (port 3299, `NODE_ENV=production`, base PostgreSQL jetable, aucune donnée réelle) |
 | Référence | `pnpm lint` et `pnpm typecheck` passent ; `pnpm test` : 569 tests sur 570 passent, le seul échec est le délai Argon2 de `security-alert.integration.test.ts` déjà consigné comme piège connu |
 | Hors périmètre | Wings lui-même, la production locale, les dépendances tierces (`pnpm audit` en CI) |
-| Aucun code modifié | Le rapport est le seul livrable de cette PR ; les corrections attendent l'arbitrage (consigne §2) |
+| Corrections | Faites après l'arbitrage de Matheo : état de chaque non-conformité, commit et test au §0 |
 
 Lignes citées sous la forme `fichier:ligne`, relatives à la racine du dépôt.
 Les chemins `apps/api/src/modules/` sont abrégés en `api/`, `apps/web/src/`
 en `web/`, `packages/` en `pkg/`.
+
+---
+
+## 0. Suivi des corrections
+
+Corrections faites après l'arbitrage de Matheo, sur la branche
+`claude/happy-goldberg-e5zgl2`. Règle suivie : **un défaut, un commit, un
+test de non-régression** qui échoue sans la correction (vérifié pour chacun).
+Les empreintes ci-dessous sont celles de cette branche.
+
+**Vérification finale** (24 septembre 2026) : `pnpm lint`, `pnpm typecheck`,
+`pnpm db:check` (migrations 0042 à 0044), `pnpm openapi` sans différence,
+`pnpm build` ; `pnpm test` avec PostgreSQL entièrement vert (API 1 055 tests
+en 111 fichiers, contracts 472, auth 142, web 44, et le reste) ; e2e : 50 parcours verts
+(authentification, CSP, accessibilité, installation, bureau et mobile),
+Lighthouse 100 / 98 / 96 / 100 ; `nginx -t` sur `panel.conf` et
+`gamedashboard.local.conf`. Sondes rejouées sur l'application compilée : écriture
+par cookie refusée depuis une autre origine (`Origin`, `Sec-Fetch-Site`,
+`x-gd-origin`), pages authentifiées en `private, no-store`, API en `nosniff` et
+`no-store`.
+
+### 0.1 Arbitrages
+
+| Point (§2.4) | Décision de Matheo | Mise en œuvre |
+|---|---|---|
+| CSRF (NC-02) | Contrôle d'origine dans l'API, en défense en profondeur, et textes corrigés | `4c10d27` |
+| Sessions (NC-03) | Trente minutes d'inactivité, douze heures au plus | `a407e74` |
+| Lien de facturation (NC-05) | Le second facteur du panel est exigé | `57c59fa`, `1cb0d55` |
+| 2FA du personnel (NC-10) | Actif par défaut | `89a274d` |
+| Commandes console (NC-13) | Premier mot et longueur des arguments seulement | `80cbf92` |
+| NC-58 (Google et personnel) | Pris en cours de route, **à confirmer** : comportement conservé, le second facteur du personnel étant désormais exigé par défaut et demandé après Google | `92cda16` (test) |
+
+### 0.2 État de chaque non-conformité
+
+| N° | État | Commit | Test de non-régression | Remarque |
+|---|---|---|---|---|
+| NC-01 | Corrigée | `910df5e` | `billing-sso.integration.test.ts` | Un serveur hors revendeur compte comme un autre revendeur |
+| NC-02 | Corrigée | `4c10d27` | `session.guard.test.ts`, `browser-provenance.test.ts`, tests des relais web | `same-site` refusé aussi ; le relais WebSocket accepte désormais le domaine d'un revendeur |
+| NC-03 | Corrigée | `a407e74` | `session.repository.test.ts`, `session.repository.integration.test.ts` | Écart : une page qui se rafraîchit seule (onglet visible) compte comme activité |
+| NC-04 | Corrigée | `6d1d977` | `security-alert.messages.test.ts`, `credentials.integration.test.ts`, `admin-users.integration.test.ts` | Courriel et cloche, envoi détaché |
+| NC-05 | Corrigée | `57c59fa`, `1cb0d55` | `billing-sign-in.integration.test.ts`, `billing-link.test.ts` | Session ouverte au second facteur, dite venue de la facturation |
+| NC-06 | Corrigée | `83f3b6f` | `reseller-impersonation.test.ts` | |
+| NC-07 | Corrigée | `ef9b30f` | `server-provisioning.integration.test.ts` | Défaut latent : aucun appelant actuel |
+| NC-08 | Corrigée | `5345e4b` | `server-provisioning`, `server-resize`, `backups` (intégration, concurrence) | |
+| NC-09 | Corrigée, écart | `ef3b919` | `remote-backup.integration.test.ts` | Second compte rendu : 204 ignoré plutôt que 404 (un refus fait effacer l'archive par Wings) |
+| NC-10 | Corrigée | `89a274d` | `platform-settings.test.ts`, `infra-prod.test.ts` | La CI lève le réglage sur sa base jetable seule |
+| NC-11 | Corrigée | `9fea1ba` | `admin-activity.test.ts` | 43 routes d'écriture tracées, jamais un secret |
+| NC-12 | Corrigée | `86d7219` | `denial-log.test.ts`, tests des quatre gardes | Refus répétés écrits à la 1ʳᵉ, 10ᵉ, 100ᵉ occurrence ; hors du journal du serveur visé |
+| NC-13 | Corrigée | `80cbf92` | `server-runtime-console.test.ts`, `console-command.test.ts` | Aussi pour les commandes remontées par Wings. Les lignes déjà écrites restent jusqu'à leur rétention |
+| NC-14 | Corrigée | `1436f84` | `wings-token.test.ts` | Plus aucun `control.*` ; la sortie d'installation, avalée par l'ancien `*`, arrive enfin |
+| NC-15 | Corrigée | `1ae4166` | `server-features-schedules.test.ts` | La mise en pause reste permise |
+| NC-16 | Corrigée | `9644c06` | `server-impersonation.test.ts` | Mot de passe de base refusé en prise en main ; emprunteur au journal |
+| NC-17 | Corrigée | `7bd5bda` | `file-upload.test.ts` | Cinq envois ouverts par compte et serveur |
+| NC-18 | Corrigée | `2d890aa` | `row-secrets.integration.test.ts`, `rekey-secrets.integration.test.ts` | Format `v4:` ; les valeurs `v3:` restent lisibles jusqu'à l'étape § 4 du runbook de la clé maître. **Ne plus revenir à une version antérieure** |
+| NC-19 | Corrigée | `5cd25fd` | `secrets.test.ts`, `secret-key-samples.test.ts` | |
+| NC-20 | Corrigée, écart | `43f3868` | `credentials.integration.test.ts` | Un compte sans mot de passe local passe sans confirmation (à décider) |
+| NC-21 | Corrigée | `29b7094` | `infra-prod.test.ts` | |
+| NC-22 | Corrigée | `b6a0a77` | `content-security-policy.test.ts`, `monaco.test.ts`, `e2e/securite.spec.ts` | Monaco 0.56 servi par le panel ; un seul script de worker (contournement Turbopack commenté) |
+| NC-23 | Corrigée | `3cd16ce`, `46a7663`, `002b1b2`, `55c6b87` | `admin-bodies.test.ts`, `server-features-inputs.test.ts`, `files.test.ts`, `application-api.test.ts`, `remote.controller.test.ts` | |
+| NC-24 | Corrigée | `d8483ce` | `remote-identifiants.test.ts` | 400 au format lu par Wings |
+| NC-25 | Corrigée | `0ec4beb` | `impersonation.test.ts` | |
+| NC-26 | Corrigée | `20fdaa1` | `ceremony.test.ts` | |
+| NC-27 | Corrigée | `f1468fd` | `sso.test.ts` | |
+| NC-28 | Corrigée | `d8be427` | `sso-resolve.integration.test.ts` | Migration 0042 : sur une base qui a déjà des doublons de casse, garde l'ancien index et le dit dans le journal de déploiement |
+| NC-29 | Corrigée | `38c9bc5`, `8b626d1` | `throttle.test.ts`, `credentials.integration.test.ts`, `login-challenge.integration.test.ts` | La réussite ne se consigne qu'après toutes les preuves |
+| NC-30 | Corrigée | `9fa09cd` | `login-challenge.integration.test.ts` | Consommation en base (`auth_tokens`), sans migration |
+| NC-31 | Corrigée | `bba5f23` | `credentials.integration.test.ts` | |
+| NC-32 | Corrigée | `fb07359` | `login-challenge.integration.test.ts` | |
+| NC-33 | Corrigée | `45255ec` | `provisional.test.ts`, `credentials.integration.test.ts` | Migration 0044 ; mot de passe tiré au sort valable 24 h, à changer ; un mot de passe choisi (`GD_PASSWORD`) n'expire pas |
+| NC-34 | Corrigée | `b15b26b` | `password.test.ts` | |
+| NC-35 | **Non corrigée** | — | — | L'inscription ouvre la session aussitôt : une réponse identique exige de ne plus en ouvrir avant confirmation de l'adresse (SMTP obligatoire pour s'inscrire). Décision produit, limitée aux panels qui ouvrent l'inscription |
+| NC-36 | Corrigée | `0798626` | `api-keys.integration.test.ts` | Les clés existantes sans échéance sont laissées telles quelles |
+| NC-37 | Corrigée | `dbdb9cd` | `ip-allowlist.test.ts`, intégrations des deux types de clés | |
+| NC-38 | Corrigée | `337ac1b` | `api-keys.integration.test.ts`, `application-keys.integration.test.ts` | |
+| NC-39 | Corrigée | `a932846` | `retention.test.ts`, `retention.integration.test.ts` | |
+| NC-40 | Corrigée | `82807bb` | `admin-write-routes.test.ts` | |
+| NC-41 | Corrigée | `fea08a9` | `server-owner.integration.test.ts` | |
+| NC-42 | Corrigée | `2d3d5ee` | `server-activity.integration.test.ts` | |
+| NC-43 | Corrigée | `d612e12` | `wings-token.test.ts`, `logout-consoles.test.ts` | Par session plutôt que par compte, pour ne pas couper les autres appareils |
+| NC-44 | Corrigée, en partie | `66e38a1` | `sftp-auth.test.ts` | État `restoring` non posé : rien ne le relâcherait (Wings refuse déjà le SFTP pendant une restauration). Mot de passe seul d'un compte 2FA documenté (ADR 0001) |
+| NC-45 | Corrigée, écart | `d2d0c05` | `remote-activity.integration.test.ts` | Le revendeur et le personnel du serveur sont aussi des auteurs admis |
+| NC-46 | Corrigée | `7d0874e` | `server-runtime-paths.test.ts`, `files.test.ts` | Seul le `..` qui sort du volume est refusé (le renommage vers un dossier parent reste possible) |
+| NC-47 | Corrigée, en partie | `9669849` | `marketplace-downloads.test.ts` | Le jar de plateforme (API PaperMC, Mojang) n'est pas filtré : liste d'hôtes à établir |
+| NC-48 | Corrigée | `67a2853` | `server-daemon-errors.test.ts`, `application-daemon-errors.test.ts` | |
+| NC-49 | Corrigée | `54c476c`, `c4d8c6f` | `infra-prod.test.ts` | 503 et non 429 (Wings ne rejoue que les 5xx) ; la production locale n'avait **aucune** limitation, elle a désormais celles du modèle |
+| NC-50 | Corrigée | `c7aa452` | `infra-prod.test.ts`, `response-headers.test.ts` | Pas de `preload` ni d'agrafage OCSP : Let's Encrypt n'en publie plus |
+| NC-51 | Corrigée | `2b886ec` | `auth-cookies.test.ts` (contrats et API) | Avec un défaut trouvé en passant : un effacement sans `Secure` laissait le cookie `__Host-` en place à la déconnexion |
+| NC-52 | Corrigée | `4ae7d01` | `infra-prod.test.ts` | Archive `.tar.enc`, clé `/opt/gamedashboard/backup.key` hors de `env/`, à conserver ailleurs |
+| NC-53 | Corrigée | `633f360` | `design/page.test.tsx` | Captures de référence reprises sur le runner (`88351e9`) : l'entrée « Design system » quitte la navigation, et la rétention de NC-39 ajoute une ligne à la vue d'ensemble de l'administration |
+| NC-54 | Corrigée | `de2626d` | `credentials.integration.test.ts` | |
+| NC-55 | Corrigée | `ba7aaca` | `node-load.test.ts` | |
+| NC-56 | Corrigée | `fb53f8c` | `instatus.service.test.ts`, `platform-settings.test.ts` | |
+| NC-57 | Corrigée | `995b67e` | `infra-prod.test.ts` | Trois vhosts : modèle, production locale, domaines de revendeurs |
+| NC-58 | Conservée | `92cda16` | `google-sign-in.integration.test.ts` | Voir §0.1 |
+| NC-59 | Corrigée | `84add95` | `admin-users.integration.test.ts` | |
+| NC-60 | Corrigée | `11e5876`, `2f2fc6a` | `staff-2fa.guard.test.ts`, `credentials.integration.test.ts` | |
+| NC-61 | Documentée | `14ebad9` | — | PLAN §5.5 décrit la lecture réelle du jeton |
+| NC-62 | Documentée | `f8093fe` | — | ADR 0007 |
+| NC-63 | Documentée | `60742d2` | — | `docs/securite/modele-de-menace.md` |
+| NC-64 | Corrigée | `d0573d8`, `e5faa98`, `e1b1fba`, `3d2d143` | `ceremony.test.ts`, `api-key.repository.integration.test.ts`, `ip-allowlist.test.ts`, `staff-2fa.guard.test.ts`, `admin-write-routes.test.ts`, `server-idor.integration.test.ts` | Aucun IDOR trouvé |
+
+### 0.3 Doutes du §7
+
+| N° | Issue | Preuve |
+|---|---|---|
+| D-1 | Sans objet : le jeton de console ne porte plus d'ordre (NC-14) | `wings-token.test.ts` |
+| D-2 | **Ouvert** : demande Wings, à rejouer sur Codiax (`verifier-transfert.sh`) | — |
+| D-3 | Confirmé, corrigé : tout ce qui suit la lecture du compte part en tâche détachée | `165465b`, `forgot-password-timing.test.ts` |
+| D-4 | Conservé : repli ouvert quand HIBP est injoignable, journalisé (l'inscription et le changement de mot de passe ne dépendent pas d'un tiers). À trancher si le niveau 2 strict est visé | `packages/auth/src/policy.ts:90-91` (`pwnedCheckFailed`) |
+| D-5 | Confirmé, corrigé : `AdminGuard` refuse toute session empruntée | `7b83b49`, `impersonation-promotion.integration.test.ts` |
+| D-6 | Tranché : le défi d'une cérémonie est à usage unique et consommé en base (NC-30, NC-32) ; un compteur à zéro est celui des clés synchronisées, admis par WebAuthn | `login-challenge.integration.test.ts` |
+| D-7 | Confirmé, corrigé : index unique `(user_id, provider)` (migration 0043) | `dd18811`, `sso-resolve.integration.test.ts` |
+| D-8 | Sans objet pour le panel : aucune adresse de fournisseur n'atteint `pullFile` hors de la liste d'hôtes (NC-47) ; le comportement de Wings seul reste à voir sur Codiax | `marketplace-downloads.test.ts` |
+| D-9 | Conforme : `private, no-cache, no-store` sur les pages, authentifiées ou non | Sonde sur l'application compilée |
+| D-10 | Confirmé, corrigé : un transfert ne sort plus un serveur du périmètre de son revendeur | `97b1074`, `server-transfer-perimetre.integration.test.ts` |
+
+### 0.4 Défauts trouvés hors du rapport, corrigés
+
+| Commit | Défaut | Test |
+|---|---|---|
+| `1cb0d55` | **Le lien de la facturation ne connectait personne** : la page posait le cookie pendant son rendu, ce que Next interdit ; chaque arrivée sans second facteur finissait en 500, session ouverte côté API et jamais remise au navigateur. Reproduit sur une instance jetable | `billing-link.test.ts` |
+| `11c698c` (PowerNexus/PowerDashboard#24) | Suite du précédent : derrière nginx, les redirections bâties sur `request.nextUrl.origin` renvoyaient le client vers l'adresse d'écoute de Next (`https://localhost:3210/`), sans son cookie de session ; les retours de l'annuaire et de Google avaient le même défaut. Redirections relatives (`redirectWithin`), le client reste sur le domaine d'arrivée, plateforme ou revendeur | `e2e/facturation.spec.ts`, `ceremony.test.ts`, `billing-link.test.ts` |
+| `9835769` | Quota de ports compté hors transaction : cinq demandes simultanées passaient toutes (même défaut que NC-08) | `allocations.integration.test.ts` |
+| `8be4083` | Rétention : décompte lu sous `rowCount`, que postgres-js n'expose pas — l'écran annonçait toujours « 0 ligne », et une seule tranche par heure | `retention.integration.test.ts` |
+| `efdeafa` | Nettoyage des bases de test : il coupait aussi l'autovacuum, superutilisateur, et le fichier échouait au nettoyage, tous ses tests verts | `throwaway-database.integration.test.ts` |
+| `0239c39` | Le « piège connu » de la consigne (`security-alert` › panne de courrier) n'était pas Argon2 : le test libérait l'envoi avant son départ et attendait pour toujours. La connexion, elle, répondait en 78 ms | le test lui-même, trois exécutions vertes |
+
+### 0.5 Ce qui reste, et pourquoi
+
+- **Décisions produit** : NC-35 (inscription sans énumération), ré-authentification
+  des comptes sans mot de passe local (NC-20), sort des clés personnelles
+  existantes sans échéance (NC-36), réécriture des anciennes lignes de journal
+  de console (NC-13), repli HIBP (D-4), NC-58.
+- **Hors de portée d'une session distante** (Wings et nginx réels, sur Codiax) :
+  `verifier-sauvegardes.sh`, `verifier-sftp.sh`, `verifier-transfert.sh` (D-2),
+  `verifier-cycle-serveur.sh`, `verifier-console.sh` (adapté par NC-14 : la
+  console envoie ses commandes par l'API) ; recharger nginx pour la production
+  locale.
+- **À l'exploitation** : jouer l'étape § 4 du runbook de la clé maître (NC-18)
+  une fois la version en service ; conserver `backup.key` hors de la machine
+  (NC-52).
+- **Restes signalés, non corrigés** : état `restoring` du SFTP (NC-44), jar de
+  plateforme non filtré (NC-47), mot de passe provisoire de
+  `AdminActionsService.createUser` sans échéance, changement d'adresse venu de
+  `SsoService.refresh` sans avis au titulaire.
+- **Pentest externe** : non fait. Recommandé avant une ouverture au public.
 
 ---
 
@@ -49,6 +195,8 @@ par défaut.
 ---
 
 ## 2. Non-conformités par gravité
+
+Constat au moment de l'audit ; l'état de chacune, commit et test, est au §0.2.
 
 Gravité = exploitabilité × impact, pas le niveau ASVS. « Correction » décrit
 le changement minimal ; chaque correction viendra avec son test de
@@ -193,7 +341,8 @@ lancée : les contrôles d'origine des actions serveur sont ceux du framework
 
 ## 4. Tableau des exigences (niveaux 1 et 2)
 
-Verdicts : **C** conforme, **NC** non conforme, **P** partiel, **SO** sans objet.
+Verdicts **au moment de l'audit** (voir §0 pour les corrections) : **C** conforme,
+**NC** non conforme, **P** partiel, **SO** sans objet.
 Une exigence de niveau 3 n'est pas listée. Les renvois `NC-nn` pointent §2.
 
 ### V1 Architecture, conception et modélisation des menaces

@@ -13,6 +13,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { z } from "zod";
+import { requestOrigin } from "../../common/request-origin";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
@@ -254,7 +255,11 @@ export class ClientController {
   ): Promise<{ data: ClientServer }> {
     // Lève 404 pour un inconnu — même réponse que « n'existe pas », pour qu'on
     // ne puisse pas énumérer les serveurs des autres.
-    await this.access.require({ id: request.user.id, scopes: request.scopes }, id, "console.read");
+    await this.access.require(
+      { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) },
+      id,
+      "console.read",
+    );
 
     const server = await this.servers.byId(id, request.user.id);
     if (!server) throw new NotFoundException("Serveur introuvable.");

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  credentialChangeTexts,
   describeDevice,
   failureAlertTexts,
   formatWhen,
@@ -60,6 +61,50 @@ describe("textes des alertes de sécurité", () => {
 
     const without = newDeviceAlertTexts({ ...base, country: null });
     expect(without.text).not.toContain("Pays");
+  });
+
+  it("nomme le changement d'authentifiant, d'où et quand, et mène à la page de sécurité", () => {
+    const fr = credentialChangeTexts({
+      locale: "fr",
+      brand: "GameDashboard",
+      kind: "twoFactorDisabled",
+      ip: "203.0.113.7",
+      when: formatWhen("fr", "Europe/Paris", AT),
+      link: LINK,
+    });
+    expect(fr.subject).toBe("Double authentification désactivée sur votre compte GameDashboard");
+    expect(fr.title).toBe("Double authentification désactivée");
+    expect(fr.text).toContain("Adresse IP : 203.0.113.7");
+    expect(fr.text).toContain("10:30");
+    expect(fr.text).toContain(LINK);
+
+    const en = credentialChangeTexts({
+      locale: "en",
+      brand: "GameDashboard",
+      kind: "passwordChanged",
+      ip: null,
+      when: formatWhen("en", "UTC", AT),
+      link: LINK,
+    });
+    expect(en.subject).toBe("Password changed on your GameDashboard account");
+    // Sans adresse connue, la ligne disparaît plutôt que d'écrire « inconnue ».
+    expect(en.text).not.toContain("IP address");
+  });
+
+  it("renvoie vers le support, et non vers le compte, quand l'adresse a changé", () => {
+    // Ce message part vers l'**ancienne** boîte : on se connecte désormais avec
+    // la nouvelle, et un lien vers la page de sécurité ne lui servirait à rien.
+    const texts = credentialChangeTexts({
+      locale: "fr",
+      brand: "GameDashboard",
+      kind: "emailChanged",
+      ip: null,
+      when: formatWhen("fr", "Europe/Paris", AT),
+      link: LINK,
+    });
+    expect(texts.subject).toBe("Adresse e-mail modifiée sur votre compte GameDashboard");
+    expect(texts.text).toContain("support");
+    expect(texts.text).not.toContain(LINK);
   });
 
   it("retombe sur le français pour une langue inconnue", () => {

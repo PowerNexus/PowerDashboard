@@ -1,10 +1,12 @@
 "use client";
 
+import { identityFragments } from "@gamedashboard/contracts";
 import { AlertBanner, Button, FormField, Input, PasswordInput } from "@gamedashboard/ui";
 import { Check, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
+import { NewPasswordStrength } from "@/components/new-password-strength";
 import { acceptInvite, registerFromInvite } from "@/server/api/invitations";
 
 /**
@@ -51,12 +53,18 @@ export function RegisterFromInvite({ token, email }: { token: string; email: str
 
       <FormField label={tc("password")} description={t("passwordHint")}>
         {(id) => (
-          <PasswordInput
-            id={id}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-          />
+          <>
+            <PasswordInput
+              id={id}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+            <NewPasswordStrength
+              password={password}
+              identity={identityFragments(email, nameFirst, nameLast)}
+            />
+          </>
         )}
       </FormField>
 

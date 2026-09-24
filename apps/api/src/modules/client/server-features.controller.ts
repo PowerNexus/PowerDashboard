@@ -12,6 +12,7 @@ import {
   ForbiddenException,
   Get,
   Inject,
+  Logger,
   Param,
   Post,
   Query,
@@ -19,15 +20,21 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from "@nestjs/common";
+import { z } from "zod";
+import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
-import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
+import { ImpersonationReadOnlyGuard, withImpersonator } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { EngineService } from "../marketplace/engine.service";
 import { EulaService, MINECRAFT_EULA_URL } from "../marketplace/eula.service";
 import { MarketplaceService } from "../marketplace/marketplace.service";
-import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
+import {
+  DAEMON_UNAVAILABLE_MESSAGE,
+  WingsClientService,
+  WingsUnavailableError,
+} from "../wings/wings-client.service";
 import { AllocationsService } from "./allocations.service";
 import { BackupsService } from "./backups.service";
 import { DatabasesService } from "./databases.service";
@@ -47,6 +54,17 @@ type ClientRequest = AuthenticatedRequest & {
   ip?: string;
   headers?: Record<string, string | string[] | undefined>;
 };
+
+/**
+ * Adresse d'un invité : une adresse, et non « quelque chose qui contient un
+ * @ ». `includes("@")` laissait partir `@` ou `a@` chercher un compte et
+ * fabriquer une invitation qui n'arriverait nulle part. Même forme que
+ * l'adresse d'un compte côté administration.
+ */
+const InviteEmail = z.string().trim().email().max(255);
+
+/** Longueur maximale d'une image Docker, comme dans l'éditeur d'eggs. */
+const MAX_DOCKER_IMAGE_LENGTH = 255;
 
 /** Décalage maximal d'une étape de tâche planifiée, en secondes (15 minutes, comme Pterodactyl). */
 const MAX_TASK_OFFSET_SECONDS = 900;
@@ -74,7 +92,8 @@ function arrivalHost(request: ClientRequest): string | null {
 }
 
 function principalOf(request: ClientRequest) {
-  return { id: request.user.id, scopes: request.scopes };
+  // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
+  return { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) };
 }
 
 /**
@@ -88,6 +107,8 @@ function principalOf(request: ClientRequest) {
 @Controller("api/v1/client/servers/:id")
 @UseGuards(SessionGuard, ImpersonationReadOnlyGuard)
 export class ServerFeaturesController {
+  private readonly logger = new Logger(ServerFeaturesController.name);
+
   constructor(
     @Inject(ServerAccessService) private readonly access: ServerAccessService,
     @Inject(ServerWebhooksService) private readonly serverWebhooks: ServerWebhooksService,
@@ -268,6 +289,17 @@ export class ServerFeaturesController {
     @Param("databaseId") databaseId: string,
   ) {
     await this.access.require(principalOf(request), id, "databases.update");
+    /*
+     * Pas pendant une prise en main. Le garde laisse passer les `GET`, mais
+     * celui-ci fait sortir un secret — remis à l'agent, sous le nom du client.
+     * « Voir ce que voit le client » n'en a pas besoin : l'écran montre les
+     * coordonnées de la base sans le mot de passe.
+     */
+    if (request.user.impersonator) {
+      throw new ForbiddenException(
+        "Vous regardez ce compte en tant que membre du personnel : le mot de passe d'une base ne vous est pas révélé.",
+      );
+    }
     const revealed = await this.databases.password(id, databaseId);
     // La consultation est journalisée au même titre que la modification :
     // c est le moment où un identifiant quitte le panel.
@@ -404,10 +436,13 @@ export class ServerFeaturesController {
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
-    const { email, permissions } = (body ?? {}) as { email?: unknown; permissions?: unknown };
-    if (typeof email !== "string" || !email.includes("@")) {
-      throw new BadRequestException("Adresse e-mail manquante.");
-    }
+    const { email: brute, permissions } = (body ?? {}) as {
+      email?: unknown;
+      permissions?: unknown;
+    };
+    const adresse = InviteEmail.safeParse(brute);
+    if (!adresse.success) throw new BadRequestException("Adresse e-mail invalide.");
+    const email = adresse.data;
     if (!Array.isArray(permissions)) throw new BadRequestException("Permissions manquantes.");
 
     await this.access.require(principalOf(request), id, "subusers.create");
@@ -589,6 +624,15 @@ export class ServerFeaturesController {
     if (typeof active !== "boolean") throw new BadRequestException("État manquant.");
 
     await this.access.require(principalOf(request), id, "schedules.update");
+    /*
+     * Réactiver, c'est rendre au planificateur des étapes qu'il exécutera avec
+     * le jeton du panel : le droit de les faire soi-même est exigé, comme à la
+     * création. La pause, non — elle n'exécute rien, et le même invité peut
+     * déjà vider la tâche de ses étapes par une modification.
+     */
+    if (active) {
+      await this.requireTaskPermissions(request, id, await this.schedules.tasksOf(id, scheduleId));
+    }
     await this.schedules.setActive(id, scheduleId, active);
     await this.log(request, id, "schedule.active", { scheduleId, active });
     return { data: { active } };
@@ -600,6 +644,10 @@ export class ServerFeaturesController {
    * Rattachée à `schedules.update` : lancer une tâche revient à décider de son
    * moment d'exécution, ce qui est bien une modification. La lecture seule ne
    * doit pas permettre de déclencher un redémarrage.
+   *
+   * **Et au droit de faire chaque étape.** `schedules.update` seul laissait un
+   * invité sans `power.stop` arrêter le serveur en lançant une tâche écrite
+   * par le propriétaire : le planificateur l'exécute avec le jeton du panel.
    */
   @Post("schedules/:scheduleId/run")
   async runSchedule(
@@ -608,6 +656,7 @@ export class ServerFeaturesController {
     @Param("scheduleId") scheduleId: string,
   ) {
     await this.access.require(principalOf(request), id, "schedules.update");
+    await this.requireTaskPermissions(request, id, await this.schedules.tasksOf(id, scheduleId));
     await this.schedules.runNow(id, scheduleId);
     await this.log(request, id, "schedule.run", { scheduleId });
     return { data: { queued: scheduleId } };
@@ -698,6 +747,14 @@ export class ServerFeaturesController {
     const image = (body as { image?: unknown })?.image;
     if (typeof image !== "string" || image.trim() === "") {
       throw new BadRequestException("Image manquante.");
+    }
+    // Le service la cherche parmi celles de l'egg et refuserait l'inconnue ;
+    // la borne évite seulement de la chercher, et de la journaliser, à
+    // n'importe quelle taille.
+    if (image.length > MAX_DOCKER_IMAGE_LENGTH) {
+      throw new BadRequestException(
+        `Nom d'image trop long (${MAX_DOCKER_IMAGE_LENGTH} caractères au plus).`,
+      );
     }
 
     await this.access.require(principalOf(request), id, "startup.docker-image");
@@ -930,10 +987,13 @@ export class ServerFeaturesController {
     @Query("q") query?: string,
     @Query("page") page?: string,
   ) {
-    await this.access.require(principalOf(request), id, "activity.read");
+    const { isOwner } = await this.access.require(principalOf(request), id, "activity.read");
     const result = await this.activity.forServer(id, {
       query,
       page: Number.parseInt(page ?? "1", 10) || 1,
+      // Les adresses des acteurs ne vont qu'à qui a tous les droits sur ce
+      // serveur : voir `ActivityService.forServer`.
+      revealIp: isOwner,
     });
     return { data: result.items, meta: { page: result.page, hasMore: result.hasMore } };
   }
@@ -1048,6 +1108,10 @@ export class ServerFeaturesController {
    * Le type d'acteur distingue une session d'une clé d'API. La distinction est
    * ce qui permet de répondre à « est-ce moi, ou mon bot ? » — la première
    * question que se pose quiconque découvre une action qu'il ne reconnaît pas.
+   *
+   * Pendant une prise en main, l'agent est nommé (`withImpersonator`) : les
+   * `GET` qui ont un effet — tirer une sauvegarde — lui passent, et le journal
+   * les imputait au client.
    */
   private async log(
     request: ClientRequest,
@@ -1062,7 +1126,7 @@ export class ServerFeaturesController {
       actorType: request.scopes === null ? "user" : "api_key",
       actorLabel: await this.activity.labelFor(request.user.id),
       ip: request.ip ?? null,
-      properties,
+      properties: withImpersonator(request, properties),
     });
   }
 
@@ -1081,7 +1145,8 @@ export class ServerFeaturesController {
     } catch (error) {
       if (error instanceof WingsUnavailableError) {
         if (error.isRefusal && error.detail) throw new BadRequestException(error.detail);
-        throw new ServiceUnavailableException(error.message);
+        this.logger.warn(`Relais vers le daemon : ${error.message}`);
+        throw new ServiceUnavailableException(DAEMON_UNAVAILABLE_MESSAGE);
       }
       throw error;
     }

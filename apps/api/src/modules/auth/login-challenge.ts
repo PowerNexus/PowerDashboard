@@ -16,6 +16,11 @@ import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
  * lecture et d'un ménage pour des objets dont la durée de vie se compte en
  * minutes.
  *
+ * Seule leur **consommation** s'écrit en base, par identifiant
+ * (`AuthTokenRepository.claimChallenge`) : elle doit valoir pour toutes les
+ * instances de l'API et survivre à un redémarrage, ce que le scellé ne sait
+ * pas dire.
+ *
  * Aucun de ces jetons ne vaut une session : ils ne donnent accès à rien.
  */
 
@@ -38,11 +43,22 @@ export type ChallengePurpose = "login" | "passkey-register" | "passkey-login";
  */
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Contexte de chiffrement des jetons d'attente.
+ *
+ * Ils ne sont rangés nulle part, mais ils sortent chiffrés vers le navigateur.
+ * Sans contexte, ce serait le seul chiffré sans contexte que le panel
+ * produise encore : un jeton recopié dans une colonne chiffrée s'y relirait
+ * (les valeurs d'avant la liaison y restent acceptées, NC-18), et un secret de
+ * colonne présenté comme jeton serait déchiffré. Lié, il ne vaut qu'ici.
+ */
+const CHALLENGE_CONTEXT = "login-challenge";
+
 interface ChallengePayload {
   purpose: ChallengePurpose;
   userId: string;
   /** Identifiant unique : c'est lui qui rend le jeton consommable une fois. */
-  jti?: string;
+  jti: string;
   /** Défi aléatoire de la cérémonie WebAuthn. Absent pour un jeton de connexion. */
   webauthn?: string;
   /**
@@ -54,13 +70,27 @@ interface ChallengePayload {
    * est impossible — les deux chemins aboutissent à la même route.
    */
   method?: string;
+  /**
+   * Défi de connexion dont celui-ci dérive : une cérémonie `passkey-login`
+   * naît d'un défi `login`, et doit le consommer en ouvrant la session.
+   *
+   * Scellé avec le reste : le navigateur ne renvoie que le défi de la
+   * cérémonie, et c'est par lui seul que l'API retrouve le premier.
+   */
+  parent?: ChallengeRef;
+  expiresAt: number;
+}
+
+/** Ce qu'il faut d'un défi pour le consommer en base. */
+export interface ChallengeRef {
+  jti: string;
   expiresAt: number;
 }
 
 export function issueChallenge(
   purpose: ChallengePurpose,
   userId: string,
-  options: { webauthn?: string; method?: string; now?: number } = {},
+  options: { webauthn?: string; method?: string; parent?: ChallengeRef; now?: number } = {},
 ): string {
   const now = options.now ?? Date.now();
   const payload: ChallengePayload = {
@@ -69,9 +99,26 @@ export function issueChallenge(
     jti: randomUUID(),
     webauthn: options.webauthn,
     method: options.method,
+    parent: options.parent
+      ? { jti: options.parent.jti, expiresAt: options.parent.expiresAt }
+      : undefined,
     expiresAt: now + CHALLENGE_TTL_MS,
   };
-  return encryptSecret(JSON.stringify(payload));
+  return encryptSecret(JSON.stringify(payload), undefined, CHALLENGE_CONTEXT);
+}
+
+/** Contenu d'un défi lu et vérifié. */
+export interface SealedChallenge {
+  userId: string;
+  /** Défi aléatoire de la cérémonie WebAuthn, ou `null`. */
+  webauthn: string | null;
+  method: string | null;
+  /** Identifiant à consommer, une fois le défi servi. */
+  jti: string;
+  /** Échéance, en millisecondes : la trace de consommation vit jusque-là. */
+  expiresAt: number;
+  /** Défi de connexion d'où dérive cette cérémonie, ou `null`. */
+  parent: ChallengeRef | null;
 }
 
 /**
@@ -81,58 +128,43 @@ export function issueChallenge(
  * une autre clé et **émis pour une autre cérémonie**. L'appelant n'a pas à les
  * distinguer : dans tous les cas il faut recommencer, et détailler la raison
  * renseignerait qui cherche à deviner le format.
+ *
+ * La lecture ne dit pas si le défi a **déjà servi** : c'est la base qui le
+ * sait (`AuthTokenRepository.challengeClaimed`), et c'est elle qui le
+ * consomme (`claimChallenge`). Cette liste vivait ici, en mémoire d'un
+ * processus : un défi servi sur une instance de l'API se rejouait sur une
+ * autre, ou sur la même après un redémarrage (NC-30).
  */
 export function readChallenge(
   purpose: ChallengePurpose,
   token: string,
   now: number = Date.now(),
-): { userId: string; webauthn: string | null; method: string | null } | null {
+): SealedChallenge | null {
   let payload: ChallengePayload;
   try {
-    payload = JSON.parse(decryptSecret(token)) as ChallengePayload;
+    payload = JSON.parse(decryptSecret(token, undefined, CHALLENGE_CONTEXT)) as ChallengePayload;
   } catch {
     return null;
   }
 
   if (typeof payload?.userId !== "string" || typeof payload?.expiresAt !== "number") return null;
+  // Sans identifiant, rien à consommer : un tel jeton se rejouerait sans fin.
+  // Tous en portent depuis que la consommation existe, et un défi vit cinq
+  // minutes — aucun ancien ne circule plus.
+  if (typeof payload.jti !== "string" || payload.jti === "") return null;
   if (payload.purpose !== purpose) return null;
   if (payload.expiresAt <= now) return null;
-  if (payload.jti !== undefined && consumed.has(payload.jti)) return null;
   return {
     userId: payload.userId,
     webauthn: payload.webauthn ?? null,
     // Rendu tel quel : un défi émis avant cette fonctionnalité n'en porte pas,
     // et l'appelant retombe alors sur le mot de passe.
     method: payload.method ?? null,
+    jti: payload.jti,
+    expiresAt: payload.expiresAt,
+    parent:
+      typeof payload.parent?.jti === "string" && typeof payload.parent.expiresAt === "number"
+        ? { jti: payload.parent.jti, expiresAt: payload.parent.expiresAt }
+        : null,
   };
-}
-
-/**
- * Jetons déjà servis, par identifiant, jusqu'à leur expiration.
- *
- * En mémoire : un jeton vit cinq minutes et l'API tourne en un processus,
- * comme la liste de révocation des jetons de console. Ce que cela ferme : un
- * défi de connexion réutilisé après un second facteur réussi, ou une
- * cérémonie WebAuthn rejouée avec le même défi tant qu'il n'a pas expiré.
- */
-const consumed = new Map<string, number>();
-
-/**
- * Marque le jeton comme servi. À appeler dès qu'il a rempli son office —
- * après le second facteur accepté, ou dès la lecture d'une cérémonie
- * WebAuthn, dont la réponse est valide ou à refaire.
- */
-export function consumeChallenge(token: string, now: number = Date.now()): void {
-  let payload: ChallengePayload;
-  try {
-    payload = JSON.parse(decryptSecret(token)) as ChallengePayload;
-  } catch {
-    return;
-  }
-  if (typeof payload?.jti !== "string" || typeof payload.expiresAt !== "number") return;
-
-  for (const [jti, expiresAt] of consumed) {
-    if (expiresAt <= now) consumed.delete(jti);
-  }
-  consumed.set(payload.jti, payload.expiresAt);
 }

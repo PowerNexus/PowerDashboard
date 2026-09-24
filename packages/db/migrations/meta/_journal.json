@@ -295,6 +295,27 @@
       "when": 1790203727958,
       "tag": "0041_backup_bytes_bigint",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790263637617,
+      "tag": "0042_users_email_lower_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790263834129,
+      "tag": "0043_oauth_user_provider_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790265328980,
+      "tag": "0044_provisional_password_expiry",
+      "breakpoints": true
     }
   ]
 }

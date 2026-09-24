@@ -179,8 +179,10 @@ export async function removeLocation(locationId: string): Promise<{ error: strin
 /**
  * Déclare une machine.
  *
- * Rend le jeton du daemon, qui n'est donné qu'une fois : c'est lui qu'on
- * recopie dans la configuration de Wings. L'écran doit l'afficher aussitôt.
+ * Rend le jeton du daemon : c'est lui qu'on recopie dans la configuration de
+ * Wings, et l'écran l'affiche aussitôt. Il se relit ensuite dans le
+ * `config.yml` du node, lecture réservée à l'administrateur et consignée
+ * (PLAN §5.5).
  */
 export async function createNode(input: {
   name: string;

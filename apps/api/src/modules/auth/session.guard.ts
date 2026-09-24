@@ -1,15 +1,36 @@
-import { type CanActivate, type ExecutionContext, Inject, Injectable } from "@nestjs/common";
+import { authCookieAttributes, sessionCookieName } from "@gamedashboard/contracts";
+import {
+  type CanActivate,
+  type ExecutionContext,
+  ForbiddenException,
+  Inject,
+  Injectable,
+} from "@nestjs/common";
 import { ApiKeyRepository } from "./api-key.repository";
+import { crossSiteCookieWrite } from "./request-provenance";
 import { SessionRepository, type SessionUser } from "./session.repository";
 
-/** Nom du cookie de session. Opaque : il ne porte aucune information. */
 /**
- * `__Host-` en production : le navigateur refuse alors un cookie du même nom
- * posé par un sous-domaine, ou sans `Secure`. Même règle côté interface
- * (`apps/web/src/lib/session-cookie.ts`).
+ * Nom du cookie de session. Opaque : il ne porte aucune information.
+ *
+ * `__Host-` dès que le panel exige HTTPS — en production, ou servi sur une
+ * origine `https://` (règle commune de `contracts`, que l'interface applique
+ * aussi dans `apps/web/src/lib/session-cookie.ts`).
+ *
+ * **Une fonction, relue à chaque appel**, et non une constante : `.env` est
+ * chargé par `ConfigModule` après l'évaluation des modules. Une constante y
+ * aurait lu une origine absente et nommé le cookie `gd_session`, pendant que
+ * l'interface, qui charge son environnement avant tout, cherchait
+ * `__Host-gd_session`.
  */
-export const SESSION_COOKIE =
-  process.env.NODE_ENV === "production" ? "__Host-gd_session" : "gd_session";
+export function sessionCookie(): string {
+  return sessionCookieName(process.env);
+}
+
+/** Attributs des cookies d'authentification, à la pose comme à l'effacement. */
+export function authCookieOptions(): ReturnType<typeof authCookieAttributes> {
+  return authCookieAttributes(process.env);
+}
 
 /**
  * Requête authentifiée.
@@ -46,6 +67,7 @@ export class SessionGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
+      method?: string;
       cookies?: Record<string, string | undefined>;
       headers?: Record<string, string | string[] | undefined>;
       ip?: string;
@@ -54,8 +76,18 @@ export class SessionGuard implements CanActivate {
       sessionToken?: string;
     }>();
 
-    const token = request.cookies?.[SESSION_COOKIE];
+    const token = request.cookies?.[sessionCookie()];
     if (token) {
+      // Le cookie part tout seul avec une requête qu'un autre site fait
+      // envoyer : une écriture qui en vient est refusée avant même de lire la
+      // session (NC-02, `request-provenance.ts`). Une clé `Bearer`, elle, ne
+      // se joint jamais d'elle-même et n'est pas concernée.
+      if (crossSiteCookieWrite(request)) {
+        throw new ForbiddenException(
+          "Requête refusée : elle vient d'un autre site que le panel. Refaites le geste depuis le panel.",
+        );
+      }
+
       const user = await this.sessions.resolve(token);
       if (!user) return false;
 

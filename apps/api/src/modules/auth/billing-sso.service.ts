@@ -133,7 +133,7 @@ export class BillingSsoService {
 
     if (resellerId !== null) {
       /*
-       * Une clé de revendeur n'ouvre que les comptes de ses clients.
+       * Une clé de revendeur n'ouvre que les comptes **entièrement** à lui.
        *
        * Le rattachement se lit sur les serveurs — un compte n'appartient à
        * personne, ce sont ses serveurs qui relèvent d'un revendeur. Un compte
@@ -141,17 +141,23 @@ export class BillingSsoService {
        * personne : la session lui sera ouverte au premier serveur livré. C'est
        * la bonne direction pour se tromper.
        *
+       * Tous les serveurs, et non un seul : la session ouverte gère le compte
+       * entier — serveurs chez un confrère ou à la plateforme, clés d'API,
+       * clés SSH. Un seul serveur suffisait, et un revendeur entrait ainsi chez
+       * le client partagé d'un autre (NC-01). C'est la règle que `origine`
+       * applique déjà au choix du domaine ; un `reseller_id` nul (serveur resté
+       * à la plateforme) compte comme un parc distinct.
+       *
        * Le message reprend celui de l'absence : distinguer « pas à vous » de
        * « n'existe pas » apprendrait à un revendeur qui sont les clients des
        * autres.
        */
-      const [lien] = await this.db
-        .select({ id: servers.id })
+      const parcs = await this.db
+        .selectDistinct({ resellerId: servers.resellerId })
         .from(servers)
-        .where(and(eq(servers.ownerId, compte.id), eq(servers.resellerId, resellerId)))
-        .limit(1);
+        .where(eq(servers.ownerId, compte.id));
 
-      if (!lien) {
+      if (parcs.length !== 1 || parcs[0]?.resellerId !== resellerId) {
         throw new NotFoundException(
           "Aucun compte ne correspond. Créez-le d'abord par POST /api/v1/application/users : " +
             "le panel n'ouvre pas de session pour un client qu'il ne connaît pas.",

@@ -60,6 +60,26 @@ export const MAX_ISSUES_PER_WINDOW: Record<TokenPurpose, number> = {
   billing_sso: 30,
 };
 
+/**
+ * Nature des lignes qui consignent un défi de connexion déjà servi.
+ *
+ * Hors de `TokenPurpose` : ces lignes ne portent aucun jeton à présenter —
+ * le défi lui-même voyage scellé (`login-challenge.ts`) — et naissent
+ * consommées. Elles n'entrent ni dans le plafond d'émission, ni dans les
+ * révocations par usage.
+ */
+export const CHALLENGE_PURPOSE = "challenge";
+
+/**
+ * Condensat sous lequel un défi est consigné.
+ *
+ * Préfixé : un identifiant de défi et un jeton envoyé par courrier ne doivent
+ * jamais pouvoir se confondre dans l'index unique qu'ils partagent.
+ */
+function challengeHash(jti: string): string {
+  return hashToken(`challenge:${jti}`);
+}
+
 @Injectable()
 export class AuthTokenRepository {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
@@ -175,5 +195,59 @@ export class AuthTokenRepository {
       .returning({ userId: authTokens.userId });
 
     return row ?? null;
+  }
+
+  /**
+   * Consomme un défi de connexion : `true` pour le premier qui le présente,
+   * `false` pour tout autre, **sur toutes les instances de l'API**.
+   *
+   * La liste des défis servis vivait en mémoire d'un processus : un défi
+   * servi sur une instance se rejouait sur une autre, ou après un redémarrage,
+   * pendant ses cinq minutes de validité (NC-30). La consommation est une
+   * insertion que l'index unique sur le condensat rend atomique — deux
+   * demandes simultanées n'en gagnent qu'une, sans verrou ni relecture. La
+   * ligne naît consommée et part avec la rétention des `auth_tokens`, un mois
+   * après l'échéance du défi.
+   *
+   * Le compte doit exister (clé étrangère) : les appelants le lisent avant.
+   */
+  async claimChallenge(challenge: {
+    jti: string;
+    userId: string;
+    expiresAt: number;
+  }): Promise<boolean> {
+    const rows = await this.db
+      .insert(authTokens)
+      .values({
+        userId: challenge.userId,
+        purpose: CHALLENGE_PURPOSE,
+        tokenHash: challengeHash(challenge.jti),
+        expiresAt: new Date(challenge.expiresAt).toISOString(),
+        consumedAt: new Date().toISOString(),
+      })
+      .onConflictDoNothing({ target: authTokens.tokenHash })
+      .returning({ id: authTokens.id });
+    return rows.length === 1;
+  }
+
+  /**
+   * Le défi a-t-il déjà servi ?
+   *
+   * Lecture seule, pour refuser tôt un défi rejoué — avant de vérifier un
+   * code, et donc avant de brûler un code de secours ou de compter un échec.
+   * Ce n'est pas elle qui garantit l'usage unique : `claimChallenge`, si.
+   */
+  async challengeClaimed(jti: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: authTokens.id })
+      .from(authTokens)
+      .where(
+        and(
+          eq(authTokens.tokenHash, challengeHash(jti)),
+          eq(authTokens.purpose, CHALLENGE_PURPOSE),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 }

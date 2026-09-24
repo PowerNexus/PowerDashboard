@@ -138,13 +138,22 @@ export class ActivityService {
    * mémoire sur une page déjà tronquée ne trouverait que ce qui figure dans les
    * cinquante dernières lignes, et donnerait « aucun résultat » pour un
    * événement qui existe.
+   *
+   * `revealIp` : l'adresse des acteurs ne va qu'à qui a tous les droits sur le
+   * serveur. `activity.read` est dans le préréglage « lecteur », et un invité
+   * voyait l'adresse du propriétaire, de ses autres invités, de l'assistance
+   * — une donnée personnelle qui ne l'aide en rien à comprendre ce qui est
+   * arrivé au serveur. Masquée, elle ne se cherche pas non plus : voir une
+   * ligne apparaître pour « 198.51.100 » la dirait aussi sûrement.
    */
   async forServer(
     serverId: string,
-    options: { query?: string; page?: number } = {},
+    options: { query?: string; page?: number; revealIp?: boolean } = {},
   ): Promise<{ items: ActivityEntry[]; page: number; hasMore: boolean }> {
     const page = Math.max(1, Math.trunc(options.page ?? 1));
     const search = options.query?.trim();
+    // Fermé par défaut : un appelant qui oublie la question ne montre rien.
+    const revealIp = options.revealIp === true;
 
     const conditions = [eq(activityLogs.serverId, serverId)];
     if (search) {
@@ -154,7 +163,7 @@ export class ActivityService {
         ilike(activityLogs.event, pattern),
         // `inet` ne se compare pas à un motif texte : la colonne est convertie
         // explicitement, sinon PostgreSQL refuse l'opérateur.
-        sql`host(${activityLogs.ip}) ilike ${pattern}`,
+        revealIp ? sql`host(${activityLogs.ip}) ilike ${pattern}` : undefined,
       );
       if (ipMatch) conditions.push(ipMatch);
     }
@@ -186,7 +195,7 @@ export class ActivityService {
         event: row.event,
         actorLabel: row.actorLabel,
         actorType: row.actorType as ActivityEntry["actorType"],
-        ip: row.ip,
+        ip: revealIp ? row.ip : null,
         properties: (row.properties ?? {}) as Record<string, unknown>,
         at: row.at,
       })),

@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/session-cookie";
+import { forwardedIdentityHeaders } from "@/server/api/forwarded";
+import { crossSiteRequest } from "@/server/browser-provenance";
 
 /**
  * Relais d'un morceau vers l'API, **en flux**.
@@ -23,6 +25,13 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ serverId: string; uploadId: string; index: string }> },
 ): Promise<Response> {
+  // Pas une action serveur : le contrôle d'origine de Next ne passe pas ici.
+  // Sans celui-ci, un site tiers ferait écrire un morceau dans l'envoi en
+  // cours d'un visiteur connecté (NC-02, même règle que l'API).
+  if (crossSiteRequest(request)) {
+    return Response.json({ message: "Origine refusée." }, { status: 403 });
+  }
+
   const { serverId, uploadId, index } = await params;
 
   const session = (await cookies()).get(SESSION_COOKIE)?.value;
@@ -38,6 +47,9 @@ export async function POST(
     {
       method: "POST",
       headers: {
+        // L'API refait le contrôle d'origine sur ce que Next lui transmet :
+        // si ce relais l'oubliait un jour, elle refuserait encore.
+        ...(await forwardedIdentityHeaders()),
         cookie: `${SESSION_COOKIE}=${session}`,
         "content-type": "application/octet-stream",
         "content-length": longueur,

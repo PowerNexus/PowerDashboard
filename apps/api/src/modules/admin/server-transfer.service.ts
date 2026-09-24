@@ -1,4 +1,11 @@
-import { allocations, type Database, nodes, servers, serverTransfers } from "@gamedashboard/db";
+import {
+  allocations,
+  type Database,
+  nodeResellerShares,
+  nodes,
+  servers,
+  serverTransfers,
+} from "@gamedashboard/db";
 import {
   BadRequestException,
   ConflictException,
@@ -88,6 +95,7 @@ export class ServerTransferService {
         id: servers.id,
         name: servers.name,
         ownerId: servers.ownerId,
+        resellerId: servers.resellerId,
         state: servers.state,
         fromNodeId: servers.nodeId,
         fromNodeName: nodes.name,
@@ -116,7 +124,12 @@ export class ServerTransferService {
     }
 
     const [target] = await this.db
-      .select({ id: nodes.id, name: nodes.name, maintenance: nodes.maintenanceMode })
+      .select({
+        id: nodes.id,
+        name: nodes.name,
+        maintenance: nodes.maintenanceMode,
+        ownerId: nodes.ownerId,
+      })
       .from(nodes)
       .where(eq(nodes.id, toNodeId))
       .limit(1);
@@ -127,6 +140,7 @@ export class ServerTransferService {
     if (target.maintenance) {
       throw new ConflictException("Ce node est en maintenance : il n'accepte pas de serveur.");
     }
+    await this.assertWithinPerimeter(server.resellerId, target.id, target.ownerId);
 
     const transferId = await this.reserve(serverId, server.fromNodeId, toNodeId);
 
@@ -164,6 +178,51 @@ export class ServerTransferService {
       failureReason: null,
       startedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Le node d'arrivée doit rester dans le périmètre du revendeur du serveur.
+   *
+   * Le rattachement (`servers.reseller_id`) décide de ce que voit un revendeur
+   * et de la part qui compte la consommation du serveur ; le transfert ne le
+   * change pas. Deux arrivées le trahiraient (audit ASVS, doute D-10) :
+   *
+   * - **la machine confiée en entier à un autre revendeur** : il l'administre,
+   *   il lirait les disques d'un client qui n'est pas le sien. Vaut aussi pour
+   *   un serveur de la plateforme ;
+   * - **une machine partagée où le revendeur n'a pas de part** : plus rien ne
+   *   compterait la consommation du serveur, ni contre une part ni contre le
+   *   plafond qui déclenche les coupures.
+   *
+   * Refuser plutôt que rattacher d'office au nouveau revendeur : changer de
+   * revendeur, c'est changer de fournisseur pour le client, une décision
+   * commerciale qu'un déménagement technique ne prend pas en passant. Le geste
+   * légitime reste possible en deux temps : poser d'abord la part.
+   */
+  private async assertWithinPerimeter(
+    resellerId: string | null,
+    toNodeId: string,
+    toNodeOwnerId: string | null,
+  ): Promise<void> {
+    if (toNodeOwnerId !== null && toNodeOwnerId !== resellerId) {
+      throw new ConflictException(
+        "Ce node est confié à un autre revendeur : le serveur n'y a pas sa place.",
+      );
+    }
+    if (resellerId === null || toNodeOwnerId === resellerId) return;
+
+    const [share] = await this.db
+      .select({ id: nodeResellerShares.id })
+      .from(nodeResellerShares)
+      .where(
+        and(eq(nodeResellerShares.nodeId, toNodeId), eq(nodeResellerShares.resellerId, resellerId)),
+      )
+      .limit(1);
+    if (!share) {
+      throw new ConflictException(
+        "Le revendeur de ce serveur n'a pas de part sur ce node : posez-lui d'abord une part.",
+      );
+    }
   }
 
   /**

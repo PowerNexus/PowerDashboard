@@ -77,6 +77,33 @@ describe("infra/prod/panel.conf", () => {
     }
   });
 
+  /*
+   * En-têtes de transport (ASVS 14.4.5, 14.3.3). HSTS couvrait le seul nom du
+   * panel : un sous-domaine en HTTP restait une porte vers une page servie en
+   * clair sous son nom. `preload`, lui, ne se retire pas en un redéploiement :
+   * absent à dessein.
+   */
+  it("impose HTTPS aux sous-domaines, sans s'inscrire à la liste de préchargement", () => {
+    const hsts = /add_header Strict-Transport-Security "([^"]+)" always;/.exec(directives)?.[1];
+    expect(hsts).toBeDefined();
+    expect(hsts).toMatch(/max-age=31536000/);
+    expect(hsts).toContain("includeSubDomains");
+    expect(hsts).not.toContain("preload");
+  });
+
+  it("ne donne sa version de nginx dans aucune réponse", () => {
+    const serveurs = directives.split(/^server \{/m).slice(1);
+    expect(serveurs.length).toBe(2);
+    for (const bloc of serveurs) expect(bloc).toMatch(/^\s*server_tokens off;/m);
+  });
+
+  it("ne pose pas d'agrafage OCSP sans répondeur, et dit pourquoi", () => {
+    // Let's Encrypt n'inscrit plus d'adresse OCSP dans ses certificats :
+    // `ssl_stapling on` n'y produirait qu'un avertissement au démarrage.
+    expect(directives).not.toMatch(/ssl_stapling/);
+    expect(vhost).toMatch(/OCSP/);
+  });
+
   it("ne porte que le nom d'exemple, que deploy.sh remplace par le domaine réel", () => {
     const noms = [...directives.matchAll(/server_name\s+([^;]+);/g)].map((m) =>
       (m[1] ?? "").trim(),
@@ -84,6 +111,155 @@ describe("infra/prod/panel.conf", () => {
     expect(new Set(noms)).toEqual(new Set(["panel.example.fr"]));
     expect(deploy).toContain("EXEMPLE=panel.example.fr");
     expect(deploy).not.toMatch(/^DOMAIN=panel\.example\.fr$/m);
+  });
+});
+
+/**
+ * Le jeton du lien de facturation n'entre dans aucun journal d'accès (NC-57).
+ *
+ * Il voyage dans le chemin (`/sso/<jeton>`) et ouvre une session : écrit dans
+ * le journal d'accès, il se lisait par quiconque lit les journaux, pendant les
+ * deux minutes où il vaut une session. Les trois vhosts qui servent
+ * l'interface sont concernés : celui de la plateforme, celui de la production
+ * locale, et celui des domaines de revendeurs, où atterrissent leurs clients.
+ *
+ * Un bloc `location` à expression régulière remplace `location /` pour ces
+ * chemins : il doit donc relayer les mêmes en-têtes d'identité, faute de quoi
+ * la page recevrait l'adresse de nginx et le mauvais domaine.
+ */
+describe("jeton du lien de facturation", () => {
+  const vhosts = {
+    "infra/prod/panel.conf": vhost,
+    "infra/local/gamedashboard.local.conf": readFileSync(
+      join(RACINE, "infra", "local", "gamedashboard.local.conf"),
+      "utf8",
+    ),
+    "infra/prod/certificates.sh (domaine de revendeur)": (() => {
+      const agent = readFileSync(join(PROD, "certificates.sh"), "utf8");
+      const debut = agent.indexOf("bloc_servi()");
+      return agent.slice(debut, agent.indexOf("\nEOF", debut)).replaceAll("\\$", "$");
+    })(),
+  };
+
+  /**
+   * Le corps d'un bloc `location`, sans commentaires ni imbrication.
+   *
+   * Le dernier du fichier : le serveur HTTPS vient après celui du port 80, dont
+   * le `location /` ne fait que rediriger.
+   */
+  function bloc(conf: string, entete: string): string | null {
+    const sansCommentaires = conf.replace(/#.*$/gm, "");
+    const debut = sansCommentaires.lastIndexOf(`location ${entete} {`);
+    if (debut < 0) return null;
+    return sansCommentaires.slice(debut, sansCommentaires.indexOf("}", debut));
+  }
+
+  const entetes = (corps: string) =>
+    [...corps.matchAll(/proxy_set_header\s+([\w-]+)\s+([^;]+);/g)]
+      .map((m) => `${m[1]} ${(m[2] ?? "").trim()}`)
+      .filter((ligne) => !/^(Upgrade|Connection) /.test(ligne))
+      .sort();
+
+  for (const [chemin, conf] of Object.entries(vhosts)) {
+    it(`${chemin} ne journalise pas /sso/<jeton>`, () => {
+      const sso = bloc(conf, "~ ^/sso/");
+      expect(sso, "aucun bloc location ~ ^/sso/").not.toBeNull();
+      expect(sso).toMatch(/^\s*access_log off;/m);
+      expect(sso).toMatch(/proxy_pass http:\/\/127\.0\.0\.1:(3210|\$PANEL_WEB_PORT);/);
+    });
+
+    it(`${chemin} relaie à /sso/ les mêmes en-têtes que l'interface`, () => {
+      expect(entetes(bloc(conf, "~ ^/sso/") ?? "")).toEqual(entetes(bloc(conf, "/") ?? ""));
+    });
+  }
+});
+
+/**
+ * La production locale limite comme le modèle (NC-49, ASVS 2.2.1).
+ *
+ * `infra/local/gamedashboard.local.conf` sert la seule installation réelle
+ * (`gamedashboard.local`), et n'avait **aucune** limitation : ni sur les
+ * écrans de connexion, ni sur l'API applicative, ni sur les routes du daemon.
+ * Les limites posées dans `panel.conf` — le modèle — ne protégeaient donc que
+ * les installations à venir. Chaque bloc limité du modèle doit l'être à
+ * l'identique ici, avec les mêmes zones.
+ *
+ * Le HSTS, lui, reste volontairement absent de la production locale : il
+ * enfermerait le navigateur sur un certificat de développement (commentaire
+ * du fichier).
+ */
+describe("limites de la production locale", () => {
+  const local = readFileSync(join(RACINE, "infra", "local", "gamedashboard.local.conf"), "utf8")
+    .split("\n")
+    .map((ligne) => ligne.replace(/#.*$/, ""))
+    .join("\n");
+
+  /** Les blocs `location` qui portent une limite, et la ligne qui la pose. */
+  function limites(conf: string): Map<string, string> {
+    const blocs = new Map<string, string>();
+    for (const m of conf.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)) {
+      const limite = /limit_req\s+zone=[^;]+;/.exec(m[2] ?? "")?.[0];
+      if (limite) blocs.set((m[1] ?? "").trim(), limite.replace(/\s+/g, " "));
+    }
+    return blocs;
+  }
+
+  const zones = (conf: string) =>
+    [...conf.matchAll(/^limit_req_zone .+;$/gm)].map((m) => m[0].replace(/\s+/g, " ")).sort();
+
+  it("déclare les mêmes zones que le modèle", () => {
+    expect(zones(directives).length).toBeGreaterThan(0);
+    expect(zones(local)).toEqual(zones(directives));
+  });
+
+  it("limite chaque bloc que le modèle limite, à l'identique", () => {
+    const modele = limites(directives);
+    expect(modele.size).toBeGreaterThan(0);
+    expect(Object.fromEntries(limites(local))).toEqual(Object.fromEntries(modele));
+  });
+
+  it("répond 429 aux navigateurs, 503 au daemon, et tait sa version", () => {
+    const https = local.slice(local.indexOf("listen 443"));
+    expect(https).toMatch(/^\s*limit_req_status 429;/m);
+    expect(/location \/api\/remote\/ \{([^}]*)\}/.exec(local)?.[1]).toMatch(
+      /^\s*limit_req_status 503;/m,
+    );
+    expect(local.match(/^\s*server_tokens off;/gm)).toHaveLength(2);
+  });
+});
+
+/**
+ * Les routes du daemon sont limitées, sans gêner Wings (NC-49).
+ *
+ * `/api/remote/` était le seul préfixe exposé sans `limit_req` : un jeton
+ * éprouvé en boucle, ou un node qui s'emballe, payait chaque requête en
+ * lecture de base. La limite doit pourtant laisser passer le trafic légitime
+ * d'un daemon — l'inventaire paginé en parallèle à son démarrage, une
+ * configuration relue par serveur démarré, le journal d'activité par lots —
+ * et surtout **ne pas lui répondre 429** : Wings abandonne sur tout 4xx et
+ * ne rejoue que les 5xx. Un compte rendu de sauvegarde refusé en 429 lui
+ * ferait effacer l'archive ; en 503, il réessaie quelques secondes plus tard.
+ */
+describe("limitation des routes du daemon", () => {
+  const bloc = /location \/api\/remote\/ \{([^}]*)\}/.exec(directives)?.[1] ?? "";
+
+  it("pose une limite par adresse sur /api/remote/", () => {
+    expect(bloc).not.toBe("");
+    expect(bloc).toMatch(/^\s*limit_req\s+zone=gd_remote\s/m);
+    expect(directives).toMatch(/^limit_req_zone \$binary_remote_addr zone=gd_remote:/m);
+  });
+
+  it("laisse passer le démarrage d'un node chargé", () => {
+    const rate = /zone=gd_remote:\S+\s+rate=(\d+)r\/s;/.exec(directives)?.[1];
+    const burst = /limit_req\s+zone=gd_remote\s+burst=(\d+)\s+nodelay;/.exec(bloc)?.[1];
+    // Des dizaines de serveurs démarrés d'un coup, plus l'inventaire paginé :
+    // plusieurs centaines de requêtes en rafale, puis un débit soutenu.
+    expect(Number(rate)).toBeGreaterThanOrEqual(10);
+    expect(Number(burst)).toBeGreaterThanOrEqual(200);
+  });
+
+  it("refuse en 503, que Wings rejoue, et non en 429, qu'il abandonne", () => {
+    expect(bloc).toMatch(/^\s*limit_req_status\s+503;/m);
   });
 });
 
@@ -234,6 +410,57 @@ describe("CLI autonome (gamedashboard.sh)", () => {
 });
 
 /**
+ * La sauvegarde d'exploitation contient `env/`, donc `APP_SECRET_KEY` : elle
+ * s'écrivait en clair, un `.tar` en 600 que l'on copie ensuite ailleurs (ASVS
+ * 8.1, 14.1). Elle se chiffre désormais, sans rien demander — `update` la
+ * prend sans terminal — et reste restaurable par la commande du runbook.
+ */
+describe("sauvegarde d'exploitation (app.sh backup)", () => {
+  const app = readFileSync(join(PROD, "app.sh"), "utf8");
+  /** Le corps d'une fonction du script ; vide si elle n'existe pas. */
+  const fonction = (nom: string) => {
+    const debut = app.indexOf(`${nom}() {`);
+    return debut < 0 ? "" : app.slice(debut, app.indexOf("\n}\n", debut));
+  };
+  const sauvegarder = fonction("sauvegarder");
+  const cle = fonction("cle_sauvegarde");
+  const runbook = readFileSync(join(RACINE, "docs", "runbooks", "restauration-base.md"), "utf8");
+
+  it("n'écrit l'archive qu'à travers le chiffrement", () => {
+    expect(sauvegarder).toContain('fichier="$SAUVEGARDES/gamedashboard-$horodatage.tar.enc"');
+    expect(sauvegarder).toMatch(/tar -cf - -C "\$temp" \. \| openssl enc -e "\$\{CHIFFRE\[@\]\}"/);
+    expect(sauvegarder).not.toMatch(/tar -cf "\$fichier"/);
+  });
+
+  it("lit sa clé dans un fichier hors de env/, jamais sur la ligne de commande", () => {
+    const chemin = /^CLE_SAUVEGARDE=\$\{GD_CLE_SAUVEGARDE:-([^}]+)\}$/m.exec(app)?.[1];
+    expect(chemin).toBeDefined();
+    // env/ est dans l'archive : une clé rangée là s'y chiffrerait elle-même.
+    expect(chemin).not.toContain("/env");
+    expect(sauvegarder).toContain('-pass "file:$CLE_SAUVEGARDE"');
+    // `pass:` et `env:` la montreraient à `ps`, ou à l'environnement du processus.
+    expect(app).not.toMatch(/-pass "?(pass|env):/);
+    expect(app).toMatch(/--preserve-env=\S*GD_CLE_SAUVEGARDE/);
+  });
+
+  it("tire la clé sans rien demander, et ne remplace jamais une clé existante", () => {
+    expect(sauvegarder).toContain("cle_sauvegarde");
+    expect(cle).toMatch(/if \[ ! -s "\$CLE_SAUVEGARDE" \]/);
+    expect(cle).toMatch(/umask 077 && openssl rand/);
+    expect(cle).toContain('chmod 600 "$CLE_SAUVEGARDE"');
+    // Le seul `read` admis lit la liste des anciennes archives, pas le clavier.
+    const lectures = `${sauvegarder}\n${cle}`.replace(/\| while read -r \w+; do/g, "");
+    expect(lectures).not.toMatch(/\bread\b|\/dev\/tty/);
+  });
+
+  it("se déchiffre par la commande du runbook de restauration", () => {
+    const chiffre = /^CHIFFRE=\(([^)]+)\)$/m.exec(app)?.[1];
+    expect(chiffre).toMatch(/^-aes-256-cbc -pbkdf2 -iter \d{6,} -md sha256$/);
+    expect(runbook).toContain(`openssl enc -d ${chiffre} -pass file:`);
+  });
+});
+
+/**
  * Le 19 mars 2026, 76 des 77 tags de `aquasecurity/trivy-action` ont été
  * réécrits vers un voleur de secrets (GHSA, correctif 0.35.0). Un tag se
  * réécrit, une empreinte de commit non : toute action tierce est épinglée
@@ -309,6 +536,36 @@ describe("actions GitHub des workflows", () => {
       expect(bloc).toContain(
         "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
       );
+    }
+  });
+
+  it("lèvent la seconde preuve du personnel sur la base d'essai, avant la suite", () => {
+    // Exigée par défaut (NC-10), et le compte d'essai est administrateur : sans
+    // cette étape, chaque écran d'administration visité par la suite serait
+    // l'explication « seconde preuve exigée », captures comprises.
+    const [ci, , captures] = workflows as [string, string, string];
+    for (const [nom, texte] of [
+      ["ci.yml", ci],
+      ["captures.yml", captures],
+    ] as const) {
+      const levee = texte.indexOf("values ('security.staffRequires2fa', 'false'::jsonb)");
+      const suite = texte.search(/run: pnpm e2e|playwright test/);
+      expect(levee, nom).toBeGreaterThan(0);
+      expect(suite, nom).toBeGreaterThan(levee);
+    }
+  });
+
+  /*
+   * Sans `permissions:`, le jeton du workflow reçoit les droits par défaut du
+   * dépôt — écriture comprise selon son réglage — et ci.yml le tendait à
+   * Semgrep, conteneur root, sur une machine à nous. La lecture seule se pose
+   * en tête ; un job qui a besoin de plus le déclare lui-même, avec sa raison.
+   */
+  it("ne donnent au jeton que la lecture du dépôt, en tête de chaque workflow", () => {
+    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml"].map(
+      (fichier, rang) => [fichier, workflows[rang] ?? ""] as const,
+    )) {
+      expect(texte, nom).toMatch(/^permissions:\n {2}contents: read\n\n/m);
     }
   });
 

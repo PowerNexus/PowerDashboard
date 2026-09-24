@@ -17,8 +17,9 @@ import { headers } from "next/headers";
  * seul. Réparer l'affichage répare aussi cela.
  *
  * Rien ici n'est une preuve d'identité : un en-tête se falsifie. Ces valeurs ne
- * servent qu'à reconnaître sa propre session dans une liste, et à répartir un
- * compteur — jamais à accorder un droit.
+ * servent qu'à reconnaître sa propre session dans une liste, à répartir un
+ * compteur, et à **refuser** une écriture venue d'un autre site — jamais à
+ * accorder un droit.
  */
 export async function forwardedIdentityHeaders(): Promise<Record<string, string>> {
   const incoming = await headers();
@@ -61,6 +62,26 @@ export async function forwardedIdentityHeaders(): Promise<Record<string, string>
    */
   const host = requestHost(incoming);
   if (host) forwarded["x-gd-host"] = host;
+
+  /*
+   * D'où vient la requête, selon le navigateur (NC-02).
+   *
+   * `Origin` et `Sec-Fetch-Site` s'arrêtent ici : l'API ne voit que Next. Les
+   * transmettre sous des noms à nous laisse `SessionGuard` refuser une
+   * écriture par cookie qu'un autre site aurait fait envoyer — en plus du
+   * contrôle d'origine que Next applique déjà à ses actions serveur, et pour
+   * tout chemin qui n'en est pas une.
+   *
+   * Contrairement aux en-têtes ci-dessus, ceux-là **servent** à décider, mais
+   * seulement à refuser : un client qui les forgerait ne pourrait que se
+   * faire refuser lui-même. Absents (rendu d'une page, client qui n'est pas
+   * un navigateur), ils restent absents.
+   */
+  const origin = incoming.get("origin");
+  if (origin) forwarded["x-gd-origin"] = origin;
+
+  const site = incoming.get("sec-fetch-site");
+  if (site) forwarded["x-gd-fetch-site"] = site;
 
   /*
    * Le pays, quand un frontal Cloudflare l'a posé.

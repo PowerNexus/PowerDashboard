@@ -1,13 +1,20 @@
-import { generateApiKey } from "@gamedashboard/auth";
+import { generateApiKey, isAllowlistEntry } from "@gamedashboard/auth";
 import {
   APPLICATION_KEY_MAX_DAYS,
   isApplicationScope,
   isPlatformScope,
 } from "@gamedashboard/contracts";
 import { applicationKeys, type Database, nodes, users } from "@gamedashboard/db";
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { ACTIVE_KEYS_MAX, activeKeysLimitMessage } from "../client/api-keys.service";
 
 /**
  * Durée de vie d'une clé d'amorçage.
@@ -142,9 +149,17 @@ export class ApplicationKeysService {
     }
 
     const allowedIps = (input.allowedIps ?? []).map((ip) => ip.trim()).filter((ip) => ip !== "");
+    /*
+     * La règle des clés personnelles, et non une expression régulière à part
+     * (NC-37) : celle-ci refusait tout bloc CIDR, que la vérification à
+     * l'usage sait pourtant comparer, et laissait passer `999.1.1.1` ou `:::`
+     * — une clé alors inutilisable sans que rien ne dise pourquoi.
+     */
     for (const ip of allowedIps) {
-      if (!/^[0-9a-fA-F:.]{3,45}$/.test(ip)) {
-        throw new BadRequestException(`Adresse IP invalide : « ${ip} ».`);
+      if (!isAllowlistEntry(ip)) {
+        throw new BadRequestException(
+          `Adresse IP invalide : « ${ip} ». Une adresse, ou un bloc CIDR de préfixe non nul.`,
+        );
       }
     }
 
@@ -167,29 +182,61 @@ export class ApplicationKeysService {
     // qu'elle ouvre.
     const generated = generateApiKey("app");
 
-    const [row] = await this.db
-      .insert(applicationKeys)
-      .values({
-        name,
-        prefix: generated.prefix,
-        keyHash: generated.hash,
-        scopes: [...new Set(input.scopes)],
-        allowedIps,
-        resellerId,
-        createdBy,
-        expiresAt,
-      })
-      .returning({
-        id: applicationKeys.id,
-        name: applicationKeys.name,
-        prefix: applicationKeys.prefix,
-        scopes: applicationKeys.scopes,
-        allowedIps: applicationKeys.allowedIps,
-        expiresAt: applicationKeys.expiresAt,
-        lastUsedAt: applicationKeys.lastUsedAt,
-        revokedAt: applicationKeys.revokedAt,
-        createdAt: applicationKeys.createdAt,
-      });
+    const row = await this.db.transaction(async (tx) => {
+      /*
+       * Plafond de clés actives (NC-38), par compte : le revendeur pour ses
+       * clés, la plateforme pour les siennes. Les clés d'amorçage d'un node
+       * n'y entrent pas — une par node, trente minutes, un seul usage.
+       *
+       * Verrou consultatif sur le périmètre plutôt que sur une ligne : la
+       * plateforme n'a pas de ligne à verrouiller. Sans lui, des émissions
+       * simultanées comptaient toutes sous le plafond et passaient toutes.
+       */
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`application_keys:${resellerId ?? "plateforme"}`}))`,
+      );
+      const [actives] = await tx
+        .select({ n: count() })
+        .from(applicationKeys)
+        .where(
+          and(
+            resellerId === null
+              ? isNull(applicationKeys.resellerId)
+              : eq(applicationKeys.resellerId, resellerId),
+            isNull(applicationKeys.nodeId),
+            isNull(applicationKeys.revokedAt),
+            or(isNull(applicationKeys.expiresAt), gt(applicationKeys.expiresAt, sql`now()`)),
+          ),
+        );
+      if ((actives?.n ?? 0) >= ACTIVE_KEYS_MAX) {
+        throw new ConflictException(activeKeysLimitMessage());
+      }
+
+      const [inserted] = await tx
+        .insert(applicationKeys)
+        .values({
+          name,
+          prefix: generated.prefix,
+          keyHash: generated.hash,
+          scopes: [...new Set(input.scopes)],
+          allowedIps,
+          resellerId,
+          createdBy,
+          expiresAt,
+        })
+        .returning({
+          id: applicationKeys.id,
+          name: applicationKeys.name,
+          prefix: applicationKeys.prefix,
+          scopes: applicationKeys.scopes,
+          allowedIps: applicationKeys.allowedIps,
+          expiresAt: applicationKeys.expiresAt,
+          lastUsedAt: applicationKeys.lastUsedAt,
+          revokedAt: applicationKeys.revokedAt,
+          createdAt: applicationKeys.createdAt,
+        });
+      return inserted;
+    });
 
     if (!row) throw new BadRequestException("La clé n'a pas pu être créée.");
     return { key: row, plaintext: generated.plaintext };

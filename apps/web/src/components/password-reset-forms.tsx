@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
 import { CaptchaField } from "@/components/captcha-field";
+import { NewPasswordStrength } from "@/components/new-password-strength";
 import { requestPasswordReset, submitPasswordReset } from "@/server/api/password-reset";
 
 /**
@@ -127,14 +128,17 @@ export function ResetPasswordForm({ token }: { token: string }) {
 
       <FormField label={t("newPassword")}>
         {(id) => (
-          <Input
-            id={id}
-            type="password"
-            autoComplete="new-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <>
+            <Input
+              id={id}
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <NewPasswordStrength password={password} />
+          </>
         )}
       </FormField>
 

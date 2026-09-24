@@ -2,6 +2,7 @@ import type { AdminUserPatch, UserSuspensionInput } from "@gamedashboard/contrac
 import { type Database, users } from "@gamedashboard/db";
 import {
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -11,9 +12,11 @@ import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { type AccountMailOutcome, AccountMailService } from "../auth/account-mail.service";
 import { AuthTokenRepository } from "../auth/auth-token.repository";
+import { SecurityAlertService } from "../auth/security-alert.service";
 import { SessionRepository } from "../auth/session.repository";
 import { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
+import { isAdminRole } from "./admin.guard";
 
 /**
  * Ce que l'administration fait d'un compte existant : le corriger, lui envoyer
@@ -43,6 +46,7 @@ export class AdminUsersService {
     @Inject(AccountMailService) private readonly accountMail: AccountMailService,
     @Inject(WingsTokenService) private readonly wingsTokens: WingsTokenService,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
+    @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
   ) {}
 
   /**
@@ -58,20 +62,42 @@ export class AdminUsersService {
    * Les liens encore valables partis vers l'**ancienne** boîte meurent au même
    * moment : un lien de réinitialisation qui dort dans une boîte qu'on vient
    * de retirer au compte resterait une clé de ce compte.
+   *
+   * Et l'ancienne boîte est prévenue (ASVS 2.2.3) : c'est la seule que le
+   * titulaire lise encore si le changement n'était pas de son fait, et l'on se
+   * connecte désormais avec la nouvelle.
+   *
+   * **L'adresse d'un autre membre du personnel ne se change pas d'ici.**
+   * L'adresse, c'est là où part la réinitialisation : un administrateur qui
+   * réécrit celle d'un confrère puis lui envoie un lien prend son compte en
+   * deux clics, et avec lui ce que la séparation des rôles protège. Le reste
+   * de sa fiche se corrige, et chacun garde la main sur sa propre adresse.
    */
   async update(
+    actorId: string,
     userId: string,
     patch: AdminUserPatch,
     ip: string | null,
   ): Promise<UserUpdateOutcome> {
     const [current] = await this.db
-      .select({ id: users.id, email: users.email })
+      .select({
+        id: users.id,
+        email: users.email,
+        role: users.role,
+        emailVerifiedAt: users.emailVerifiedAt,
+      })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
     if (!current) throw new NotFoundException("Compte introuvable.");
 
     const emailChanged = current.email.toLowerCase() !== patch.email;
+
+    if (emailChanged && actorId !== userId && isAdminRole(current.role)) {
+      throw new ForbiddenException(
+        "L'adresse d'un autre membre du personnel ne se change pas depuis l'administration : c'est à lui de la modifier depuis son compte.",
+      );
+    }
 
     if (emailChanged) {
       // Vérification explicite plutôt que de laisser l'index unique parler :
@@ -103,6 +129,14 @@ export class AdminUsersService {
     if (!emailChanged) return { emailChanged, verification: null };
 
     await this.tokens.revokePending(userId, ["password_reset", "email_verify"]);
+    this.alerts.afterCredentialChange({
+      userId,
+      kind: "emailChanged",
+      // L'adresse est celle de l'administrateur : elle ne regarde pas le client.
+      ip: null,
+      host: null,
+      previousEmail: { address: current.email, verified: current.emailVerifiedAt !== null },
+    });
     // Le domaine de la plateforme, comme pour la réinitialisation ci-dessous.
     const verification = await this.accountMail.sendEmailVerification(
       { id: userId, email: patch.email },

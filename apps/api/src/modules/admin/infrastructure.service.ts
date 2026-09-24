@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { encryptSecret } from "@gamedashboard/auth";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   type CapacityRefusal,
   capacityRefusals,
@@ -23,6 +22,7 @@ import {
 } from "@nestjs/common";
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { encryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Mise en place de l'infrastructure : classements, localisations, nodes.
@@ -242,11 +242,12 @@ export class InfrastructureService {
   /**
    * Déclare une machine.
    *
-   * Le jeton du daemon est tiré ici et rendu **une seule fois** : c'est lui
+   * Le jeton du daemon est tiré ici et rendu dans la réponse : c'est lui
    * qu'on recopie dans la configuration de Wings. Seule sa forme chiffrée est
    * gardée — le panel doit pouvoir le relire pour parler au daemon, ce qui
-   * interdit de le condenser comme un mot de passe, mais rien n'oblige à le
-   * réafficher.
+   * interdit de le condenser comme un mot de passe. Il se relit ensuite dans
+   * le `config.yml` du node, lecture réservée à l'administrateur et
+   * consignée (PLAN §5.5).
    *
    * Le node est créé **sans allocation** : les ports s'ajoutent ensuite, par
    * plages, depuis la fiche. Les demander ici ferait un formulaire de quinze
@@ -284,6 +285,17 @@ export class InfrastructureService {
       );
     }
 
+    /*
+     * `http` reste admis, et c'est un choix écrit (rapport ASVS, NC-56).
+     *
+     * Le jeton du node et chaque commande du panel voyagent alors en clair :
+     * ce n'est acceptable que sur un poste de développement, où Wings tourne
+     * sans certificat. Le refuser obligerait à monter une autorité de
+     * certification pour le moindre essai ; le garder coûte un geste de
+     * l'administrateur, seul à pouvoir le choisir, et le guide d'installation
+     * le dit. Aucun filtre de destination non plus : un node vit par nature
+     * sur le réseau de l'hébergeur, souvent en adresse privée.
+     */
     if (input.scheme !== "http" && input.scheme !== "https") {
       throw new BadRequestException("Le schéma est « http » ou « https ».");
     }
@@ -315,10 +327,13 @@ export class InfrastructureService {
      */
     const tokenId = randomBytes(8).toString("hex");
     const token = randomBytes(32).toString("base64url");
+    // Identifiant tiré ici : le jeton est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
 
     const [created] = await this.db
       .insert(nodes)
       .values({
+        id,
         name,
         locationId: input.locationId,
         category: input.category,
@@ -332,7 +347,7 @@ export class InfrastructureService {
         cpuCores: input.cpuCores,
         public: input.isPublic,
         daemonTokenId: tokenId,
-        daemonTokenEnc: encryptSecret(token),
+        daemonTokenEnc: encryptRowSecret("nodes.daemon_token_enc", id, token),
         daemonTokenRotatedAt: new Date().toISOString(),
       })
       .returning({ id: nodes.id });

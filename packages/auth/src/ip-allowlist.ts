@@ -19,7 +19,15 @@ export function ipAllowed(allowed: readonly string[], presented: string | null):
   return allowed.some((entry) => matchesEntry(entry.trim(), address));
 }
 
-/** Vrai si l'entrée a une forme acceptable : adresse, ou adresse suivie d'un préfixe. */
+/**
+ * Vrai si l'entrée a une forme acceptable : adresse, ou adresse suivie d'un
+ * préfixe. **La seule règle** de ce qu'une liste accepte : clés personnelles
+ * et applicatives passent toutes par elle.
+ *
+ * Un préfixe nul est refusé (audit ASVS, NC-37) : `0.0.0.0/0` ou `::/0`
+ * couvrent toutes les adresses, et une clé « restreinte » par eux s'ouvrirait
+ * de partout en affichant une restriction.
+ */
 export function isAllowlistEntry(entry: string): boolean {
   const [ip, prefix, ...rest] = entry.trim().split("/");
   if (rest.length > 0 || !ip) return false;
@@ -28,7 +36,7 @@ export function isAllowlistEntry(entry: string): boolean {
   if (prefix === undefined) return true;
   if (!/^\d{1,3}$/.test(prefix)) return false;
   const bits = Number(prefix);
-  return bits >= 0 && bits <= (version === 4 ? 32 : 128);
+  return bits >= 1 && bits <= (version === 4 ? 32 : 128);
 }
 
 function matchesEntry(entry: string, address: string): boolean {

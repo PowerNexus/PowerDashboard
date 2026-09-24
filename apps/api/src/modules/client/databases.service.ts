@@ -1,5 +1,4 @@
-import { randomBytes } from "node:crypto";
-import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
+import { randomBytes, randomUUID } from "node:crypto";
 import { type Database, databaseHosts, databases, servers } from "@gamedashboard/db";
 import { DEFAULT_MAX_USER_CONNECTIONS } from "@gamedashboard/mysql";
 import {
@@ -11,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { and, count, eq, isNull, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret, encryptRowSecret } from "../../common/row-secrets";
 import { MysqlProvisionerService } from "./mysql-provisioner.service";
 
 export interface ClientDatabase {
@@ -73,7 +73,7 @@ export class DatabasesService {
   /** Mot de passe d'une base, déchiffré à la demande. */
   async password(serverId: string, databaseId: string): Promise<string> {
     const row = await this.mustFind(serverId, databaseId);
-    return decryptSecret(row.passwordEnc);
+    return decryptRowSecret("databases.password_enc", row.id, row.passwordEnc);
   }
 
   /**
@@ -134,14 +134,17 @@ export class DatabasesService {
           throw new ConflictException(`Quota atteint (${used?.n ?? 0}/${limit}).`);
         }
 
+        // Identifiant tiré ici : le mot de passe est lié à sa ligne dès l'écriture.
+        const id = randomUUID();
         const [inserted] = await tx
           .insert(databases)
           .values({
+            id,
             serverId,
             databaseHostId: host.id,
             name,
             username,
-            passwordEnc: encryptSecret(password),
+            passwordEnc: encryptRowSecret("databases.password_enc", id, password),
             remote,
             // Le plafond réellement posé sur l'utilisateur MySQL, noté ici pour que
             // le panel puisse le dire. La colonne existait depuis le début sans
@@ -185,7 +188,10 @@ export class DatabasesService {
     await this.mysql.rotatePassword(host, row.username, row.remote, password);
     await this.db
       .update(databases)
-      .set({ passwordEnc: encryptSecret(password), updatedAt: new Date().toISOString() })
+      .set({
+        passwordEnc: encryptRowSecret("databases.password_enc", databaseId, password),
+        updatedAt: new Date().toISOString(),
+      })
       .where(eq(databases.id, databaseId));
 
     return password;

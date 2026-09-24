@@ -3,6 +3,7 @@
 import { Skeleton } from "@gamedashboard/ui";
 import Editor from "@monaco-editor/react";
 import { useEffect, useState } from "react";
+import { prepareMonaco } from "@/lib/monaco";
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   json: "json",
@@ -44,6 +45,10 @@ export interface CodeEditorProps {
 /**
  * Éditeur Monaco aux couleurs du panel. Le thème suit celui de l'application
  * et `Ctrl+S` déclenche `onSave` au lieu de la boîte d'enregistrement du navigateur.
+ *
+ * Monaco vient du panel, jamais d'un CDN (`lib/monaco.ts`) : l'éditeur ne se
+ * monte qu'une fois l'instance locale donnée au chargeur, sans quoi celui-ci
+ * irait la chercher sur `cdn.jsdelivr.net`.
  */
 export function CodeEditor({
   value,
@@ -54,6 +59,17 @@ export function CodeEditor({
   readOnly,
 }: CodeEditorProps) {
   const [dark, setDark] = useState(true);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    void prepareMonaco().then(() => {
+      if (mounted) setReady(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -74,6 +90,17 @@ export function CodeEditor({
       media.removeEventListener("change", read);
     };
   }, []);
+
+  if (!ready) {
+    return (
+      <div
+        className="overflow-hidden rounded-card border border-border bg-surface shadow-card"
+        style={{ height }}
+      >
+        <Skeleton className="h-full w-full rounded-none" />
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">

@@ -1,4 +1,4 @@
-import { encryptSecret } from "@gamedashboard/auth";
+import { randomUUID } from "node:crypto";
 import { type Database, databaseHosts, databases, nodes } from "@gamedashboard/db";
 import { MysqlHostUnreachableError, probeHost } from "@gamedashboard/mysql";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { count, eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { encryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Hôtes MySQL sur lesquels le panel crée les bases des clients.
@@ -88,6 +89,14 @@ export class DatabaseHostsService {
    * Sert au bouton « tester » du formulaire, et au contrôle fait avant toute
    * écriture. Le mot de passe arrive en clair de l'écran d'administration, ne
    * traverse que cette requête, et n'est écrit nulle part quand le test échoue.
+   *
+   * **Aucun filtre de destination, à dessein** (rapport ASVS, NC-56). Un hôte
+   * MySQL vit presque toujours sur le réseau privé de l'hébergeur, à côté des
+   * nodes : refuser les adresses internes, comme on le fait pour un rappel
+   * sortant, interdirait le cas normal. Ce qui borne la sonde : elle est
+   * réservée à l'administrateur (`AdminWriteGuard`), consignée avec l'hôte et
+   * le port (`admin.database_host_tested`), ne parle que le protocole MySQL,
+   * et ne rend que la version du serveur ou le message de refus du pilote.
    */
   async probe(input: {
     name: string;
@@ -132,14 +141,17 @@ export class DatabaseHostsService {
 
     await this.probe(input);
 
+    // Identifiant tiré ici : le mot de passe est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
     const [row] = await this.db
       .insert(databaseHosts)
       .values({
+        id,
         name: input.name.trim(),
         host: input.host.trim(),
         port: input.port,
         username: input.username.trim(),
-        passwordEnc: encryptSecret(input.password),
+        passwordEnc: encryptRowSecret("database_hosts.password_enc", id, input.password),
         nodeId: input.nodeId,
         maxDatabases: input.maxDatabases,
       })
@@ -174,7 +186,9 @@ export class DatabaseHostsService {
         host: input.host.trim(),
         port: input.port,
         username: input.username.trim(),
-        ...(input.password === "" ? {} : { passwordEnc: encryptSecret(input.password) }),
+        ...(input.password === ""
+          ? {}
+          : { passwordEnc: encryptRowSecret("database_hosts.password_enc", id, input.password) }),
         nodeId: input.nodeId,
         maxDatabases: input.maxDatabases,
         updatedAt: new Date().toISOString(),

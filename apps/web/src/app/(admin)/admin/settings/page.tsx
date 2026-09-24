@@ -8,15 +8,15 @@ import { fetchMe } from "@/server/api/client";
 export const generateMetadata = pageTitle("adminSettings", "title");
 
 export default async function AdminSettingsPage() {
-  const [settings, presets, me] = await Promise.all([
-    fetchPlatformSettings(),
-    fetchSubuserPresets(),
-    fetchMe(),
-  ]);
+  const [presets, me] = await Promise.all([fetchSubuserPresets(), fetchMe()]);
+  const canConfigure = CONFIGURATION_ROLES.has(me.role);
+  // Les réglages ne se lisent qu'en administrateur : l'API les refuse au
+  // support, et les demander pour lui ferait de toute la page une erreur.
+  const settings = canConfigure ? await fetchPlatformSettings() : null;
 
   return (
     <AdminSettings initial={settings}>
-      <AdminSubuserPresets initial={presets} canEdit={CONFIGURATION_ROLES.has(me.role)} />
+      <AdminSubuserPresets initial={presets} canEdit={canConfigure} />
     </AdminSettings>
   );
 }

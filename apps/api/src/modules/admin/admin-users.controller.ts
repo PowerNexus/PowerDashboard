@@ -32,7 +32,7 @@ export class AdminUsersController {
     @Body() body: unknown,
   ) {
     const patch = parseBody(AdminUserPatch, body);
-    const outcome = await this.accounts.update(userId, patch, request.ip ?? null);
+    const outcome = await this.accounts.update(request.user.id, userId, patch, request.ip ?? null);
 
     await this.activityLog.record({
       event: "admin.user_updated",

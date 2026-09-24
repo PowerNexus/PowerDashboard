@@ -73,39 +73,57 @@ export class AllocationsService {
    * liraient sinon le même port libre, et la seconde écraserait la première.
    */
   async claim(serverId: string): Promise<ClientAllocation> {
-    const { used, limit } = await this.quota(serverId);
-    if (used >= limit) {
-      throw new ConflictException(
-        limit === 0
-          ? "Ce serveur n'a pas de quota de ports."
-          : `Quota atteint (${used}/${limit}). Libérez un port avant d'en prendre un autre.`,
-      );
-    }
+    /*
+     * Le compte et la prise dans la même transaction, sous le verrou de la
+     * ligne du serveur.
+     *
+     * Le verrou du port pris ne suffisait pas : il empêche deux demandes de
+     * prendre le **même** port, pas de dépasser le quota. Cinq demandes
+     * lancées ensemble lisaient toutes « 1 sur 2 », hors transaction, et
+     * toutes passaient. Verrouiller le serveur les met en file : la seconde
+     * relit le compte une fois la première validée.
+     */
+    const claimed = await this.db.transaction(async (tx) => {
+      const [server] = await tx
+        .select({ nodeId: servers.nodeId, limit: servers.allocationLimit })
+        .from(servers)
+        .where(eq(servers.id, serverId))
+        .limit(1)
+        .for("update");
+      if (!server) throw new NotFoundException("Serveur introuvable.");
 
-    const [server] = await this.db
-      .select({ nodeId: servers.nodeId })
-      .from(servers)
-      .where(eq(servers.id, serverId))
-      .limit(1);
-    if (!server) throw new NotFoundException("Serveur introuvable.");
+      const [counted] = await tx
+        .select({ n: count() })
+        .from(allocations)
+        .where(eq(allocations.serverId, serverId));
+      const used = counted?.n ?? 0;
+      if (used >= server.limit) {
+        throw new ConflictException(
+          server.limit === 0
+            ? "Ce serveur n'a pas de quota de ports."
+            : `Quota atteint (${used}/${server.limit}). Libérez un port avant d'en prendre un autre.`,
+        );
+      }
 
-    const [claimed] = await this.db
-      .update(allocations)
-      .set({ serverId, updatedAt: new Date().toISOString() })
-      .where(
-        sql`${allocations.id} = (
-          select ${allocations.id} from ${allocations}
-          where ${allocations.nodeId} = ${server.nodeId} and ${allocations.serverId} is null
-          order by ${allocations.port}
-          limit 1
-          for update skip locked
-        )`,
-      )
-      .returning();
+      const [row] = await tx
+        .update(allocations)
+        .set({ serverId, updatedAt: new Date().toISOString() })
+        .where(
+          sql`${allocations.id} = (
+            select ${allocations.id} from ${allocations}
+            where ${allocations.nodeId} = ${server.nodeId} and ${allocations.serverId} is null
+            order by ${allocations.port}
+            limit 1
+            for update skip locked
+          )`,
+        )
+        .returning();
 
-    if (!claimed) {
-      throw new ConflictException("Aucun port disponible sur ce node. Contactez le support.");
-    }
+      if (!row) {
+        throw new ConflictException("Aucun port disponible sur ce node. Contactez le support.");
+      }
+      return row;
+    });
 
     await this.sync(serverId);
 

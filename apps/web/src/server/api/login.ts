@@ -4,10 +4,23 @@ import { LOCALE_COOKIE } from "@gamedashboard/i18n";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { INITIAL_LOGIN_STATE, type LoginState } from "@/lib/login-state";
-import { SESSION_COOKIE } from "./client";
+import { AUTH_COOKIE_OPTIONS, SESSION_COOKIE, SESSION_MAX_AGE_S } from "@/lib/session-cookie";
 import { forwardedIdentityHeaders } from "./forwarded";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
+
+/**
+ * Où mène une connexion faite avec un mot de passe provisoire : le formulaire
+ * de changement, avec l'avis qui dit pourquoi. Le mot de passe tiré par un
+ * script d'exploitation expire, et l'y conduire tout de suite évite de le
+ * découvrir le lendemain, porte fermée.
+ */
+const PROVISIONAL_PASSWORD_PAGE = "/account/security?password=provisional";
+
+/** Destination après une session ouverte. */
+function landing(body: { passwordChangeRequired?: boolean }): string {
+  return body.passwordChangeRequired ? PROVISIONAL_PASSWORD_PAGE : "/";
+}
 
 /**
  * Connexion. Le mot de passe ne traverse que le serveur : le composant client
@@ -42,6 +55,7 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
     methods?: { totp: boolean; passkeys: boolean };
     remainingRecoveryCodes?: number;
     user?: { locale?: unknown };
+    passwordChangeRequired?: boolean;
   };
 
   /**
@@ -61,7 +75,7 @@ export async function login(_previous: LoginState, formData: FormData): Promise<
   }
 
   await adoptSession(response, body.user?.locale);
-  redirect("/");
+  redirect(landing(body));
 }
 
 /**
@@ -94,8 +108,9 @@ export async function submitSecondFactor(
     };
   }
 
-  await adoptSession(response, await localeOf(response));
-  redirect("/");
+  const body = await sessionBody(response);
+  await adoptSession(response, body.user?.locale);
+  redirect(landing(body));
 }
 
 /**
@@ -148,34 +163,6 @@ export async function submitPasskey(
 }
 
 /**
- * Consomme un lien de connexion venu du système de facturation.
- *
- * Le client n'a pas de mot de passe sur ce panel : il a cliqué « Gérer mon
- * serveur » depuis son espace client, et le plugin l'a redirigé ici avec un
- * jeton valable deux minutes et une seule fois.
- *
- * Posée dans ce fichier et non ailleurs pour une raison précise : c'est le seul
- * endroit qui sache recopier vers le navigateur le cookie que l'API pose sur sa
- * réponse à Next. Un second chemin d'ouverture de session finirait par oublier
- * l'une des propriétés du cookie, ou la langue du compte.
- */
-export async function consumeBillingLink(token: string): Promise<{ error: string | null }> {
-  const response = await fetch(`${API_URL}/api/v1/auth/billing/consume`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
-    body: JSON.stringify({ token }),
-  });
-
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { message?: string };
-    return { error: body.message ?? "Ce lien de connexion n'est plus valable." };
-  }
-
-  await adoptSession(response, await localeOf(response));
-  return { error: null };
-}
-
-/**
  * Recopie le cookie posé par l'API sur la réponse de Next.
  *
  * L'API répond à Next, pas au navigateur : sans cette recopie, le cookie
@@ -188,11 +175,8 @@ async function adoptSession(response: Response, locale?: unknown): Promise<void>
 
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 7 * 24 * 60 * 60,
+    ...AUTH_COOKIE_OPTIONS,
+    maxAge: SESSION_MAX_AGE_S,
   });
 
   /*
@@ -221,10 +205,19 @@ async function adoptSession(response: Response, locale?: unknown): Promise<void>
  * prochain changement de langue pour se mettre au diapason.
  */
 async function localeOf(response: Response): Promise<unknown> {
+  return (await sessionBody(response)).user?.locale;
+}
+
+/** Le corps d'une session ouverte, ou rien s'il a déjà été lu. */
+async function sessionBody(
+  response: Response,
+): Promise<{ user?: { locale?: unknown }; passwordChangeRequired?: boolean }> {
   try {
-    const body = (await response.json()) as { user?: { locale?: unknown } };
-    return body.user?.locale;
+    return (await response.json()) as {
+      user?: { locale?: unknown };
+      passwordChangeRequired?: boolean;
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }

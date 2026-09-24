@@ -1,6 +1,5 @@
+import { randomUUID } from "node:crypto";
 import {
-  decryptSecret,
-  encryptSecret,
   generateRecoveryCodes,
   generateTotpSecret,
   hashPassword,
@@ -20,6 +19,7 @@ import {
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, isNull } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { decryptRowSecret, encryptRowSecret } from "../../common/row-secrets";
 
 /** État de la double authentification, tel qu'un écran le montre. */
 export interface TwoFactorStatus {
@@ -122,9 +122,12 @@ export class TwoFactorRepository {
       .delete(userTotpCredentials)
       .where(and(eq(userTotpCredentials.userId, userId), isNull(userTotpCredentials.verifiedAt)));
 
+    // Identifiant tiré ici : le secret est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
     await this.db.insert(userTotpCredentials).values({
+      id,
       userId,
-      secretEnc: encryptSecret(secret),
+      secretEnc: encryptRowSecret("user_credentials_totp.secret_enc", id, secret),
       createdAt: now,
       updatedAt: now,
     });
@@ -148,7 +151,10 @@ export class TwoFactorRepository {
 
     if (!credential) return false;
 
-    const result = verifyTotp(decryptSecret(credential.secretEnc), code);
+    const result = verifyTotp(
+      decryptRowSecret("user_credentials_totp.secret_enc", credential.id, credential.secretEnc),
+      code,
+    );
     if (!result.valid) return false;
 
     const now = new Date().toISOString();
@@ -181,7 +187,12 @@ export class TwoFactorRepository {
 
     if (!credential) return false;
 
-    const result = verifyTotp(decryptSecret(credential.secretEnc), code, {
+    const secret = decryptRowSecret(
+      "user_credentials_totp.secret_enc",
+      credential.id,
+      credential.secretEnc,
+    );
+    const result = verifyTotp(secret, code, {
       lastUsedStep: credential.lastUsedStep,
     });
     if (!result.valid) return false;

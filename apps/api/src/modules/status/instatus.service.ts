@@ -8,6 +8,7 @@ import { type Database, settings } from "@gamedashboard/db";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { inArray } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { assertPublicDestination } from "../../common/public-url";
 
 /**
  * Reprise des annonces publiées sur la page Instatus.
@@ -76,7 +77,23 @@ export class InstatusService {
 
     const url = instatusSummaryUrl(pageUrl);
     if (!url) {
-      this.logger.warn(`Adresse Instatus inexploitable : « ${pageUrl} ».`);
+      this.logger.warn(`Adresse Instatus inexploitable (https attendu) : « ${pageUrl} ».`);
+      return INSTATUS_SILENT;
+    }
+
+    try {
+      /*
+       * Destination publique, jugée **à chaque lecture** et pas seulement à
+       * l'enregistrement : le nom peut résoudre ailleurs depuis, et une valeur
+       * enregistrée avant ce contrôle n'y est jamais passée. Le panel publie
+       * ce qu'il lit ici dans la bannière de chaque page ; une adresse interne
+       * en ferait une fenêtre sur son propre réseau (rapport ASVS, NC-56).
+       */
+      await assertPublicDestination(new URL(url));
+    } catch (error) {
+      this.logger.warn(
+        `Page Instatus refusée : ${error instanceof Error ? error.message : "destination invalide"}`,
+      );
       return INSTATUS_SILENT;
     }
 

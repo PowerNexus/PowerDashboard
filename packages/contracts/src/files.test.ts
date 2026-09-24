@@ -6,6 +6,7 @@ import {
   modeToBits,
   octalFromSymbolic,
   RenameRequest,
+  refusePath,
   renameRefusal,
 } from "./files";
 
@@ -128,5 +129,43 @@ describe("cible d'un renommage", () => {
     expect(RenameRequest.safeParse({ root: "/", from: "a", to: "" }).success).toBe(false);
     expect(RenameRequest.safeParse({ root: "/", from: "a", to: "x/" }).success).toBe(false);
     expect(RenameRequest.parse({ root: "/", from: "a", to: " b " }).to).toBe("b");
+  });
+
+  it("refuse une cible plus longue qu'un chemin Linux", () => {
+    expect(
+      RenameRequest.safeParse({ root: "/", from: "a", to: `b/${"c".repeat(5000)}` }).success,
+    ).toBe(false);
+  });
+});
+
+describe("chemin relayé au daemon", () => {
+  it("laisse passer un chemin du volume, absolu ou relatif à son dossier", () => {
+    expect(refusePath("/")).toBeNull();
+    expect(refusePath("/plugins/a.jar")).toBeNull();
+    expect(refusePath("a.jar", "/plugins")).toBeNull();
+    expect(refusePath("mondes/./nether", "/")).toBeNull();
+  });
+
+  it("laisse remonter tant qu'on reste dans le volume", () => {
+    // `../a.jar` depuis `plugins` : le déplacement que l'écran propose.
+    expect(refusePath("../a.jar", "/plugins")).toBeNull();
+    expect(refusePath("/plugins/../server.properties")).toBeNull();
+  });
+
+  it("refuse ce qui remonte au-dessus de la racine du volume", () => {
+    expect(refusePath("/../../etc/passwd")).toBe("outsideVolume");
+    expect(refusePath("..")).toBe("outsideVolume");
+    expect(refusePath("../a.jar", "/")).toBe("outsideVolume");
+    expect(refusePath("../../a.jar", "/plugins")).toBe("outsideVolume");
+    expect(refusePath("/plugins/../../a")).toBe("outsideVolume");
+  });
+
+  it("refuse un octet nul, dans le chemin comme dans son dossier", () => {
+    expect(refusePath("/a\0b")).toBe("nullByte");
+    expect(refusePath("a", "/pl\0ugins")).toBe("nullByte");
+  });
+
+  it("ne prend pas l'antislash pour un séparateur : le daemon tourne sous Linux", () => {
+    expect(refusePath("..\\a")).toBeNull();
   });
 });

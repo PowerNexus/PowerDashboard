@@ -31,6 +31,7 @@ import {
   Users,
   Webhook,
 } from "lucide-react";
+import { showcaseServed } from "@/lib/design-showcase";
 
 /**
  * Navigation du panel (cf. PLAN.md §2.4).
@@ -83,8 +84,11 @@ export function accountNav(
           : []),
         ...(access.isAdmin ? [{ label: t("admin"), href: "/admin", icon: <Shield /> }] : []),
         // « DEV » n'est pas traduit : c'est une étiquette technique, identique
-        // dans les deux langues, et la traduire n'apporterait rien.
-        { label: t("designSystem"), href: "/design", icon: <FileCode2 />, badge: "DEV" },
+        // dans les deux langues, et la traduire n'apporterait rien. Hors
+        // production seulement, comme la page elle-même.
+        ...(showcaseServed()
+          ? [{ label: t("designSystem"), href: "/design", icon: <FileCode2 />, badge: "DEV" }]
+          : []),
       ],
     },
   ];

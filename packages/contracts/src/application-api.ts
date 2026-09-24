@@ -18,6 +18,8 @@
  *   s'oublie dans une requête.
  */
 
+import { z } from "zod";
+
 export const APPLICATION_SCOPES = [
   /* Comptes clients. */
   "users.read",
@@ -226,3 +228,81 @@ export const IDEMPOTENCY_KEY_MAX_LENGTH = 200;
 export function isUsableIdempotencyKey(value: string): boolean {
   return value.trim().length >= 8 && value.trim().length <= IDEMPOTENCY_KEY_MAX_LENGTH;
 }
+
+/*
+ * Corps de création et de correction de l'API applicative.
+ *
+ * Chaque champ texte est **borné par la colonne qui le reçoit** (ASVS 5.1.4).
+ * Sans borne, un corps d'un mégaoctet passait la validation et n'était arrêté
+ * que par la base — `value too long`, une erreur 500 qu'un système tiers
+ * prend pour une panne et rejoue — au lieu d'un refus qui dit quoi changer.
+ * Les bornes vivent ici, à côté des portées, pour que l'API et ce qui la
+ * documente lisent la même règle.
+ */
+
+/**
+ * Un identifiant du panel : un UUID, 36 caractères.
+ *
+ * Borné sans juger du format : un identifiant inconnu reste un 404 rendu par
+ * la route, comme avant ; seul le démesuré est refusé ici.
+ */
+const PanelId = z.string().max(64);
+
+/** Adresse : `users.email`, 255 caractères. Le format est vérifié par le service. */
+const Email = z.string().min(3).max(255);
+/** Prénom et nom : `users.name_first` et `users.name_last`, 100 caractères. */
+const PersonName = z.string().min(1).max(100);
+/** Identifiant du client chez l'appelant : `users.external_id`, 255 caractères. */
+const ExternalId = z.string().min(1).max(255);
+
+export const ApplicationUserCreate = z.object({
+  email: Email,
+  nameFirst: PersonName,
+  nameLast: PersonName,
+  /** Identifiant du client chez l'appelant. C'est par lui qu'il se retrouvera. */
+  externalId: ExternalId.optional(),
+});
+export type ApplicationUserCreate = z.infer<typeof ApplicationUserCreate>;
+
+export const ApplicationUserUpdate = z.object({
+  nameFirst: PersonName.optional(),
+  nameLast: PersonName.optional(),
+  externalId: ExternalId.nullable().optional(),
+});
+export type ApplicationUserUpdate = z.infer<typeof ApplicationUserUpdate>;
+
+/** Au plus autant de variables qu'un egg peut en déclarer (`egg-editor.ts`). */
+export const APPLICATION_SERVER_VARIABLES_MAX = 100;
+
+/**
+ * Variables de démarrage : nom borné par `egg_variables.env_variable` (120),
+ * valeur à 4 Kio — une ligne de commande Java, pas un fichier.
+ */
+const ServerVariables = z
+  .record(z.string().max(120), z.string().max(4096))
+  .refine((variables) => Object.keys(variables).length <= APPLICATION_SERVER_VARIABLES_MAX, {
+    message: `Au plus ${APPLICATION_SERVER_VARIABLES_MAX} variables.`,
+  });
+
+const ResourceRequest = z.object({
+  memoryMb: z.number().int(),
+  diskMb: z.number().int(),
+  cpuPct: z.number().int(),
+  swapMb: z.number().int(),
+  allocations: z.number().int(),
+  backups: z.number().int(),
+  databases: z.number().int(),
+});
+
+export const ApplicationServerCreate = z.object({
+  ownerId: PanelId.min(1),
+  eggId: PanelId.min(1),
+  /** `servers.name`, 120 caractères. */
+  name: z.string().min(1).max(120),
+  variables: ServerVariables.optional(),
+  planId: PanelId.optional(),
+  locationId: PanelId.optional(),
+  nodeId: PanelId.optional(),
+  resources: ResourceRequest.optional(),
+});
+export type ApplicationServerCreate = z.infer<typeof ApplicationServerCreate>;

@@ -352,9 +352,9 @@ export function AdminUsers({ initial }: { initial: AdminUser[] }) {
               </DropdownItem>
             ) : null}
             {/* Réservée aux comptes clients : l'API refuse un membre du
-                personnel, et proposer l'entrée ferait découvrir le refus
-                après coup. */}
-            {row.original.role === "admin" || row.original.role === "support" ? null : (
+                personnel et un revendeur, et proposer l'entrée ferait
+                découvrir le refus après coup. */}
+            {row.original.role !== "user" ? null : (
               <DropdownItem
                 icon={<Eye />}
                 disabled={pending}

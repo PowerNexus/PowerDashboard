@@ -220,6 +220,20 @@ server {
     # L'interface seule. L'API n'est pas exposée sur le domaine d'un
     # revendeur : ses clients n'ont rien à y appeler directement, et l'ouvrir
     # multiplierait la surface par le nombre de revendeurs.
+    #
+    # Le lien de connexion de la facturation atterrit ici pour les clients
+    # d'un revendeur : son jeton, dans le chemin, vaut une session pendant
+    # deux minutes et n'a rien à faire dans le journal d'accès.
+    location ~ ^/sso/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:$PANEL_WEB_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:$PANEL_WEB_PORT;
         proxy_http_version 1.1;

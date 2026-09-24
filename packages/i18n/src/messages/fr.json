@@ -411,7 +411,9 @@
     "features": "Fonctionnalités",
     "featuresHint": "Activation progressive des modules. Prend effet immédiatement.",
     "featureOn": "Actif",
-    "featureOff": "Inactif"
+    "featureOff": "Inactif",
+    "reservedTitle": "Réglages réservés aux administrateurs",
+    "reservedBody": "Marque, courrier, stockage, connexion et facturation ne sont lisibles que par un administrateur : ils portent les identifiants des services de la plateforme. Vous pouvez consulter ci-dessous les presets de sous-utilisateurs."
   },
   "adminUsers": {
     "create": "Créer un compte",
@@ -499,7 +501,7 @@
     "allowedIps": "IP autorisées",
     "allowedIpsHint": "Séparées par des virgules. Vide = toutes les adresses.",
     "daysLabel": "Validité (jours)",
-    "daysHint": "Vide = sans fin. Une clé qui expire limite ce qu'une fuite peut coûter.",
+    "daysHint": "Vide = 365 jours, le maximum. Une clé qui expire limite ce qu'une fuite peut coûter.",
     "columnExpires": "Expire",
     "neverExpires": "Jamais",
     "createKey": "Créer la clé",
@@ -536,7 +538,7 @@
     "errorFormat": "Format d'erreur",
     "errorFormatValue": "RFC 9457 (Problem Details)",
     "curlTitle": "Redémarrer un serveur",
-    "keyStorage": "La clé n'est affichée qu'à sa création : seule son empreinte est conservée. Chaque clé porte des portées, une liste d'adresses IP autorisées et une date d'expiration facultative. Toute requête est inscrite au journal d'audit avec l'empreinte utilisée.",
+    "keyStorage": "La clé n'est affichée qu'à sa création : seule son empreinte est conservée. Chaque clé porte des portées, une liste d'adresses IP autorisées et une date d'expiration, un an au plus. Toute requête est inscrite au journal d'audit avec l'empreinte utilisée.",
     "routes": "Routes disponibles",
     "tabClient": "Clé personnelle",
     "tabApplication": "Clé application",
@@ -945,8 +947,13 @@
   "billingSso": {
     "eyebrow": "Connexion",
     "title": "Accès au panel",
+    "expired": "Ce lien de connexion n'est plus valable.",
     "failedTitle": "Lien de connexion expiré",
     "retryHint": "Retournez dans votre espace client et cliquez de nouveau sur « Gérer mon serveur » : un nouveau lien sera créé.",
+    "suspendedTitle": "Compte suspendu",
+    "suspended": "Ce compte est suspendu. Contactez le support de votre hébergeur pour en connaître la raison.",
+    "unavailableTitle": "Connexion impossible",
+    "unavailable": "Le panel n'a pas pu vérifier ce lien. Réessayez dans un instant depuis votre espace client.",
     "staffSignIn": "Connexion équipe et sous-utilisateurs"
   },
   "invitation": {
@@ -1050,6 +1057,7 @@
     "title": "Connexion",
     "subtitle": "Accédez à votre panel de gestion.",
     "staffDescription": "Cette page est réservée à l'équipe et aux personnes invitées sur un serveur. Si vous êtes client, vous accédez à votre serveur depuis votre espace de facturation.",
+    "resumeDescription": "Votre compte est protégé par un second facteur : confirmez qu'il s'agit bien de vous pour entrer.",
     "clientsTitle": "Vous êtes client ?",
     "clientsBody": "Vous n'avez pas de mot de passe ici. Connectez-vous à votre espace client, puis ouvrez votre serveur depuis vos services.",
     "clientsCta": "Aller à mon espace client",
@@ -1514,6 +1522,9 @@
     "enable": "Activer",
     "disable": "Désactiver",
     "setupTitle": "Activer la double authentification",
+    "enableConfirmBody": "Votre mot de passe d'abord : un second facteur posé sur votre compte ne doit pouvoir l'être que par vous.",
+    "provisionalTitle": "Mot de passe provisoire",
+    "provisionalBody": "Ce mot de passe a été tiré au sort pour une première connexion. Choisissez-en un vôtre : passé vingt-quatre heures, il sera refusé.",
     "setupStep1": "1. Scannez ce code avec votre application",
     "setupStep1Hint": "Google Authenticator, Aegis, 1Password, Bitwarden — toutes lisent le même format.",
     "setupManual": "Ou saisissez cette clé à la main",
@@ -1656,8 +1667,8 @@
   },
   "staffTwoFactor": {
     "title": "Seconde preuve exigée",
-    "body": "Cette plateforme demande une seconde preuve d'identité au personnel. Tant qu'elle n'est pas activée sur votre compte, l'espace d'administration reste fermé — l'API le refuse également.",
-    "emptyTitle": "Administration verrouillée",
+    "body": "Cette plateforme demande une seconde preuve d'identité à son personnel et à ses revendeurs. Tant qu'elle n'est pas activée sur votre compte, cet espace reste fermé — l'API le refuse également.",
+    "emptyTitle": "Espace verrouillé",
     "emptyBody": "Activez une application d'authentification ou une clé d'accès, puis revenez ici.",
     "action": "Aller à la sécurité du compte"
   },
@@ -1973,6 +1984,19 @@
     "description": "Cette page n'existe pas ou vous n'y avez pas accès.",
     "home": "Retour à l'accueil"
   },
+  "passwordStrength": {
+    "tooShort": "Trop court",
+    "tooLong": "Trop long",
+    "containsIdentity": "Refusé",
+    "acceptable": "Acceptable",
+    "good": "Bon",
+    "strong": "Solide",
+    "missing": "{count, plural, one {encore # caractère} other {encore # caractères}}",
+    "tooLongHint": "{maximum} caractères au plus",
+    "identityHint": "il contient votre nom ou votre adresse e-mail",
+    "longerHint": "plus long, il serait plus sûr",
+    "breachHint": "il sera aussi comparé aux fuites connues"
+  },
   "securityAlerts": {
     "failureSubject": "Tentatives de connexion échouées sur votre compte {brand}",
     "failureTitle": "Tentatives de connexion échouées",
@@ -1992,7 +2016,29 @@
     "deviceOn": "{browser} sur {platform}",
     "unknownDevice": "appareil non identifié",
     "unknownIp": "inconnue",
-    "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification."
+    "footer": "Ce message de sécurité vous est envoyé quels que soient vos réglages de notification.",
+    "credentialSubject": "{change} sur votre compte {brand}",
+    "credentialChange": {
+      "passwordChanged": "Mot de passe modifié",
+      "passwordReset": "Mot de passe réinitialisé",
+      "twoFactorEnabled": "Double authentification activée",
+      "twoFactorDisabled": "Double authentification désactivée",
+      "passkeyAdded": "Clé d'accès ajoutée",
+      "passkeyRemoved": "Clé d'accès supprimée",
+      "emailChanged": "Adresse e-mail modifiée"
+    },
+    "credentialBody": {
+      "passwordChanged": "Le mot de passe de votre compte vient d'être changé, et les autres sessions ont été fermées.",
+      "passwordReset": "Le mot de passe de votre compte vient d'être réinitialisé par un lien envoyé à cette adresse, et toutes les sessions ont été fermées.",
+      "twoFactorEnabled": "La double authentification par application vient d'être activée sur votre compte.",
+      "twoFactorDisabled": "La double authentification par application vient d'être désactivée sur votre compte.",
+      "passkeyAdded": "Une nouvelle clé d'accès vient d'être enregistrée sur votre compte.",
+      "passkeyRemoved": "Une clé d'accès vient d'être retirée de votre compte.",
+      "emailChanged": "L'adresse e-mail de votre compte vient d'être remplacée. Ce message part vers l'ancienne adresse ; les suivants iront à la nouvelle."
+    },
+    "credentialAdvice": "Si ce n'était pas vous, quelqu'un a peut-être pris la main sur votre compte : changez votre mot de passe, fermez les autres sessions et vérifiez votre double authentification :",
+    "credentialReassure": "Si c'était vous, il n'y a rien à faire.",
+    "emailChangedAdvice": "Si vous n'avez rien demandé, contactez sans attendre le support de votre hébergeur : c'est désormais avec la nouvelle adresse qu'on se connecte à ce compte."
   },
   "subuserPresets": {
     "title": "Préréglages des sous-utilisateurs",

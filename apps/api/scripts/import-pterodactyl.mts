@@ -40,7 +40,8 @@
  * le réécrit en Argon2id. Personne n'a à changer de mot de passe, et aucun
  * bcrypt ne survit à sa première utilisation.
  */
-import { assertEncryptionKey, encryptSecret } from "@gamedashboard/auth";
+import { randomUUID } from "node:crypto";
+import { assertEncryptionKey } from "@gamedashboard/auth";
 import {
   allocations,
   createClient,
@@ -59,6 +60,7 @@ import {
 } from "@gamedashboard/db";
 import { and, eq } from "drizzle-orm";
 import mysql from "mysql2/promise";
+import { encryptRowSecret } from "../src/common/row-secrets";
 
 interface Options {
   source: string;
@@ -320,9 +322,12 @@ async function importerNodes(
     }
 
     const jeton = jetonDeDaemon();
+    // Identifiant tiré ici : le jeton est lié à sa ligne dès l'écriture.
+    const id = randomUUID();
     const [cree] = await db
       .insert(nodes)
       .values({
+        id,
         name: String(ligne.name),
         locationId,
         fqdn,
@@ -340,7 +345,7 @@ async function importerNodes(
         public: Number(ligne.public) === 1,
         maintenanceMode: Number(ligne.maintenance_mode ?? 0) === 1,
         daemonTokenId: jeton.id,
-        daemonTokenEnc: encryptSecret(jeton.secret),
+        daemonTokenEnc: encryptRowSecret("nodes.daemon_token_enc", id, jeton.secret),
         daemonTokenRotatedAt: new Date().toISOString(),
       })
       .returning({ id: nodes.id });

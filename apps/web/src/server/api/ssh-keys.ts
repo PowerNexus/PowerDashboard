@@ -24,11 +24,17 @@ export const listSshKeys = async (): Promise<SshKey[]> => {
   return data;
 };
 
+/**
+ * Ajoute une clé, contre le mot de passe du compte : elle ouvre les fichiers
+ * de tous ses serveurs et survit à la session. Vide pour un compte sans mot
+ * de passe local.
+ */
 export async function addSshKey(
   name: string,
   publicKey: string,
+  password: string,
 ): Promise<{ error: string | null }> {
-  return act(() => apiSend("/api/v1/auth/ssh-keys", { name, publicKey }));
+  return act(() => apiSend("/api/v1/auth/ssh-keys", { name, publicKey, password }));
 }
 
 export async function removeSshKey(keyId: string): Promise<{ error: string | null }> {

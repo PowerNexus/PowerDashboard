@@ -1,4 +1,3 @@
-import { decryptSecret } from "@gamedashboard/auth";
 import {
   createDatabase,
   dropDatabase,
@@ -7,6 +6,7 @@ import {
   rotatePassword,
 } from "@gamedashboard/mysql";
 import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { decryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Hôte MySQL tel que stocké en base : le mot de passe est chiffré.
@@ -72,7 +72,7 @@ export class MysqlProvisionerService {
       host: host.host,
       port: host.port,
       username: host.username,
-      password: decryptSecret(host.passwordEnc),
+      password: decryptRowSecret("database_hosts.password_enc", host.id, host.passwordEnc),
     };
   }
 

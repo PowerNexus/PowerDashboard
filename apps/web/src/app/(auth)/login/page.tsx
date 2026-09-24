@@ -86,11 +86,16 @@ export default async function LoginPage({
          * des identifiants qui n'existent pas — puis écrive au support.
          */
         description={
-          sso.enabled && !challenge
-            ? t("ssoDescription")
-            : billingActive
-              ? t("staffDescription")
-              : t("description")
+          challenge
+            ? // Reprise d'une connexion externe (annuaire, Google, facturation) :
+              // le compte est nommé, il reste la preuve. « Page de l'équipe »
+              // dirait à un client du facturier qu'il s'est trompé de porte.
+              t("resumeDescription")
+            : sso.enabled
+              ? t("ssoDescription")
+              : billingActive
+                ? t("staffDescription")
+                : t("description")
         }
         footer={
           // Trois raisons de ne rien proposer, et une seule suffit : sans mot

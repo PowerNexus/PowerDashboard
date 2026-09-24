@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE } from "@/lib/session-cookie";
+import { forwardedIdentityHeaders } from "@/server/api/forwarded";
+import { crossSiteRequest } from "@/server/browser-provenance";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
-const PANEL_ORIGIN = process.env.PANEL_ORIGIN ?? null;
 
 /**
  * Demande une autorisation de websocket pour le compte du navigateur.
@@ -25,13 +26,12 @@ export async function POST(
    * Ce relais n'est pas une action serveur de Next, il n'hérite donc pas de
    * sa vérification d'origine. Un site tiers ne doit pas pouvoir obtenir un
    * jeton de console au nom d'un visiteur connecté.
+   *
+   * La règle partagée avec l'API (NC-02). La comparaison d'avant, à
+   * `PANEL_ORIGIN` seule, refusait la console ouverte depuis le domaine d'un
+   * revendeur, et ne contrôlait plus rien quand la variable manquait.
    */
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null && site !== "same-origin" && site !== "none") {
-    return NextResponse.json({ message: "Origine refusée." }, { status: 403 });
-  }
-  const origin = request.headers.get("origin");
-  if (origin !== null && PANEL_ORIGIN !== null && origin !== PANEL_ORIGIN) {
+  if (crossSiteRequest(request)) {
     return NextResponse.json({ message: "Origine refusée." }, { status: 403 });
   }
 
@@ -44,7 +44,8 @@ export async function POST(
 
   const response = await fetch(`${API_URL}/api/v1/client/servers/${id}/websocket`, {
     method: "POST",
-    headers: { cookie: `${SESSION_COOKIE}=${session}` },
+    // Transmis pour que l'API refasse le contrôle d'origine de son côté.
+    headers: { ...(await forwardedIdentityHeaders()), cookie: `${SESSION_COOKIE}=${session}` },
     cache: "no-store",
   });
 

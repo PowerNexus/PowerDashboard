@@ -16,11 +16,24 @@ La clé AES est dérivée par `scrypt(APP_SECRET_KEY, sel)`
 précède illisible d'un coup.** Les mots de passe des comptes, les sessions et
 les clés d'API ne sont pas concernés : ils sont hachés, pas chiffrés.
 
-L'API refuse de démarrer sans `APP_SECRET_KEY` (`assertEncryptionKey`).
+Chaque valeur est **liée à sa ligne** : chiffrée avec le contexte
+`<table>.<colonne>:<id>` (la clé du réglage pour `settings`), sous la forme
+`v4:…`. Recopiée sur une autre ligne, elle ne se relit plus : qui écrit en base
+ne peut plus poser son propre secret TOTP sur le compte d'un autre, ni le jeton
+d'un node sur un autre. Les valeurs écrites avant cette liaison (`v3:…`, ou
+sans préfixe) se relisent encore ; le § 4 les lie.
+
+L'API refuse de démarrer sans `APP_SECRET_KEY` (`assertEncryptionKey`), et
+avec une clé de moins de 32 caractères : le sel de dérivation est public, une
+clé courte se devinerait donc hors ligne sur une copie de la base. Une
+installation dont la clé est plus courte en change par la rotation du § 1,
+l'ancienne clé dans `APP_SECRET_KEY_OLD` : le script la relit, quelle que soit
+sa longueur, et n'exige le seuil que de la nouvelle.
+
 `deploy.sh` et `install.sh` ne la génèrent qu'une fois et ne la remplacent
 jamais.
 
-Trois situations, trois procédures.
+Quatre situations, quatre procédures.
 
 ---
 
@@ -28,10 +41,12 @@ Trois situations, trois procédures.
 
 **Quand** : la clé a fuité, ou une personne qui la connaissait part.
 
-**Préalable** : une version du script qui reprend le format `v3:`
-(`apps/api/src/common/rekey.ts`). Avant ce correctif, le script ne reprenait
-que l'ancien format sans préfixe. Il se terminait sur « 0 secret rechiffré »,
-et le redémarrage sous la nouvelle clé perdait tous les secrets.
+**Préalable** : une version du script qui reprend les formats `v3:` et `v4:`
+(`apps/api/src/common/rekey.ts`). Avant le premier de ces correctifs, le
+script ne reprenait que l'ancien format sans préfixe. Il se terminait sur
+« 0 secret rechiffré », et le redémarrage sous la nouvelle clé perdait tous
+les secrets. Un script qui ne connaît pas la forme liée `v4:` laisserait de
+même ces valeurs sous l'ancienne clé.
 
 1. **Sauvegarder la base.** Le script travaille en une transaction, mais une
    sauvegarde est la seule chose qui rattrape une mauvaise clé saisie.
@@ -54,9 +69,12 @@ et le redémarrage sous la nouvelle clé perdait tous les secrets.
    `FROM_SALT` est **obligatoire** ici : sa valeur par défaut est celle de
    l'ancien sel, qui sert au cas n° 2.
 5. **Lire le bilan.** `N secret(s) rechiffré(s)` doit correspondre au nombre
-   de lignes chiffrées. Si le bilan annonce des valeurs « laissées en l'état »,
-   ce sont des valeurs que l'ancienne clé ne lit pas. Les examiner avant de
-   continuer.
+   de lignes chiffrées, et `0 illisible(s)`. Une valeur illisible est une
+   valeur que ni l'ancienne clé ni la nouvelle ne lisent, ou une valeur liée à
+   une **autre** ligne que la sienne, donc recopiée : le script ne la blanchit
+   pas. Chaque ligne en cause est nommée `ILLISIBLE` dans la sortie. Les
+   examiner avant de continuer, et traiter une valeur recopiée comme un
+   incident ([runbook](./incident-securite.md)).
 6. **Remplacer** `APP_SECRET_KEY` dans `/opt/gamedashboard/env/api.env`, puis
    redémarrer l'API.
 7. **Vérifier** : les nodes restent « En ligne » (le panel relit leur jeton à
@@ -134,13 +152,17 @@ traité comme non renseigné, et le SSO reste inactif.
    pnpm --filter @gamedashboard/api exec tsx -e '
      import { randomBytes } from "node:crypto";
      import { encryptSecret } from "@gamedashboard/auth";
+     const node = process.env.NODE_ID;
      const id = randomBytes(8).toString("hex");
-     const enc = encryptSecret(randomBytes(32).toString("base64url"));
-     console.log(`update nodes set daemon_token_id = '\''${id}'\'', daemon_token_enc = '\''${enc}'\'' where id = '\''<node>'\'';`);
+     // Lié à la ligne du node, comme l'écrit le panel.
+     const enc = encryptSecret(randomBytes(32).toString("base64url"), undefined,
+       `nodes.daemon_token_enc:${node}`);
+     console.log(`update nodes set daemon_token_id = '\''${id}'\'', daemon_token_enc = '\''${enc}'\'' where id = '\''${node}'\'';`);
    ' | sudo -u postgres psql -d gamedashboard
    ```
-   puis déposer sur la machine le `config.yml` téléchargé depuis l'écran
-   « Machines » et redémarrer Wings, comme dans
+   (`NODE_ID=<identifiant du node>` exporté avant la commande), puis déposer
+   sur la machine le `config.yml` téléchargé depuis l'écran « Machines » et
+   redémarrer Wings, comme dans
    [« Si le node est perdu »](./rotation-jeton-node.md#si-le-node-est-perdu-malgré-tout).
    C'est la seule écriture de jeton à la main admise : il n'existe alors plus
    aucun jeton valide des deux côtés, donc plus rien à désaccorder.
@@ -148,3 +170,50 @@ traité comme non renseigné, et le SSO reste inactif.
 **Pour ne pas en arriver là** : conserver `APP_SECRET_KEY` hors de la machine,
 dans un gestionnaire de secrets, à côté de la sauvegarde de la base. Une
 sauvegarde sans sa clé ne restaure que la moitié du panel.
+
+---
+
+## 4. Lier à leur ligne les secrets d'avant la liaison
+
+**Quand** : une fois, après la mise en ligne de la version qui lie les secrets
+à leur ligne (forme `v4:`, audit ASVS NC-18). Elle relit les deux formes :
+rien ne casse sans cette étape, mais les valeurs `v3:` restent permutables
+jusqu'à leur prochaine écriture — un jeton de node ou un secret TOTP peut ne
+jamais être réécrit.
+
+**Jamais avant la mise en ligne** : une API antérieure ne lit pas la forme
+`v4:`, et perdrait tous les secrets repris. Pour la même raison, un retour à
+une version antérieure après cette étape (ou après la moindre écriture d'un
+secret par la nouvelle version) passe par la restauration de la sauvegarde
+prise par `gamedashboard update`, pas par un simple changement de version.
+
+1. **Sauvegarder la base** (§ 1, étape 1).
+2. **Lier**, avec la clé courante des deux côtés. L'API peut rester en ligne :
+   le script verrouille les lignes qu'il reprend, et une écriture de l'API
+   attend la fin de la transaction au lieu d'être écrasée.
+   ```bash
+   cd /opt/gamedashboard/app
+   set -a; . /opt/gamedashboard/env/api.env; set +a
+   FROM_SALT=gamedashboard.secrets.v2 \
+     pnpm --filter @gamedashboard/api exec tsx scripts/rekey-secrets.mts
+   ```
+   La sortie commence par « Même clé et même sel : les secrets sont seulement
+   liés à leur ligne ».
+3. **Lire le bilan** : `N secret(s) rechiffré(s), M déjà à jour, 0
+   illisible(s)`. Une valeur illisible se traite comme au § 1, étape 5.
+4. **Vérifier** qu'il ne reste aucune valeur sans contexte :
+   ```sql
+   select 'nodes', count(*) from nodes where daemon_token_enc not like 'v4:%'
+   union all select 'database_hosts', count(*) from database_hosts where password_enc not like 'v4:%'
+   union all select 'databases', count(*) from databases where password_enc not like 'v4:%'
+   union all select 'totp', count(*) from user_credentials_totp where secret_enc not like 'v4:%'
+   union all select 'webhooks', count(*) from webhooks where secret_enc not like 'v4:%'
+   union all select 'application_webhooks', count(*) from application_webhooks where secret_enc not like 'v4:%'
+   union all select 'settings', count(*) from settings where is_secret and value #>> '{}' not like 'v4:%';
+   ```
+   Chaque ligne doit rendre 0. Puis, comme au § 1 : nodes « En ligne », une
+   console s'ouvre, les réglages SMTP ne se présentent pas comme vides.
+
+Relancer le script ne fait rien : une valeur déjà liée n'est pas réécrite. Une
+rotation de la clé maître (§ 1) lie au passage ce qui ne l'était pas : après
+elle, cette étape n'a plus d'objet.

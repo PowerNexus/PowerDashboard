@@ -27,6 +27,22 @@ import { PlatformSettingsService } from "./platform-settings.service";
  * administrateur, il connaît déjà l'existence de ces routes. Lui répondre
  * « introuvable » l'enverrait chercher une panne là où il y a une règle.
  */
+/**
+ * Rôles dont l'espace est gardé ici : le personnel (administration) et les
+ * revendeurs (espace revendeur).
+ *
+ * Le garde ne lit pas le rôle — ce sont les contrôleurs sur lesquels il est
+ * posé qui en décident. Cette liste sert à l'**indicateur** rendu au compte
+ * (`GET /auth/2fa`, `required`), qui doit dire la même chose que le garde :
+ * il ignorait le revendeur, dont l'espace s'affichait alors en erreur au lieu
+ * de mener à la sécurité du compte (NC-60).
+ */
+const SECOND_FACTOR_ROLES = new Set(["admin", "support", "reseller"]);
+
+export function requiresStaffSecondFactor(role: string): boolean {
+  return SECOND_FACTOR_ROLES.has(role);
+}
+
 @Injectable()
 export class StaffTwoFactorGuard implements CanActivate {
   constructor(

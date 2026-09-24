@@ -1,6 +1,12 @@
 import "server-only";
+import { LOCALE_COOKIE } from "@gamedashboard/i18n";
 import { type NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/server/api/client";
+import {
+  AUTH_COOKIE_OPTIONS,
+  SECURE_COOKIES,
+  SESSION_COOKIE,
+  SESSION_MAX_AGE_S,
+} from "@/lib/session-cookie";
 import {
   CEREMONY_COOKIE,
   type Ceremony,
@@ -11,6 +17,22 @@ import {
   type SsoPending,
   startCeremony,
 } from "@/server/api/sso";
+
+/**
+ * Redirige vers un chemin du panel, sur le domaine où le navigateur se trouve.
+ *
+ * **Une adresse relative, jamais bâtie sur `request.nextUrl.origin`.** Next
+ * construit cette origine sur son adresse d'écoute, pas sur l'hôte demandé :
+ * derrière nginx, `https://localhost:3210`. Le navigateur repartait vers sa
+ * propre machine, et le cookie de session, posé pour le domaine du panel, ne
+ * le suivait pas. Relative, la redirection reste là où le client est arrivé —
+ * domaine de la plateforme ou d'un revendeur — sans avoir à le connaître.
+ *
+ * 307, comme `NextResponse.redirect` : la méthode de la requête est gardée.
+ */
+export function redirectWithin(path: string): NextResponse {
+  return new NextResponse(null, { status: 307, headers: { location: path } });
+}
 
 /**
  * Départ d'une cérémonie OAuth : l'annuaire (`/auth/sso/start`) ou Google
@@ -42,7 +64,7 @@ export async function beginCeremony(ceremony: Ceremony): Promise<NextResponse> {
     // `lax` et non `strict` : le retour du fournisseur est une navigation
     // venue d'un autre site, et `strict` empêcherait le cookie de repartir.
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIES,
     // La cérémonie dure le temps de saisir des identifiants chez le
     // fournisseur. Au-delà, mieux vaut recommencer proprement.
     maxAge: 10 * 60,
@@ -65,8 +87,21 @@ export async function finishCeremony(
   ceremony: Ceremony,
   request: NextRequest,
 ): Promise<NextResponse> {
-  const origin = request.nextUrl.origin;
-  const fail = (reason: string) => NextResponse.redirect(new URL(`/login?sso=${reason}`, origin));
+  /*
+   * Toute sortie en échec efface la cérémonie, comme le succès.
+   *
+   * L'état passe dans l'URL d'autorisation, donc dans l'historique et les
+   * journaux du fournisseur. Laissé dix minutes après un retour refusé, il
+   * suffisait à qui l'avait appris pour faire terminer au navigateur une
+   * cérémonie portant **son** code, et connecter la victime à son compte.
+   * Une cérémonie refusée ne se reprend pas : on repart de la page de
+   * connexion, qui en ouvre une neuve.
+   */
+  const fail = (reason: string) => {
+    const refus = redirectWithin(`/login?sso=${reason}`);
+    refus.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
+    return refus;
+  };
 
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
@@ -100,63 +135,84 @@ export async function finishCeremony(
     return fail(refus?.noAccount ? "noAccount" : "refused");
   }
 
+  const conclusion = await concludeSignIn(response);
+  // La cérémonie est terminée : le vérificateur n'a plus rien à protéger et
+  // ne doit pas resservir.
+  conclusion.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
+  return conclusion;
+}
+
+/**
+ * Fin commune des connexions attestées par un tiers : fournisseur OAuth, ou
+ * facturier par son lien à usage unique.
+ *
+ * Toujours depuis une **route de navigation**, jamais depuis le rendu d'une
+ * page : Next interdit d'y écrire un cookie. Le lien de la facturation le
+ * faisait, et chaque arrivée sans second facteur finissait en erreur 500 —
+ * jeton consommé et session ouverte côté API, jamais remise au navigateur.
+ *
+ * `response` est la réponse, réussie, de l'API. Les redirections restent sur
+ * le domaine d'arrivée : voir `redirectWithin`.
+ */
+export async function concludeSignIn(response: Response): Promise<NextResponse> {
   const body = (await response.json().catch(() => ({}))) as {
     twoFactorRequired?: boolean;
     challenge?: string;
     methods?: { totp: boolean; passkeys: boolean };
     remainingRecoveryCodes?: number;
+    user?: { locale?: unknown };
   };
 
   /**
-   * Le second facteur du panel s'applique aussi aux comptes SSO.
+   * Le second facteur du panel s'applique aussi à ces chemins.
    *
-   * Le défi repart dans l'URL de la page de connexion, qui reprend la main sur
-   * la seconde étape. Il ne donne accès à rien : il nomme seulement, sous
+   * Le défi repart vers la page de connexion, qui reprend la main sur la
+   * seconde étape. Il ne donne accès à rien : il nomme seulement, sous
    * chiffrement, le compte dont la preuve est attendue.
    *
    * Les preuves disponibles voyagent avec lui. Elles ne sont pas secrètes — la
    * connexion par mot de passe les rend déjà en clair — et sans elles, l'écran
    * proposerait une clé d'accès à qui n'en a pas.
    */
-  let destination: URL;
   if (body.twoFactorRequired && body.challenge) {
-    destination = new URL("/login", origin);
+    const preuves = new URLSearchParams();
     // Le défi voyage en cookie, pas dans l'URL : une adresse se retrouve dans
     // l'historique, les journaux du proxy et le Referer, un cookie non.
-    if (body.methods?.totp) destination.searchParams.set("totp", "1");
-    if (body.methods?.passkeys) destination.searchParams.set("passkeys", "1");
-    destination.searchParams.set("recovery", String(body.remainingRecoveryCodes ?? 0));
-  } else {
-    destination = new URL("/", origin);
-  }
+    if (body.methods?.totp) preuves.set("totp", "1");
+    if (body.methods?.passkeys) preuves.set("passkeys", "1");
+    preuves.set("recovery", String(body.remainingRecoveryCodes ?? 0));
 
-  const redirect = NextResponse.redirect(destination);
-  // La cérémonie est terminée : le vérificateur n'a plus rien à protéger et
-  // ne doit pas resservir.
-  redirect.cookies.delete({ name: CEREMONY_COOKIE[ceremony], path: ceremonyPath(ceremony) });
-
-  if (body.twoFactorRequired && body.challenge) {
+    const redirect = redirectWithin(`/login?${preuves}`);
     redirect.cookies.set(SSO_CHALLENGE_COOKIE, body.challenge, {
       path: "/login",
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: SECURE_COOKIES,
       // Même durée que le défi lui-même.
       maxAge: 5 * 60,
     });
+    return redirect;
   }
 
+  const redirect = redirectWithin("/");
   const setCookie = response.headers.get("set-cookie");
   const token = setCookie?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
   if (token) {
     redirect.cookies.set(SESSION_COOKIE, token, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 7 * 24 * 60 * 60,
+      ...AUTH_COOKIE_OPTIONS,
+      maxAge: SESSION_MAX_AGE_S,
     });
   }
 
+  // La langue du compte suit la connexion, comme après un mot de passe : le
+  // rendu lit un cookie, pas la session.
+  const locale = body.user?.locale;
+  if (typeof locale === "string" && locale !== "") {
+    redirect.cookies.set(LOCALE_COOKIE, locale, {
+      path: "/",
+      maxAge: 365 * 24 * 60 * 60,
+      sameSite: "lax",
+    });
+  }
   return redirect;
 }

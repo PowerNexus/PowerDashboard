@@ -18,13 +18,15 @@ export async function listPasskeys(): Promise<Passkey[]> {
 }
 
 /**
- * Options de la cérémonie d'enregistrement.
+ * Options de la cérémonie d'enregistrement, contre le mot de passe du compte.
  *
  * `options` est passé tel quel à `navigator.credentials.create()` par le
  * navigateur ; `challenge` est le jeton scellé à renvoyer avec la réponse. Ni
  * l'un ni l'autre n'est interprété ici : l'action serveur ne fait que relayer.
+ * Le mot de passe est demandé ici, avant que la boîte de dialogue du
+ * navigateur ne prenne la main ; vide pour un compte qui n'en a pas.
  */
-export async function passkeyRegistrationOptions(): Promise<{
+export async function passkeyRegistrationOptions(password: string): Promise<{
   options: unknown;
   challenge: string;
   error: string | null;
@@ -32,7 +34,7 @@ export async function passkeyRegistrationOptions(): Promise<{
   try {
     const { data } = await apiSendFor<{ data: { options: unknown; challenge: string } }>(
       "/api/v1/auth/2fa/passkeys/options",
-      undefined,
+      { password },
     );
     return { ...data, error: null };
   } catch (error) {

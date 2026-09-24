@@ -1,4 +1,3 @@
-import { decryptSecret, encryptSecret } from "@gamedashboard/auth";
 import {
   FEATURE_FLAGS,
   featureFlagDefault,
@@ -17,6 +16,8 @@ import { type Database, featureFlags, settings } from "@gamedashboard/db";
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { eq, inArray } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { assertPublicDestination, PrivateDestinationError } from "../../common/public-url";
+import { decryptRowSecret, encryptRowSecret } from "../../common/row-secrets";
 
 /**
  * Valeur servie à l'écran.
@@ -152,7 +153,7 @@ export class PlatformSettingsService {
 
     let clientSecret: string;
     try {
-      clientSecret = decryptSecret(encrypted);
+      clientSecret = decryptRowSecret("settings.value", "sso.clientSecret", encrypted);
     } catch {
       // Secret illisible — clé maître changée, ligne abîmée. Se taire vaut
       // mieux qu'une redirection qui échouera côté fournisseur : l'écran
@@ -224,7 +225,7 @@ export class PlatformSettingsService {
     let password: string | null = null;
     if (typeof encrypted === "string" && encrypted !== "") {
       try {
-        password = decryptSecret(encrypted);
+        password = decryptRowSecret("settings.value", "smtp.password", encrypted);
       } catch {
         // Mot de passe illisible — clé maître changée, ligne abîmée. Se taire
         // et ne rien envoyer vaut mieux qu'une tentative qui échouera à
@@ -320,7 +321,7 @@ export class PlatformSettingsService {
     if (typeof row?.value !== "string" || row.value === "") return "";
 
     try {
-      return decryptSecret(row.value);
+      return decryptRowSecret("settings.value", key, row.value);
     } catch {
       this.logger.error(`Secret « ${key} » illisible : traité comme non renseigné.`);
       return "";
@@ -380,7 +381,9 @@ export class PlatformSettingsService {
 
       if (descriptor.kind === "secret") {
         if (typeof raw !== "string" || raw === "") continue;
-        await this.upsert(key, encryptSecret(raw), true);
+        // La clé du réglage tient lieu d'identifiant de ligne : c'est elle
+        // que la table rend unique, et elle ne change jamais.
+        await this.upsert(key, encryptRowSecret("settings.value", key, raw), true);
         saved.push(key);
         continue;
       }
@@ -433,6 +436,9 @@ export class PlatformSettingsService {
         throw new BadRequestException(
           `« ${descriptor.label} » doit être une couleur hexadécimale, comme #0ea5e9.`,
         );
+      }
+      if (descriptor.format === "outbound" && text !== "") {
+        await assertOutboundSetting(text, descriptor.label);
       }
 
       await this.upsert(
@@ -524,6 +530,36 @@ export class PlatformSettingsService {
         target: settings.key,
         set: { value, isSecret, updatedAt: new Date().toISOString() },
       });
+  }
+}
+
+/**
+ * Une adresse que le panel appellera lui-même : `https://`, et publique.
+ *
+ * Contrôlée à l'enregistrement pour que l'administrateur l'apprenne tout de
+ * suite ; le service qui appelle la juge encore à chaque lecture, puisque le
+ * nom peut résoudre ailleurs ensuite (rapport ASVS, NC-56).
+ */
+async function assertOutboundSetting(value: string, label: string): Promise<void> {
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
+  }
+  if (url?.protocol !== "https:") {
+    throw new BadRequestException(`« ${label} » doit commencer par « https:// ».`);
+  }
+
+  try {
+    await assertPublicDestination(url);
+  } catch (error) {
+    if (error instanceof PrivateDestinationError) {
+      throw new BadRequestException(
+        `« ${label} » : ${error.message} Le panel appellerait lui-même cette adresse.`,
+      );
+    }
+    throw error;
   }
 }
 

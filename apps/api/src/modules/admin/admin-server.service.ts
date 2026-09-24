@@ -18,6 +18,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, eq } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { WingsClientService } from "../wings/wings-client.service";
+import { WingsTokenService } from "../wings/wings-token.service";
 
 /**
  * Fiche d'administration d'un serveur : ce que l'espace client ne montre pas.
@@ -82,6 +83,7 @@ export class AdminServerService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(WingsClientService) private readonly wings: WingsClientService,
+    @Inject(WingsTokenService) private readonly tokens: WingsTokenService,
   ) {}
 
   async detail(serverId: string): Promise<AdminServerDetail> {
@@ -232,6 +234,12 @@ export class AdminServerService {
       );
     }
 
+    const [avant] = await this.db
+      .select({ ownerId: servers.ownerId })
+      .from(servers)
+      .where(eq(servers.id, serverId))
+      .limit(1);
+
     const [updated] = await this.db
       .update(servers)
       .set({ ownerId, updatedAt: new Date().toISOString() })
@@ -241,13 +249,23 @@ export class AdminServerService {
     if (!updated) throw new NotFoundException("Serveur introuvable.");
 
     /*
-     * Le daemon n'a rien à apprendre ici.
+     * La configuration du daemon n'a rien à apprendre ici : la propriété est
+     * une notion du panel, et Wings ne connaît qu'un identifiant de serveur,
+     * un conteneur et des limites.
      *
-     * La propriété est une notion du panel : Wings ne connaît qu'un
-     * identifiant de serveur, un conteneur et des limites. Le prévenir
-     * n'aurait rien à lui dire — et le faire créerait une dépendance à une
-     * machine qui peut être injoignable au moment du transfert.
+     * **Ses jetons de console, si.** Celui de l'ancien propriétaire vit dix
+     * minutes et Wings ne revérifie pas qui le porte : sans révocation, il
+     * gardait la console d'un serveur qui n'était plus le sien — ce que la
+     * suspension et le retrait d'un sous-utilisateur empêchent déjà. Ceux des
+     * sous-utilisateurs restent : ils sont toujours invités.
+     *
+     * Un node injoignable n'annule pas le transfert : la base fait foi, et le
+     * jeton expire de lui-même.
      */
+    if (avant && avant.ownerId !== ownerId) {
+      const jtis = this.tokens.revocableFor(serverId, avant.ownerId);
+      await this.wings.denyWebsocketTokens(serverId, jtis).catch(() => undefined);
+    }
   }
 
   /**

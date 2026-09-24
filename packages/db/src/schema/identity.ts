@@ -28,6 +28,16 @@ export const users = pgTable(
      * ouvrirait la porte à une connexion sans secret.
      */
     passwordHash: text("password_hash"),
+    /**
+     * Échéance d'un mot de passe **provisoire**, tiré au sort par un script
+     * d'exploitation (`create-admin`, `reset-password`) ; nulle pour tout mot
+     * de passe choisi par son titulaire.
+     *
+     * Passé l'échéance, la connexion le refuse ; avant, elle demande d'en
+     * changer. Tout changement de mot de passe depuis le panel la lève. Voir
+     * `passwordStanding`.
+     */
+    passwordExpiresAt: moment("password_expires_at"),
     nameFirst: varchar("name_first", { length: 100 }).notNull(),
     nameLast: varchar("name_last", { length: 100 }).notNull(),
     locale: varchar("locale", { length: 10 }).notNull().default("fr"),
@@ -93,8 +103,10 @@ export const users = pgTable(
   (table) => [
     // L'unicité est insensible à la casse : « Paul@ex.fr » et « paul@ex.fr »
     // désignent la même boîte, et deux comptes pour une même adresse
-    // rendraient le rapprochement SSO ambigu.
-    uniqueIndex("users_email_unique").on(table.email),
+    // rendraient le rapprochement SSO ambigu. L'index portait sur la colonne
+    // brute, sensible à la casse, alors que toutes les lectures comparent en
+    // `lower()` (NC-28, migration 0042).
+    uniqueIndex("users_email_unique").on(sql`lower(${table.email})`),
     uniqueIndex("users_external_id_unique").on(table.externalId),
   ],
 );
@@ -116,6 +128,10 @@ export const userOauthAccounts = pgTable(
     // Un compte distant ne peut être rattaché qu'à un seul compte local :
     // sans cela, deux utilisateurs pourraient se connecter avec le même Google.
     uniqueIndex("oauth_provider_identity_unique").on(table.provider, table.providerUserId),
+    // Et un compte local ne porte qu'une identité par fournisseur. Le
+    // rapprochement le vérifiait par une lecture, que deux cérémonies
+    // concurrentes passaient ensemble (doute D-7, migration 0043).
+    uniqueIndex("oauth_user_provider_unique").on(table.userId, table.provider),
     index("oauth_user_idx").on(table.userId),
   ],
 );
@@ -221,8 +237,9 @@ export const sessions = pgTable(
      * apparaîtrait comme la plus récemment active de la liste — exactement
      * l'inverse de ce qui s'est passé.
      *
-     * L'écriture est volontairement grossière (cf. `LAST_SEEN_PRECISION_MS`) :
-     * la valeur sert à reconnaître une session oubliée, pas à chronométrer.
+     * L'écriture se fait au plus une fois par minute (cf.
+     * `LAST_SEEN_PRECISION_MS`) : la valeur décide de l'expiration
+     * d'inactivité (trente minutes), et une tranche plus large la déplacerait.
      */
     lastSeenAt: moment("last_seen_at"),
     /**

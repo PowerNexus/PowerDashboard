@@ -61,7 +61,14 @@ export class NodeLoadService {
     // Fenêtre inconnue : on retombe sur la journée plutôt que de refuser. Le
     // paramètre vient d'une adresse, et un graphe vide pour une faute de frappe
     // n'apprendrait rien à personne.
-    const { hours, bucketMinutes } = WINDOWS[window] ?? { hours: 24, bucketMinutes: 15 };
+    //
+    // `Object.hasOwn` et non `WINDOWS[window] ?? …` : `?window=constructor`
+    // lisait la propriété héritée d'`Object.prototype`, une fonction sans
+    // `hours`, et la date de départ `NaN` faisait lever `toISOString()` — une
+    // erreur 500 pour un paramètre d'adresse.
+    const { hours, bucketMinutes } = Object.hasOwn(WINDOWS, window)
+      ? (WINDOWS[window] as { hours: number; bucketMinutes: number })
+      : { hours: 24, bucketMinutes: 15 };
     const since = new Date(Date.now() - hours * 3_600_000).toISOString();
 
     /*

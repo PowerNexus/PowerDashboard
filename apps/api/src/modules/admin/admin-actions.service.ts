@@ -140,11 +140,24 @@ export class AdminActionsService {
    * par mégarde n'a plus personne pour le remonter, et la réparation passe par
    * un accès direct à la base.
    */
-  async setUserRole(actorId: string, userId: string, role: string): Promise<void> {
+  async setUserRole(
+    actorId: string,
+    userId: string,
+    role: string,
+  ): Promise<{ previous: string; email: string }> {
     if (!ASSIGNABLE_ROLES.has(role)) throw new BadRequestException(`Rôle inconnu : « ${role} ».`);
     if (actorId === userId) {
       throw new ConflictException("Vous ne pouvez pas modifier votre propre rôle.");
     }
+
+    // Le rôle d'avant est rendu pour le journal : « devenu administrateur »
+    // ne se lit pas pareil selon qu'il était client ou support.
+    const [current] = await this.db
+      .select({ role: users.role, email: users.email })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!current) throw new NotFoundException("Compte introuvable.");
 
     const [updated] = await this.db
       .update(users)
@@ -153,6 +166,7 @@ export class AdminActionsService {
       .returning({ id: users.id });
 
     if (!updated) throw new NotFoundException("Compte introuvable.");
+    return { previous: current.role, email: current.email };
   }
 
   /**
@@ -216,6 +230,21 @@ export class AdminActionsService {
         "La prise en main ne vaut que pour un compte client : un membre du personnel ne se regarde pas depuis le compte d'un autre.",
       );
     }
+    /*
+     * Un revendeur non plus.
+     *
+     * Son compte gouverne le parc de ses clients : consentement au
+     * provisionnement par la plateforme, clés de sa boutique, suppression de
+     * serveurs. L'espace revendeur est désormais en lecture seule pendant une
+     * prise en main, mais la lecture elle-même montre les clients d'un tiers
+     * sous son nom ; l'administration voit déjà ce parc depuis `/admin`, sous
+     * le sien.
+     */
+    if (target.role === "reseller") {
+      throw new ForbiddenException(
+        "La prise en main ne vaut que pour un compte client : le parc d'un revendeur se consulte depuis l'administration.",
+      );
+    }
 
     return { id: target.id, email: target.email };
   }
@@ -228,7 +257,7 @@ export class AdminActionsService {
    * illisible ; la vérifier ici permet de dire combien de serveurs bloquent et
    * donc quoi faire — les transférer, ou les supprimer d'abord.
    */
-  async deleteUser(actorId: string, userId: string): Promise<void> {
+  async deleteUser(actorId: string, userId: string): Promise<{ email: string }> {
     if (actorId === userId) {
       throw new ConflictException("Vous ne pouvez pas supprimer votre propre compte.");
     }
@@ -267,6 +296,10 @@ export class AdminActionsService {
       { userId: deleted.id, email: deleted.email, externalId: deleted.externalId },
       { reseller: null },
     );
+
+    // Rendue pour le journal : une fois la ligne partie, l'identifiant seul
+    // ne dirait plus à personne quel compte a été supprimé.
+    return { email: deleted.email };
   }
 
   /* --- Serveurs ------------------------------------------------------------ */
@@ -328,7 +361,7 @@ export class AdminActionsService {
    * Le port revient au stock par la contrainte `set null` de la base ; on ne le
    * fait pas à la main pour ne pas avoir deux règles pour la même chose.
    */
-  async deleteServer(serverId: string): Promise<void> {
+  async deleteServer(serverId: string): Promise<{ name: string; ownerId: string }> {
     const [row] = await this.db
       .select({
         id: servers.id,
@@ -395,6 +428,10 @@ export class AdminActionsService {
       { serverId, ownerId: row.ownerId, name: row.name },
       { reseller: row.resellerId },
     );
+
+    // Rendus pour le journal de qui supprime : la ligne n'existe plus, et le
+    // journal ne peut plus s'y rattacher.
+    return { name: row.name, ownerId: row.ownerId };
   }
 
   /* --- Nodes --------------------------------------------------------------- */

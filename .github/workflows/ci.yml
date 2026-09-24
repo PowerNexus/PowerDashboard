@@ -13,6 +13,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Lecture seule, pour tous les jobs. Sans cette ligne, le jeton du workflow
+# reçoit les droits par défaut du dépôt, écriture comprise selon son réglage,
+# et chaque action tierce le voit — Semgrep en conteneur root, sur un runner
+# à nous. Aucun job d'ici n'écrit sur GitHub : les artefacts passent par un
+# autre jeton. Un job qui aurait besoin de plus le déclarerait lui-même, avec
+# sa raison, comme ceux de release.yml et captures.yml.
+permissions:
+  contents: read
+
 # Les jobs tournent sur un runner auto-hébergé (docs/runner-auto-heberge.md).
 # La variable de dépôt CI_RUNNER, en JSON, choisit une autre cible sans
 # toucher aux workflows : '"ubuntu-latest"' pour revenir aux runners de GitHub.
@@ -240,6 +249,21 @@ jobs:
             "$E2E_EMAIL" Essai CI
           GD_PASSWORD="$E2E_PASSWORD" \
             pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
+
+      # La seconde preuve du personnel est exigée par défaut (rapport ASVS,
+      # NC-10), et le compte d'essai est administrateur : la suite, qui visite
+      # l'administration (captures, accessibilité, Lighthouse), tomberait sur
+      # « seconde preuve exigée ». Levée pour cette base jetable seule, plutôt
+      # qu'un TOTP enrôlé dans la fixture : l'anti-rejeu refuse le même code
+      # deux fois dans une fenêtre de trente secondes, et la suite se connecte
+      # à chaque test. Le produit garde son défaut ; `staff-2fa.guard.test.ts`
+      # et `platform-settings.test.ts` le tiennent.
+      - name: Seconde preuve du personnel levée pour la base d'essai
+        run: |
+          docker exec ${{ job.services.postgres.id }} \
+            psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c \
+            "insert into settings (key, value) values ('security.staffRequires2fa', 'false'::jsonb)
+             on conflict (key) do update set value = excluded.value"
 
       - name: Construire
         run: pnpm build

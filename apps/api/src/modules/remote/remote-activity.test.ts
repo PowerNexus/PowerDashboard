@@ -1,4 +1,4 @@
-import type { Database } from "@gamedashboard/db";
+import { type Database, servers } from "@gamedashboard/db";
 import { describe, expect, it, vi } from "vitest";
 import { RemoteActivityService, type WingsActivity } from "./remote-activity.service";
 
@@ -7,28 +7,46 @@ const MINE = "22222222-2222-2222-2222-222222222222";
 const THEIRS = "33333333-3333-3333-3333-333333333333";
 const USER = "44444444-4444-4444-4444-444444444444";
 
+/** Il y a `jours` jours : l'horodatage est borné autour de maintenant. */
+const ilYa = (jours: number) => new Date(Date.now() - jours * 24 * 3600_000).toISOString();
+
 /**
- * Base simulée : premier `select` les serveurs du node, second les utilisateurs
- * connus. `insert` capture ce qui aurait été écrit.
+ * Base simulée : les serveurs du node (lecture simple), puis les couples
+ * (serveur, compte) liés (lecture avec jointures) — chaque compte connu l'est
+ * à `MINE`. `insert` capture ce qui aurait été écrit. Le lien lui-même se
+ * vérifie contre une vraie base, dans `remote-activity.integration.test.ts`.
  */
 function service(options: { servers?: string[]; users?: string[] } = {}) {
   const inserted: Record<string, unknown>[] = [];
-  let call = 0;
 
   const db = {
-    select: () => ({
-      from: () => ({
+    select: () => {
+      let table: unknown;
+      let joined = false;
+      const chain = {
+        from: (t: unknown) => {
+          table = t;
+          return chain;
+        },
+        innerJoin: () => {
+          joined = true;
+          return chain;
+        },
+        leftJoin: () => chain,
         where: async () => {
-          call += 1;
-          if (call === 1) return (options.servers ?? [MINE]).map((id) => ({ id }));
-          return (options.users ?? [USER]).map((id) => ({
-            id,
+          // La sous-requête des sous-utilisateurs n'est jamais attendue seule.
+          if (table !== servers) return [];
+          if (!joined) return (options.servers ?? [MINE]).map((id) => ({ id }));
+          return (options.users ?? [USER]).map((userId) => ({
+            serverId: MINE,
+            userId,
             first: "Alex",
             last: "Equipier",
           }));
         },
-      }),
-    }),
+      };
+      return chain;
+    },
     insert: () => ({
       values: async (rows: Record<string, unknown>[]) => {
         inserted.push(...rows);
@@ -44,7 +62,7 @@ const entry = (over: Partial<WingsActivity> = {}): WingsActivity => ({
   event: "server:sftp.write",
   user: USER,
   ip: "82.66.14.201",
-  timestamp: "2026-09-16T12:00:00Z",
+  timestamp: ilYa(1),
   ...over,
 });
 
@@ -88,8 +106,9 @@ describe("journal remonté par le daemon", () => {
     // Un lot peut arriver en retard après une coupure : c'est le daemon qui
     // sait quand l'action a eu lieu.
     const { svc, inserted } = service();
-    await svc.record(NODE, [entry({ timestamp: "2026-09-15T08:30:00Z" })]);
-    expect(inserted[0]?.at).toBe("2026-09-15T08:30:00.000Z");
+    const retard = ilYa(9);
+    await svc.record(NODE, [entry({ timestamp: retard })]);
+    expect(inserted[0]?.at).toBe(retard);
   });
 
   it("retombe sur maintenant pour un horodatage inexploitable", async () => {
@@ -124,6 +143,18 @@ describe("journal remonté par le daemon", () => {
     const { svc, inserted } = service();
     await svc.record(NODE, [entry({ event: undefined })]);
     expect(inserted).toEqual([]);
+  });
+
+  it("ne garde d'une commande de console que son premier mot et la longueur du reste", async () => {
+    // Wings consigne en clair la commande tapée sur la socket. Même règle que
+    // pour celles qui passent par le panel : un `/login <mot de passe>` n'a
+    // pas à survivre un an dans un journal lisible par un invité.
+    const { svc, inserted } = service();
+    await svc.record(NODE, [
+      entry({ event: "server:console.command", metadata: { command: "login hunter2-secret" } }),
+    ]);
+    expect(inserted[0]?.properties).toEqual({ command: "login", argumentsLength: 14 });
+    expect(JSON.stringify(inserted[0])).not.toContain("hunter2");
   });
 });
 

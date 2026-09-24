@@ -1,3 +1,4 @@
+import { encryptSecret } from "@gamedashboard/auth";
 import { describe, expect, it } from "vitest";
 import { CHALLENGE_TTL_MS, issueChallenge, readChallenge } from "./login-challenge";
 
@@ -13,6 +14,10 @@ describe("défis scellés", () => {
       userId: USER,
       webauthn: null,
       method: null,
+      // L'identifiant à consommer en base, et l'échéance de sa trace.
+      jti: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      expiresAt: NOW + CHALLENGE_TTL_MS,
+      parent: null,
     });
   });
 
@@ -22,6 +27,31 @@ describe("défis scellés", () => {
     // route, et rien d'autre ne permet de les distinguer ensuite.
     const token = issueChallenge("login", USER, { method: "sso", now: NOW });
     expect(readChallenge("login", token, NOW)?.method).toBe("sso");
+  });
+
+  it("scelle le défi de connexion d'où dérive une cérémonie", () => {
+    // NC-32 : la cérémonie de clé d'accès doit consommer le défi `login`
+    // qui l'a ouverte, et le navigateur ne renvoie qu'elle.
+    const login = readChallenge("login", issueChallenge("login", USER, { now: NOW }), NOW);
+    if (!login) throw new Error("défi illisible");
+    const token = issueChallenge("passkey-login", USER, {
+      webauthn: "abc123",
+      parent: { jti: login.jti, expiresAt: login.expiresAt },
+      now: NOW,
+    });
+    expect(readChallenge("passkey-login", token, NOW)?.parent).toEqual({
+      jti: login.jti,
+      expiresAt: login.expiresAt,
+    });
+  });
+
+  it("est lié à son usage : un secret chiffré pour une colonne n'en tient pas lieu", () => {
+    expect(issueChallenge("login", USER, { now: NOW }).startsWith("v4:")).toBe(true);
+    // Même porteur d'un contenu valide, un chiffré lié à une ligne de la base
+    // ne se relit pas comme défi.
+    const contenu = JSON.stringify({ purpose: "login", userId: USER, expiresAt: NOW + 1000 });
+    const colonne = encryptSecret(contenu, undefined, "webhooks.secret_enc:x");
+    expect(readChallenge("login", colonne, NOW)).toBeNull();
   });
 
   it("transporte le défi aléatoire d'une cérémonie WebAuthn", () => {

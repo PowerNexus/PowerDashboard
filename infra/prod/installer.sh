@@ -451,12 +451,12 @@ printf '%s%s══════════════════════�
 if [ -n "$MOT_DE_PASSE" ]; then
   printf '  Identifiant          %s\n' "$EMAIL"
   printf '  Mot de passe         %s%s%s\n' "$G" "$MOT_DE_PASSE" "$Z"
-  printf "  %sIl n'est affiché qu'une fois.%s Notez-le, puis changez-le à la première connexion.\n\n" "$J" "$Z"
+  printf "  %sIl n'est affiché qu'une fois, et ne vaut que 24 heures.%s Changez-le à la première connexion.\n\n" "$J" "$Z"
 fi
 cat <<EOF
   À faire maintenant (détails dans docs/installation.md) :
     1. Se connecter, changer le mot de passe, activer la double authentification
-       (Compte › Sécurité).
+       (Compte › Sécurité) : l'administration l'exige avant de s'ouvrir.
     2. Configurer l'envoi de courriels (Administration › Paramètres).
     3. Installer Wings sur la machine qui fera tourner les jeux :
          gamedashboard wings   (sur cette machine), ou sur une autre :
@@ -465,10 +465,12 @@ cat <<EOF
 
   ${G}Sauvegardez dès maintenant${Z} : gamedashboard backup, puis copiez le
   fichier produit hors de cette machine. Il contient APP_SECRET_KEY, sans
-  laquelle une sauvegarde de la base ne sert à rien.
+  laquelle une sauvegarde de la base ne sert à rien. Il est chiffré par
+  /opt/gamedashboard/backup.key, tirée à cette première sauvegarde : copiez-la
+  aussi, une fois, à part — sans elle, aucune sauvegarde ne se relit.
 
   Au quotidien, de n'importe où (gamedashboard help pour la liste) :
     gamedashboard status | start | stop | restart | logs [api|web]
-    gamedashboard backup      sauvegarde la base et la clé maître
+    gamedashboard backup      sauvegarde chiffrée de la base et de la clé maître
     gamedashboard update      sauvegarde, puis passe à la dernière version
 EOF

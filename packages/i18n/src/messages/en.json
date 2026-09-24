@@ -411,7 +411,9 @@
     "features": "Features",
     "featuresHint": "Gradual module rollout. Takes effect immediately.",
     "featureOn": "On",
-    "featureOff": "Off"
+    "featureOff": "Off",
+    "reservedTitle": "Settings reserved to administrators",
+    "reservedBody": "Branding, email, storage, sign-in and billing can only be read by an administrator: they hold the credentials of the platform's services. You can review the sub-user presets below."
   },
   "adminUsers": {
     "create": "Create an account",
@@ -499,7 +501,7 @@
     "allowedIps": "Allowed IPs",
     "allowedIpsHint": "Comma separated. Empty means every address.",
     "daysLabel": "Validity (days)",
-    "daysHint": "Empty means no end date. An expiring key limits what a leak can cost.",
+    "daysHint": "Empty means 365 days, the maximum. An expiring key limits what a leak can cost.",
     "columnExpires": "Expires",
     "neverExpires": "Never",
     "createKey": "Create key",
@@ -536,7 +538,7 @@
     "errorFormat": "Error format",
     "errorFormatValue": "RFC 9457 (Problem Details)",
     "curlTitle": "Restart a server",
-    "keyStorage": "The key is shown only once, at creation: only its fingerprint is kept. Every key carries scopes, a list of allowed IP addresses and an optional expiry date. Every request is written to the audit log with the fingerprint used.",
+    "keyStorage": "The key is shown only once, at creation: only its fingerprint is kept. Every key carries scopes, a list of allowed IP addresses and an expiry date, one year at most. Every request is written to the audit log with the fingerprint used.",
     "routes": "Available routes",
     "tabClient": "Personal key",
     "tabApplication": "Application key",
@@ -945,8 +947,13 @@
   "billingSso": {
     "eyebrow": "Sign in",
     "title": "Panel access",
+    "expired": "This sign-in link is no longer valid.",
     "failedTitle": "Sign-in link expired",
     "retryHint": "Go back to your client area and click “Manage my server” again: a new link will be created.",
+    "suspendedTitle": "Account suspended",
+    "suspended": "This account is suspended. Contact your host's support to find out why.",
+    "unavailableTitle": "Sign-in unavailable",
+    "unavailable": "The panel could not check this link. Try again in a moment from your client area.",
     "staffSignIn": "Staff and sub-user sign-in"
   },
   "invitation": {
@@ -1050,6 +1057,7 @@
     "title": "Sign in",
     "subtitle": "Access your management panel.",
     "staffDescription": "This page is for staff and for people invited to a server. If you are a customer, you reach your server from your billing area.",
+    "resumeDescription": "Your account is protected by a second factor: confirm it is really you to get in.",
     "clientsTitle": "Are you a customer?",
     "clientsBody": "You do not have a password here. Sign in to your client area, then open your server from your services.",
     "clientsCta": "Go to my client area",
@@ -1514,6 +1522,9 @@
     "enable": "Enable",
     "disable": "Disable",
     "setupTitle": "Enable two-factor authentication",
+    "enableConfirmBody": "Your password first: a second factor on your account must only ever be set by you.",
+    "provisionalTitle": "Temporary password",
+    "provisionalBody": "This password was generated for a first sign-in. Choose your own: after twenty-four hours, it will be refused.",
     "setupStep1": "1. Scan this code with your app",
     "setupStep1Hint": "Google Authenticator, Aegis, 1Password, Bitwarden — they all read the same format.",
     "setupManual": "Or type this key by hand",
@@ -1656,8 +1667,8 @@
   },
   "staffTwoFactor": {
     "title": "Second proof required",
-    "body": "This platform requires staff to provide a second proof of identity. Until it is enabled on your account, the administration area stays closed — the API refuses it too.",
-    "emptyTitle": "Administration locked",
+    "body": "This platform requires its staff and resellers to provide a second proof of identity. Until it is enabled on your account, this area stays closed — the API refuses it too.",
+    "emptyTitle": "Area locked",
     "emptyBody": "Enable an authenticator app or a passkey, then come back here.",
     "action": "Go to account security"
   },
@@ -1973,6 +1984,19 @@
     "description": "This page does not exist or you do not have access to it.",
     "home": "Back to home"
   },
+  "passwordStrength": {
+    "tooShort": "Too short",
+    "tooLong": "Too long",
+    "containsIdentity": "Refused",
+    "acceptable": "Acceptable",
+    "good": "Good",
+    "strong": "Strong",
+    "missing": "{count, plural, one {# more character} other {# more characters}}",
+    "tooLongHint": "{maximum} characters at most",
+    "identityHint": "it contains your name or email address",
+    "longerHint": "a longer one would be safer",
+    "breachHint": "it will also be checked against known breaches"
+  },
   "securityAlerts": {
     "failureSubject": "Failed sign-in attempts on your {brand} account",
     "failureTitle": "Failed sign-in attempts",
@@ -1992,7 +2016,29 @@
     "deviceOn": "{browser} on {platform}",
     "unknownDevice": "unidentified device",
     "unknownIp": "unknown",
-    "footer": "This security message is sent regardless of your notification settings."
+    "footer": "This security message is sent regardless of your notification settings.",
+    "credentialSubject": "{change} on your {brand} account",
+    "credentialChange": {
+      "passwordChanged": "Password changed",
+      "passwordReset": "Password reset",
+      "twoFactorEnabled": "Two-factor authentication turned on",
+      "twoFactorDisabled": "Two-factor authentication turned off",
+      "passkeyAdded": "Passkey added",
+      "passkeyRemoved": "Passkey removed",
+      "emailChanged": "Email address changed"
+    },
+    "credentialBody": {
+      "passwordChanged": "The password of your account was just changed, and your other sessions were signed out.",
+      "passwordReset": "The password of your account was just reset through a link sent to this address, and every session was signed out.",
+      "twoFactorEnabled": "Two-factor authentication with an app was just turned on for your account.",
+      "twoFactorDisabled": "Two-factor authentication with an app was just turned off for your account.",
+      "passkeyAdded": "A new passkey was just registered on your account.",
+      "passkeyRemoved": "A passkey was just removed from your account.",
+      "emailChanged": "The email address of your account was just replaced. This message goes to the former address; the next ones will go to the new one."
+    },
+    "credentialAdvice": "If this was not you, someone may have taken over your account: change your password, sign out your other sessions and check your two-factor authentication:",
+    "credentialReassure": "If this was you, there is nothing to do.",
+    "emailChangedAdvice": "If you did not ask for this, contact your host's support right away: this account now signs in with the new address."
   },
   "subuserPresets": {
     "title": "Subuser presets",

@@ -36,8 +36,12 @@ export interface SettingDescriptor {
    *   des revendeurs. Ces valeurs finissent dans un `src` ou un `href`.
    * - `hex` : couleur hexadécimale (`normalizeHex`). Elle finit dans une
    *   variable CSS, où une chaîne libre injecterait des déclarations.
+   * - `outbound` : adresse que **le panel appelle lui-même** — `https://`, et
+   *   jamais une destination interne (boucle locale, réseau privé, service
+   *   de métadonnées). L'API le vérifie en résolvant le nom
+   *   (`assertPublicDestination`, rapport ASVS NC-56).
    */
-  format?: "url" | "hex";
+  format?: "url" | "hex" | "outbound";
 }
 
 export interface SettingGroup {
@@ -357,24 +361,28 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         kind: "boolean",
         label: "2FA obligatoire pour le personnel",
         description:
-          "Les rôles administrateur et support doivent activer une seconde preuve. " +
-          "À activer dès que le panel sert autre chose que vous : c'est le compte le plus " +
+          "Les rôles administrateur, support et revendeur doivent activer une seconde preuve " +
+          "avant d'entrer dans leur espace. Actif par défaut : c'est le compte le plus " +
           "puissant de la plateforme qui est en jeu.",
         /*
-         * **Fermé au départ, et c'est un choix d'exploitation, pas de sécurité.**
+         * **Exigée au départ** (rapport ASVS, NC-10, décision de Matheo).
          *
-         * Le défaut inverse verrouillait l'administration d'un panel neuf :
-         * le premier compte est administrateur, il n'a évidemment pas encore
-         * de seconde preuve, et l'espace qui permet d'en poser une est
-         * justement celui que la règle ferme. On installait, on se connectait,
-         * et on tombait sur « Administration verrouillée ».
+         * Le défaut inverse tenait à une crainte : verrouiller l'administration
+         * d'un panel neuf, dont le premier compte n'a évidemment pas encore de
+         * seconde preuve. Elle ne tient pas. L'enrôlement vit dans l'espace de
+         * **compte** (`/account/security`), que `StaffTwoFactorGuard` ne ferme
+         * pas ; l'administration, elle, explique le refus et y renvoie d'un
+         * clic. Le premier administrateur active sa seconde preuve, puis entre.
          *
-         * Le réglage reste au catalogue et s'active en un clic. Ce qui suit
-         * cette ligne ne change pas : dès qu'il est posé, l'API refuse — c'est
-         * elle qui fait règle — et l'écran explique plutôt que de se contenter
-         * d'une page en erreur.
+         * Le défaut fermé laissait en revanche le compte le plus puissant
+         * derrière un seul mot de passe tant que personne n'allait cocher une
+         * case — ce qui, sur un panel que personne ne relit, veut dire jamais.
+         *
+         * Une installation existante sans ligne en base passe à l'exigence à la
+         * mise à jour : son personnel sans seconde preuve voit la même
+         * explication, et l'enrôle depuis son compte.
          */
-        fallback: false,
+        fallback: true,
       },
       {
         key: "security.captchaOnLogin",
@@ -412,6 +420,10 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         description:
           "La page publique. Le panel y lit « summary.json », qui ne demande aucune clé — la lecture reste donc possible même si la clé d'API expire.",
         placeholder: "https://status.gamedashboard.fr",
+        // Le panel lit cette page lui-même, et publie ce qu'il lit dans la
+        // bannière de chaque page : une adresse interne en ferait une fenêtre
+        // sur son propre réseau.
+        format: "outbound",
       },
       {
         key: "instatus.showBanner",

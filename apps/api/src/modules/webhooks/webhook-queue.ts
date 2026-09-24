@@ -6,6 +6,7 @@ import {
   webhooks,
 } from "@gamedashboard/db";
 import { and, asc, eq, inArray, isNotNull, lte } from "drizzle-orm";
+import type { SecretColumn } from "../../common/row-secrets";
 
 /**
  * Les deux files de rappels sortants, vues d'un même répartiteur.
@@ -47,6 +48,12 @@ export interface WebhookQueue {
   readonly label: string;
 
   /**
+   * Colonne du secret de signature, dont le contexte le lie à son point
+   * d'entrée (`webhookId`) : un secret recopié d'un autre ne signe rien.
+   */
+  readonly secretColumn: SecretColumn;
+
+  /**
    * Prend les livraisons dues, et les retire de la file dans le même geste.
    *
    * `next_attempt_at` passe à `null` au moment de la prise : sans cela, deux
@@ -80,6 +87,7 @@ export interface WebhookQueue {
 export function applicationQueue(db: Database): WebhookQueue {
   return {
     label: "applicatif",
+    secretColumn: "application_webhooks.secret_enc",
 
     async claimDue(now, limit) {
       const rows = await db
@@ -170,6 +178,7 @@ export function applicationQueue(db: Database): WebhookQueue {
 export function clientQueue(db: Database): WebhookQueue {
   return {
     label: "client",
+    secretColumn: "webhooks.secret_enc",
 
     async claimDue(now, limit) {
       const rows = await db

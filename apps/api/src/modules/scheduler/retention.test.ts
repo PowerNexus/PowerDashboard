@@ -39,6 +39,19 @@ describe("fenêtres de rétention", () => {
     expect(byTable.get("sessions")?.where).toContain("revoked_at is not null");
   });
 
+  /*
+   * Non-régression (audit ASVS, NC-39) : les réponses mémorisées de
+   * l'idempotence n'étaient jamais purgées, alors qu'elles portent la réponse
+   * complète d'une création — adresse et nom du compte créé compris.
+   */
+  it("purge les réponses de l'idempotence, passé un mois de reprises possibles", () => {
+    const regle = byTable.get("idempotency_records");
+    expect(regle?.column).toBe("created_at");
+    // Un mois couvre largement les reprises d'une facturation (secondes pour
+    // un délai réseau, heures pour une file ou un clic sur « Create »).
+    expect(regle?.days).toBe(30);
+  });
+
   it("donne une raison à chaque fenêtre", () => {
     // Une durée sans justification se change à la légère, puis se change dans
     // l'autre sens six mois plus tard.

@@ -84,10 +84,16 @@ export async function createThrowawayDatabase(): Promise<ThrowawayDatabase> {
          * PostgreSQL refuse de supprimer une base encore ouverte, et une
          * connexion oubliée par un test transformerait la fin de suite en
          * échec sans rapport avec ce qui était testé.
+         *
+         * Seulement les connexions **clientes de ce rôle** : l'autovacuum
+         * passe aussi sur ces bases, et son processus, superutilisateur, ne se
+         * coupe pas depuis un rôle ordinaire (« permission denied to terminate
+         * process ») — la suite échouait alors au nettoyage, tous ses tests
+         * verts. `drop database` l'écarte de lui-même.
          */
         await cleaner.execute(
           sql.raw(
-            `select pg_terminate_backend(pid) from pg_stat_activity where datname = '${name}' and pid <> pg_backend_pid()`,
+            `select pg_terminate_backend(pid) from pg_stat_activity where datname = '${name}' and pid <> pg_backend_pid() and backend_type = 'client backend' and usename = current_user`,
           ),
         );
         await cleaner.execute(sql.raw(`drop database if exists "${name}"`));

@@ -17,6 +17,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import type { BrandingService } from "../reseller/branding.service";
 import type { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
 import { AuthController } from "./auth.controller";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import { SecurityAlertRepository } from "./security-alert.repository";
 import { FAILURE_ALERT, NEW_DEVICE_ALERT, SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
@@ -146,6 +147,11 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       // Le courrier de compte (réinitialisation, vérification) n'est pas en
       // jeu ici : la connexion n'y touche pas.
       {} as never,
+      // Les consoles de Wings non plus.
+      {} as never,
+      {} as never,
+      // Le verrou et la trace des échecs, que la connexion emploie.
+      new PasswordConfirmationService(users, alerts),
     );
   });
 
@@ -373,6 +379,15 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
        * écrivait encore en base pendant que le test suivant vidait les tables,
        * et le `truncate` finissait une fois sur trois en interblocage.
        */
+      /*
+       * L'envoi est libéré **une fois parti**. L'alerte le lance après la
+       * réponse, puisque la connexion ne l'attend pas : libérer aussitôt ne
+       * libérait rien — l'envoi, parti ensuite, pendait pour toujours, et
+       * `settled()` avec lui. Le test dépassait son délai une fois sur deux,
+       * sans rien dire de la connexion, qui avait répondu en quelques
+       * dizaines de millisecondes.
+       */
+      await vi.waitFor(() => expect(liberer).toBeDefined());
       liberer?.();
       await alerts.settled();
     });

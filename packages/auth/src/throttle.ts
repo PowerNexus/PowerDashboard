@@ -6,7 +6,10 @@
  *   en échouant volontairement, ce qui transforme la protection en arme ;
  * - par IP seule, une attaque répartie sur mille adresses passe sans être vue.
  *
- * On applique donc la décision la plus restrictive des deux.
+ * On applique donc la décision la plus restrictive des deux — sauf pour une
+ * adresse d'où le compte a déjà été ouvert, que le verrou du compte n'arrête
+ * pas : c'est ce qui empêche un tiers d'enfermer dehors le titulaire en
+ * échouant dix fois sur son adresse.
  */
 
 export const ATTEMPT_WINDOW_MS = 15 * 60_000;
@@ -19,6 +22,15 @@ export const MAX_ATTEMPTS_PER_IP = 30;
 export interface AttemptCounts {
   account: number;
   ip: number;
+  /**
+   * Le compte a-t-il déjà été ouvert depuis cette adresse ?
+   *
+   * Une connexion **complète**, second facteur compris : une adresse d'où
+   * l'on n'a donné que le mot de passe ne doit pas s'exempter du verrou, sans
+   * quoi qui le connaît déjà essaierait ensuite les codes sans limite de
+   * compte. La limite par adresse, elle, s'applique toujours.
+   */
+  knownIp?: boolean;
 }
 
 export type ThrottleDecision =
@@ -38,7 +50,7 @@ export function attemptDelayMs(failures: number): number {
 }
 
 export function throttleDecision(counts: AttemptCounts): ThrottleDecision {
-  if (counts.account >= MAX_ATTEMPTS_PER_ACCOUNT) {
+  if (counts.account >= MAX_ATTEMPTS_PER_ACCOUNT && !counts.knownIp) {
     return { action: "block", retryAfterMs: ATTEMPT_WINDOW_MS, reason: "account" };
   }
   if (counts.ip >= MAX_ATTEMPTS_PER_IP) {
