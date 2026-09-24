@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { createClient, type Database } from "@gamedashboard/db";
+import { migrateDatabase } from "@gamedashboard/db/migrate";
 import { sql } from "drizzle-orm";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 
 /**
  * Base jetable pour les tests d'intégration.
@@ -47,7 +47,9 @@ const MIGRATIONS_FOLDER = fileURLToPath(
   new URL("../../../../packages/db/migrations", import.meta.url),
 );
 
-export async function createThrowawayDatabase(): Promise<ThrowawayDatabase> {
+export async function createThrowawayDatabase(
+  options: { migrate?: boolean } = {},
+): Promise<ThrowawayDatabase> {
   const base = process.env.DATABASE_URL;
   if (!base) throw new Error(NO_DATABASE_REASON);
 
@@ -68,7 +70,10 @@ export async function createThrowawayDatabase(): Promise<ThrowawayDatabase> {
   }
 
   const db = createClient(withDatabase(base, name));
-  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  // Le migrateur de l'archive autonome, et non celui de drizzle-orm : chaque
+  // test d'intégration le rejoue ainsi sur le serveur de la suite. Une base
+  // vide (`migrate: false`) sert à comparer les migrateurs.
+  if (options.migrate !== false) await migrateDatabase(db, MIGRATIONS_FOLDER);
 
   return {
     db,
@@ -91,9 +96,19 @@ export async function createThrowawayDatabase(): Promise<ThrowawayDatabase> {
          * process ») — la suite échouait alors au nettoyage, tous ses tests
          * verts. `drop database` l'écarte de lui-même.
          */
+        /*
+         * `backend_type` n'existe que depuis PostgreSQL 10 ; avant, la vue ne
+         * montre que les connexions clientes, et le filtre est inutile. La
+         * suite tourne ainsi aussi contre un 9.6, celui des hébergements
+         * mutualisés qui n'ont pas suivi.
+         */
+        const [{ version } = { version: "0" }] = await cleaner.execute<{ version: string }>(
+          sql.raw("select current_setting('server_version_num') as version"),
+        );
+        const clientes = Number(version) >= 100000 ? "and backend_type = 'client backend'" : "";
         await cleaner.execute(
           sql.raw(
-            `select pg_terminate_backend(pid) from pg_stat_activity where datname = '${name}' and pid <> pg_backend_pid() and backend_type = 'client backend' and usename = current_user`,
+            `select pg_terminate_backend(pid) from pg_stat_activity where datname = '${name}' and pid <> pg_backend_pid() ${clientes} and usename = current_user`,
           ),
         );
         await cleaner.execute(sql.raw(`drop database if exists "${name}"`));

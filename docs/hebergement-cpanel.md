@@ -45,6 +45,13 @@ cPanel › **Bases de données PostgreSQL** : créer une base, un utilisateur av
 un mot de passe long, et donner à l'utilisateur tous les droits sur la base.
 cPanel préfixe les deux noms par celui du compte (`compte_gamedashboard`).
 
+Un PostgreSQL ancien convient, **depuis la version 9.6** : c'est ce que
+proposent encore certains hébergeurs, sans extension installable. Le
+migrateur de l'archive (`@gamedashboard/db/migrate`) adapte au serveur ce
+qu'il ne connaît pas encore et fournit les fonctions qui lui manquent
+(`gen_random_uuid()`, `date_bin()`) ; toute la suite de tests de l'API passe
+contre un 9.6. La version s'affiche en tête de phpPgAdmin.
+
 ## 2. Domaines
 
 - **Le domaine du panel.** Sa racine de documents (souvent `public_html`)
