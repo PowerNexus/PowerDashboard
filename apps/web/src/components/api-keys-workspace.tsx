@@ -42,8 +42,8 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [ips, setIps] = useState("");
-  // Vide : sans fin. Le choix reste à l'utilisateur, une clé de script ne
-  // tourne pas d'elle-même ; mais une date de fin est proposée.
+  // Vide : l'API pose le maximum, un an. Une clé de script ne tourne pas
+  // d'elle-même : sans fin, elle survivait à l'oubli (NC-36).
   const [days, setDays] = useState("");
   const [scopes, setScopes] = useState<string[]>(["console.read", "power.start", "power.restart"]);
   const [created, setCreated] = useState<string | null>(null);
@@ -251,7 +251,7 @@ export function ApiKeysWorkspace({ initial }: { initial: ApiKey[] }) {
                     className="gd-mono"
                     value={days}
                     onChange={(e) => setDays(e.target.value)}
-                    placeholder="∞"
+                    placeholder="365"
                   />
                 )}
               </FormField>

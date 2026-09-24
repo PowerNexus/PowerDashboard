@@ -13,7 +13,10 @@ export interface ClientApiKey {
   scopes: string[];
   allowedIps: string[];
   lastUsedAt: string | null;
-  /** `null` : sans fin. Une clé de script vit tant qu'on ne la révoque pas. */
+  /**
+   * Toujours posée à la création (un an au plus). `null` ne se voit que sur une
+   * clé créée avant que l'échéance devienne obligatoire.
+   */
   expiresAt: string | null;
   createdAt: string;
 }
@@ -21,7 +24,10 @@ export interface ClientApiKey {
 /** Forme d'une entrée acceptable dans la liste d'autorisation : adresse, ou bloc CIDR. */
 const IP_PATTERN = /^[0-9a-fA-F:.]{3,45}(\/\d{1,3})?$/;
 
-/** Durée maximale proposée à la création : un an, comme les clés applicatives. */
+/**
+ * Durée maximale d'une clé, et durée posée quand aucune n'est demandée : un
+ * an, comme les clés applicatives.
+ */
 export const CLIENT_KEY_MAX_DAYS = 365;
 
 @Injectable()
@@ -67,7 +73,7 @@ export class ApiKeysService {
     name: string,
     scopes: string[],
     allowedIps: string[],
-    /** Nombre de jours de validité, ou `null` pour une clé sans fin. */
+    /** Nombre de jours de validité ; `null` pose `CLIENT_KEY_MAX_DAYS`. */
     expiresInDays: number | null = null,
   ): Promise<{ key: ClientApiKey; plaintext: string }> {
     const unknown = scopes.filter((s) => !SERVER_PERMISSIONS.includes(s as ServerPermission));
@@ -86,16 +92,20 @@ export class ApiKeysService {
       throw new BadRequestException(`Adresse invalide : ${invalid.join(", ")}.`);
     }
 
-    if (
-      expiresInDays !== null &&
-      (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > CLIENT_KEY_MAX_DAYS)
-    ) {
+    /*
+     * Une échéance, toujours.
+     *
+     * Sans durée demandée, la clé ne finissait jamais (audit ASVS, NC-36) :
+     * collée dans un script puis oubliée, elle restait valable des années
+     * après que plus personne ne savait où elle traînait. Le champ vide pose
+     * désormais le maximum, comme pour les clés applicatives ; qui veut plus
+     * court le dit.
+     */
+    const days = expiresInDays ?? CLIENT_KEY_MAX_DAYS;
+    if (!Number.isInteger(days) || days < 1 || days > CLIENT_KEY_MAX_DAYS) {
       throw new BadRequestException(`La validité va de 1 à ${CLIENT_KEY_MAX_DAYS} jours.`);
     }
-    const expiresAt =
-      expiresInDays === null
-        ? null
-        : new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
     const generated = generateApiKey("live");
 

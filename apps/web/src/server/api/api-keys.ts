@@ -31,7 +31,7 @@ export async function createApiKey(
   name: string,
   scopes: string[],
   allowedIps: string[],
-  /** Jours de validité ; `null` pour une clé sans fin. */
+  /** Jours de validité ; `null` pour la durée maximale (un an), posée par l'API. */
   expiresInDays: number | null = null,
 ): Promise<{ plaintext: string | null; error: string | null }> {
   try {

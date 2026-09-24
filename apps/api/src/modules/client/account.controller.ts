@@ -82,7 +82,7 @@ export class AccountController {
       throw new BadRequestException("Libellé manquant.");
     }
     if (!Array.isArray(scopes)) throw new BadRequestException("Portées manquantes.");
-    // Absent ou nul : sans fin. Le service borne la valeur fournie.
+    // Absent ou nul : la durée maximale, un an. Le service borne la valeur fournie.
     if (
       expiresInDays !== undefined &&
       expiresInDays !== null &&
