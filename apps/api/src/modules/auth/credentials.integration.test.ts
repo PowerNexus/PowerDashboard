@@ -81,6 +81,8 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
   let tokens: AuthTokenRepository;
   let alerts: SecurityAlertService;
   let controller: AuthController;
+  /** Réglages booléens de la plateforme ; absents, ils valent faux. */
+  let settings: Record<string, boolean>;
 
   beforeAll(async () => {
     Logger.overrideLogger(false);
@@ -102,13 +104,14 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     );
 
     mail = { send: vi.fn(async () => true), isConfigured: async () => true };
+    settings = {};
     const mailer = mail as unknown as MailerService;
     const branding = {
       forHost: async () => ({ name: "GameDashboard", resellerId: null }),
     } as unknown as BrandingService;
     const platform = {
       text: async () => "gamedashboard.local",
-      boolean: async () => false,
+      boolean: async (key: string) => settings[key] ?? false,
     } as unknown as PlatformSettingsService;
 
     const userRepository = new UserRepository(db);
@@ -117,12 +120,9 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     tokens = new AuthTokenRepository(db);
     alerts = new SecurityAlertService(
       new SecurityAlertRepository(db),
-      new NotificationsService(
-        db,
-        new NotificationPreferencesRepository(db),
-        mailer,
-        { emit: async () => {} } as unknown as ClientWebhookEmitterService,
-      ),
+      new NotificationsService(db, new NotificationPreferencesRepository(db), mailer, {
+        emit: async () => {},
+      } as unknown as ClientWebhookEmitterService),
       mailer,
       activity,
       branding,
@@ -208,6 +208,23 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       // change son mot de passe parce qu'on le croit connu d'un autre, et ce
       // lien dort peut-être dans une boîte que cet autre lit aussi.
       expect(await tokens.consume(issued.token, "password_reset")).toBeNull();
+    });
+  });
+
+  describe("indicateur « double authentification requise »", () => {
+    it("couvre le revendeur, que le garde du personnel retient aussi", async () => {
+      settings["security.staffRequires2fa"] = true;
+
+      // L'espace revendeur passe par `StaffTwoFactorGuard` : un indicateur
+      // faux laissait l'écran muet devant un refus qu'il devait annoncer.
+      const reseller = await seedAccount("reseller");
+      expect((await controller.twoFactorStatus(signedIn(reseller))).data.required).toBe(true);
+
+      const admin = await seedAccount("admin");
+      expect((await controller.twoFactorStatus(signedIn(admin))).data.required).toBe(true);
+
+      const client = await seedAccount("user");
+      expect((await controller.twoFactorStatus(signedIn(client))).data.required).toBe(false);
     });
   });
 });
