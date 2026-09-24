@@ -100,7 +100,9 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
     mailer.send.mockClear();
   });
 
-  async function account(input: { role?: "admin" | "user" | "reseller"; password?: string } = {}) {
+  async function account(
+    input: { role?: "admin" | "support" | "user" | "reseller"; password?: string } = {},
+  ) {
     const [row] = await db
       .insert(users)
       .values({
@@ -354,6 +356,7 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
   /* --- Modification ------------------------------------------------------- */
 
   it("refuse une adresse déjà prise, quelle que soit la casse", async () => {
+    const admin = await account({ role: "admin" });
     const client = await account();
     const other = await account();
     // Une ligne ancienne peut porter des majuscules : la reprise les a gardées.
@@ -361,6 +364,7 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
 
     await expect(
       accounts.update(
+        admin.id,
         client.id,
         { email: other.email, nameFirst: "A", nameLast: "B", locale: "fr" },
         null,
@@ -369,11 +373,13 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
   });
 
   it("repasse une adresse changée en « non vérifiée » et éteint les liens de l'ancienne", async () => {
+    const admin = await account({ role: "admin" });
     const client = await account({ password: "phrase-de-passe-solide-42" });
     const oldLink = await tokens.issue(client.id, "password_reset", null);
     if (!oldLink) throw new Error("jeton non émis");
 
     const outcome = await accounts.update(
+      admin.id,
       client.id,
       {
         email: "nouvelle@gamedashboard.test",
@@ -395,8 +401,10 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
   });
 
   it("garde la vérification quand l'adresse ne change pas", async () => {
+    const admin = await account({ role: "admin" });
     const client = await account();
     const outcome = await accounts.update(
+      admin.id,
       client.id,
       { email: client.email, nameFirst: "Dominique", nameLast: "Martin", locale: "fr" },
       null,
@@ -406,6 +414,44 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
     expect(row?.emailVerifiedAt).not.toBeNull();
     expect(row?.nameFirst).toBe("Dominique");
   });
+
+  it.each(["admin", "support"] as const)(
+    "refuse de changer l'adresse d'un autre membre du personnel (%s)",
+    async (role) => {
+      // NC-59 : réécrire l'adresse d'un confrère, puis lui envoyer une
+      // réinitialisation, c'était prendre son compte en deux clics.
+      const admin = await account({ role: "admin" });
+      const staff = await account({ role, password: "phrase-de-passe-solide-42" });
+
+      await expect(
+        accounts.update(
+          admin.id,
+          staff.id,
+          { email: "detournee@gamedashboard.test", nameFirst: "A", nameLast: "B", locale: "fr" },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      const [row] = await db.select().from(users).where(eq(users.id, staff.id));
+      expect(row?.email).toBe(staff.email);
+      expect(mailer.send).not.toHaveBeenCalled();
+
+      // Le reste de sa fiche se corrige toujours, et chacun garde la main sur
+      // sa propre adresse.
+      await accounts.update(
+        admin.id,
+        staff.id,
+        { email: staff.email, nameFirst: "Dominique", nameLast: "B", locale: "fr" },
+        null,
+      );
+      const self = await accounts.update(
+        admin.id,
+        admin.id,
+        { email: "moi@gamedashboard.test", nameFirst: "A", nameLast: "B", locale: "fr" },
+        null,
+      );
+      expect(self.emailChanged).toBe(true);
+    },
+  );
 
   /* --- Réinitialisation --------------------------------------------------- */
 
