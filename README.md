@@ -36,6 +36,8 @@ empreinte, lance l'installation guidée et installe la commande
 `gamedashboard` : `status`, `start`, `stop`, `restart`, `logs`, `backup`,
 `update`, `admin`, `password`, `wings`, `help`. Le pas à pas complet, pensé
 pour qui découvre le projet : [docs/installation.md](./docs/installation.md).
+Sur un hébergement mutualisé cPanel (Setup Node.js App), sans nginx ni
+systemd : [docs/hebergement-cpanel.md](./docs/hebergement-cpanel.md).
 
 Depuis un clone ou une archive extraite, les mêmes commandes s'appellent
 `pnpm app:install`, `pnpm app:setup`, `pnpm app:start`… (`pnpm app:help`).

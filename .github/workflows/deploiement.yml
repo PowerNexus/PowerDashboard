@@ -1,0 +1,107 @@
+name: Construction continue
+
+# Construit le panel après chaque CI verte sur main, et publie l'archive dans
+# la préversion « continu » : c'est là que infra/cpanel/deployer.sh vient la
+# chercher (docs/hebergement-cpanel.md).
+#
+# Un hébergement mutualisé n'a ni la mémoire ni le temps que demande
+# `next build` : l'interface est construite ici, une fois. La préversion n'est
+# jamais « la dernière » de la page Releases : `releases/latest`, celle
+# qu'installe `gamedashboard.sh`, reste la dernière version étiquetée.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Republier la construction de main, après une panne du runner par exemple.
+  workflow_dispatch:
+
+# Une publication à la fois, jamais annulée en route : une archive à moitié
+# téléversée ferait échouer chaque passage du cron jusqu'à la suivante.
+concurrency:
+  group: construction-continue
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  NEXT_TELEMETRY_DISABLED: 1
+
+jobs:
+  publier:
+    name: Compiler et publier
+    # Seulement un push sur main passé par la CI : jamais le code d'une PR.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # Même runner que la CI (docs/runner-auto-heberge.md).
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
+    timeout-minutes: 20
+    permissions:
+      # Déplacer l'étiquette « continu » et remplacer les fichiers publiés.
+      contents: write
+
+    env:
+      # Le commit que la CI a vérifié, pas celui qu'aurait main entre-temps.
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ env.COMMIT }}
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      # Aucun secret : les clés ne sont lues qu'à l'exécution, sur le serveur.
+      - name: Compiler
+        run: pnpm build
+
+      # Même archive qu'une version publiée, sous un nom fixe : le script du
+      # serveur n'a qu'une adresse à connaître.
+      - name: Assembler l'archive
+        run: |
+          bash infra/release/assembler.sh "v0.0.0-continu.${COMMIT::12}" dist
+          mkdir -p publication
+          cp dist/gamedashboard-v0.0.0-continu.*.tar.gz publication/gamedashboard.tar.gz
+          ( cd publication && sha256sum gamedashboard.tar.gz > gamedashboard.tar.gz.sha256 )
+          install -m 755 infra/cpanel/deployer.sh publication/deployer.sh
+
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          Construction de \`main\` au commit ${COMMIT}, remplacée à chaque CI verte.
+
+          Ce n'est pas une version : elle alimente un hébergement cPanel, par
+          \`infra/cpanel/deployer.sh\` ([guide](https://github.com/${{ github.repository }}/blob/main/docs/hebergement-cpanel.md)).
+          Pour installer une version sur un serveur à soi : la dernière release étiquetée.
+          EOF
+
+          git tag -f continu "$COMMIT"
+          git push -f origin refs/tags/continu
+
+          if ! gh release view continu >/dev/null 2>&1; then
+            gh release create continu --verify-tag --prerelease --latest=false \
+              --title "Construction continue" --notes-file notes.md
+          fi
+          gh release edit continu --notes-file notes.md
+
+          # L'archive d'abord, son empreinte ensuite. Un serveur qui passe
+          # entre les deux compare la nouvelle archive à l'ancienne empreinte :
+          # il refuse, et réessaie au passage suivant. Rien de mélangé ne
+          # s'installe.
+          gh release upload continu publication/gamedashboard.tar.gz --clobber
+          gh release upload continu publication/deployer.sh --clobber
+          gh release upload continu publication/gamedashboard.tar.gz.sha256 --clobber
