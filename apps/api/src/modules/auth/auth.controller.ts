@@ -841,6 +841,27 @@ export class AuthController {
     if (!user?.passwordHash) return;
 
     /*
+     * La suite ne s'attend pas (doute D-3 de l'audit ASVS).
+     *
+     * Le corps de la réponse ne dit rien de l'adresse ; le temps le disait :
+     * pour un compte existant, la route attendait l'émission du jeton, le
+     * rendu du courrier et l'écriture au journal — de quoi trier une liste
+     * d'adresses sous charge. Détachée, la réponse part au même instant dans
+     * tous les cas ; seule la lecture du compte, commune aux deux, la précède.
+     */
+    void this.requestPasswordReset(user, request).catch((error: unknown) => {
+      this.logger.error(
+        `Demande de réinitialisation non aboutie : ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }
+
+  /** Émet le lien de réinitialisation d'un compte existant, et le consigne. */
+  private async requestPasswordReset(
+    user: { id: string; email: string },
+    request: ClientRequest,
+  ): Promise<void> {
+    /*
      * Sans courrier, on n'émet **rien**, et plafond atteint vaut le même
      * silence qu'un compte inconnu (voir `AccountMailService`).
      *
