@@ -6,7 +6,7 @@ import { AuthController } from "../auth/auth.controller";
 import type { TwoFactorRepository } from "../auth/two-factor.repository";
 import { ResellerController } from "../reseller/reseller.controller";
 import type { PlatformSettingsService } from "./platform-settings.service";
-import { StaffTwoFactorGuard } from "./staff-2fa.guard";
+import { requiresStaffSecondFactor, StaffTwoFactorGuard } from "./staff-2fa.guard";
 
 /**
  * La seconde preuve exigée du personnel (et des revendeurs).
@@ -67,6 +67,16 @@ describe("seconde preuve du personnel", () => {
 
   it("est posé sur l'espace revendeur", () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, ResellerController)).toContain(StaffTwoFactorGuard);
+  });
+
+  it("dit l'exigence à chaque rôle dont il garde l'espace, revendeur compris", () => {
+    // NC-60 : l'indicateur rendu à l'interface ignorait le revendeur, pourtant
+    // refusé par ce garde. Son espace s'affichait alors en erreur, sans la
+    // phrase qui mène à la sécurité du compte.
+    for (const role of ["admin", "support", "reseller"]) {
+      expect(requiresStaffSecondFactor(role), role).toBe(true);
+    }
+    expect(requiresStaffSecondFactor("user")).toBe(false);
   });
 
   it.each([

@@ -27,8 +27,8 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { ActivityService } from "../activity/activity.service";
-import { isAdminRole } from "../admin/admin.guard";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
+import { requiresStaffSecondFactor } from "../admin/staff-2fa.guard";
 import { MailerService } from "../mail/mailer.service";
 import { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
@@ -1126,10 +1126,12 @@ export class AuthController {
      * cherche à expliquer.
      *
      * Faux pour un compte ordinaire, quelle que soit la valeur du réglage : il
-     * ne porte que sur le personnel.
+     * ne porte que sur le personnel et les revendeurs — les rôles dont
+     * `StaffTwoFactorGuard` garde l'espace.
      */
     const required =
-      isAdminRole(user.role) && (await this.platform.boolean("security.staffRequires2fa"));
+      requiresStaffSecondFactor(user.role) &&
+      (await this.platform.boolean("security.staffRequires2fa"));
 
     return { data: { ...status, required } };
   }

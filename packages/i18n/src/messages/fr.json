@@ -1664,8 +1664,8 @@
   },
   "staffTwoFactor": {
     "title": "Seconde preuve exigée",
-    "body": "Cette plateforme demande une seconde preuve d'identité au personnel. Tant qu'elle n'est pas activée sur votre compte, l'espace d'administration reste fermé — l'API le refuse également.",
-    "emptyTitle": "Administration verrouillée",
+    "body": "Cette plateforme demande une seconde preuve d'identité à son personnel et à ses revendeurs. Tant qu'elle n'est pas activée sur votre compte, cet espace reste fermé — l'API le refuse également.",
+    "emptyTitle": "Espace verrouillé",
     "emptyBody": "Activez une application d'authentification ou une clé d'accès, puis revenez ici.",
     "action": "Aller à la sécurité du compte"
   },

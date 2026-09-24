@@ -1664,8 +1664,8 @@
   },
   "staffTwoFactor": {
     "title": "Second proof required",
-    "body": "This platform requires staff to provide a second proof of identity. Until it is enabled on your account, the administration area stays closed — the API refuses it too.",
-    "emptyTitle": "Administration locked",
+    "body": "This platform requires its staff and resellers to provide a second proof of identity. Until it is enabled on your account, this area stays closed — the API refuses it too.",
+    "emptyTitle": "Area locked",
     "emptyBody": "Enable an authenticator app or a passkey, then come back here.",
     "action": "Go to account security"
   },

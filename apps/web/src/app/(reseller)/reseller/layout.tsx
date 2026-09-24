@@ -2,11 +2,13 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import type { ReactNode } from "react";
 import { PanelShell } from "@/components/shell";
+import { StaffTwoFactorNotice } from "@/components/staff-2fa-notice";
 import { resellerNav } from "@/config/navigation";
 import { displayName } from "@/lib/session-user";
 import { fetchActiveAnnouncements } from "@/server/api/announcements";
 import { fetchMe } from "@/server/api/client";
 import { fetchNotifications } from "@/server/api/notifications";
+import { fetchTwoFactorStatus } from "@/server/api/two-factor";
 
 export default async function ResellerLayout({ children }: { children: ReactNode }) {
   const [t, notifications, me, announcements] = await Promise.all([
@@ -29,6 +31,11 @@ export default async function ResellerLayout({ children }: { children: ReactNode
    */
   if (me.role !== "reseller") notFound();
 
+  // Même seconde preuve que le personnel, et même explication : l'API refuse
+  // déjà l'espace, l'écran dit pourquoi et mène à la sécurité du compte.
+  const twoFactor = await fetchTwoFactorStatus();
+  const locked = twoFactor.required && !twoFactor.enabled;
+
   return (
     <PanelShell
       sections={resellerNav(t)}
@@ -41,7 +48,7 @@ export default async function ResellerLayout({ children }: { children: ReactNode
       announcements={announcements}
       userAvatarUrl={me.avatarUrl}
     >
-      {children}
+      {locked ? <StaffTwoFactorNotice /> : children}
     </PanelShell>
   );
 }
