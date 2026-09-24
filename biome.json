@@ -6,6 +6,7 @@
       "**",
       "!**/node_modules",
       "!**/.next",
+      "!**/.next-autonome",
       "!**/dist",
       "!**/.turbo",
       "!**/storybook-static",
@@ -38,5 +39,11 @@
   },
   "css": {
     "parser": { "cssModules": false, "tailwindDirectives": true }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["infra/**"],
+      "linter": { "rules": { "suspicious": { "noUndeclaredEnvVars": "off" } } }
+    }
+  ]
 }

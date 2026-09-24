@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
@@ -76,6 +77,22 @@ const config: NextConfig = {
    * chemin à l'envers.
    */
 };
+
+/*
+ * Construction autonome, pour l'archive qui se met à jour d'elle-même
+ * (`infra/release/autonome.mjs`, docs/hebergement-cpanel.md).
+ *
+ * `standalone` réunit dans `.next-autonome/standalone` le serveur et les
+ * seuls fichiers de node_modules qu'il charge : l'hébergement n'installe
+ * rien. Un dossier à part, pour que la construction ordinaire (`next start`,
+ * infra/prod, la CI) reste exactement ce qu'elle est. La racine de traçage
+ * est celle du dépôt : les paquets de l'espace de travail en font partie.
+ */
+if (process.env.GAMEDASHBOARD_AUTONOME === "1") {
+  config.output = "standalone";
+  config.distDir = ".next-autonome";
+  config.outputFileTracingRoot = join(process.cwd(), "..", "..");
+}
 
 // Sans argument, le plugin cherche `src/i18n/request.ts`.
 export default createNextIntlPlugin()(config);

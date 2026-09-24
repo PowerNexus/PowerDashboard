@@ -2,6 +2,8 @@ node_modules/
 .pnpm-store/
 .turbo/
 .next/
+# Construction autonome de l'interface (archive qui se met à jour seule).
+.next-autonome/
 dist/
 out/
 coverage/
