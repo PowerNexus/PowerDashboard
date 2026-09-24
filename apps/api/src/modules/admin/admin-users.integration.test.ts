@@ -309,6 +309,25 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
     await expect(actions.impersonationTarget(admin.id, client.id)).rejects.toThrow(/suspendu/);
   });
 
+  it("refuse la prise en main d'un revendeur", async () => {
+    // NC-06 : l'agent agissait sous le nom du revendeur — consentement de
+    // provisionnement, clés, suppression de serveurs —, imputé au revendeur.
+    const admin = await account({ role: "admin" });
+    const reseller = await account({ role: "reseller" });
+
+    const actions = new AdminActionsService(
+      db,
+      wings as unknown as WingsClientService,
+      sessionsRepo,
+      { emit: async () => undefined } as unknown as WebhookEmitterService,
+      new WingsTokenService(db),
+      {} as S3Service,
+    );
+    await expect(actions.impersonationTarget(admin.id, reseller.id)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
   it("éteint les liens de réinitialisation déjà envoyés", async () => {
     const admin = await account({ role: "admin" });
     const client = await account({ password: "phrase-de-passe-solide-42" });

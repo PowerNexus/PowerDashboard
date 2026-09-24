@@ -17,6 +17,7 @@ import { AdminActionsService } from "../admin/admin-actions.service";
 import { StaffTwoFactorGuard } from "../admin/staff-2fa.guard";
 import { ApplicationKeysService } from "../application/application-keys.service";
 import { ResellerScopeService } from "../application/reseller-scope.service";
+import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { ServerResizeService } from "../client/server-resize.service";
@@ -84,7 +85,13 @@ type ResellerRequest = AuthenticatedRequest & { ip?: string };
 @Controller("api/v1/reseller")
 // Même exigence de seconde preuve que pour le personnel (§5.1) : un revendeur
 // tient le parc de ses clients, un mot de passe seul ne suffit pas.
-@UseGuards(SessionGuard, ResellerGuard, StaffTwoFactorGuard)
+//
+// Lecture seule en prise en main, comme l'espace client : sans ce garde, un
+// agent entré chez un revendeur se donnait le consentement de provisionnement,
+// émettait une clé ou supprimait un serveur, et le journal l'imputait au
+// revendeur. La cible est refusée en amont (`impersonationTarget`) ; ce garde
+// tient le cas d'une session empruntée devenue celle d'un revendeur en route.
+@UseGuards(SessionGuard, ResellerGuard, StaffTwoFactorGuard, ImpersonationReadOnlyGuard)
 export class ResellerController {
   constructor(
     @Inject(ResellerService) private readonly reseller: ResellerService,

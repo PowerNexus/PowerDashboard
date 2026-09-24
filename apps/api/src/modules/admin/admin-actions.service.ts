@@ -216,6 +216,21 @@ export class AdminActionsService {
         "La prise en main ne vaut que pour un compte client : un membre du personnel ne se regarde pas depuis le compte d'un autre.",
       );
     }
+    /*
+     * Un revendeur non plus.
+     *
+     * Son compte gouverne le parc de ses clients : consentement au
+     * provisionnement par la plateforme, clés de sa boutique, suppression de
+     * serveurs. L'espace revendeur est désormais en lecture seule pendant une
+     * prise en main, mais la lecture elle-même montre les clients d'un tiers
+     * sous son nom ; l'administration voit déjà ce parc depuis `/admin`, sous
+     * le sien.
+     */
+    if (target.role === "reseller") {
+      throw new ForbiddenException(
+        "La prise en main ne vaut que pour un compte client : le parc d'un revendeur se consulte depuis l'administration.",
+      );
+    }
 
     return { id: target.id, email: target.email };
   }
