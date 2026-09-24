@@ -31,7 +31,8 @@ import type { AuthenticatedRequest } from "./session.guard";
  * SFTP durable au nom du client. Seuls `logout` et `impersonation/stop` en
  * sont exempts, puisqu'ils ferment la prise en main. Les routes
  * d'administration sont hors d'atteinte de toute façon : la session porte le
- * rôle du client.
+ * rôle du client, et `AdminGuard` refuse une session empruntée même quand la
+ * cible a été promue en cours de route.
  */
 @Injectable()
 export class ImpersonationReadOnlyGuard implements CanActivate {

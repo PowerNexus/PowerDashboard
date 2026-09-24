@@ -1,6 +1,7 @@
 import {
   type CanActivate,
   type ExecutionContext,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -49,6 +50,22 @@ export class AdminGuard implements CanActivate {
       request.user !== undefined &&
       ADMIN_ROLES.has(request.user.role)
     ) {
+      /*
+       * Une session empruntée n'entre pas, quel que soit le rôle qu'elle porte.
+       *
+       * La prise en main ne s'ouvre que sur un compte client, mais le rôle est
+       * relu à chaque requête : qu'un autre administrateur promeuve la cible
+       * pendant l'emprunt, et la session de l'agent devenait celle d'un
+       * administrateur — des écritures dans `/admin` sous le nom de la cible,
+       * sans rien au journal qui dise qui les a faites (doute D-5 du rapport
+       * ASVS). 403 et non 404 : derrière la session, c'est un membre du
+       * personnel, qui connaît l'espace et doit comprendre le refus.
+       */
+      if (request.user.impersonator) {
+        throw new ForbiddenException(
+          "Session de prise en main : l'administration se consulte depuis votre propre session. Rendez la main d'abord.",
+        );
+      }
       return true;
     }
 
