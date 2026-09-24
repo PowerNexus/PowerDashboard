@@ -12,6 +12,9 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
+  // Le tsconfig de Next dit `jsx: preserve` (Next compile lui-même) : ici,
+  // c'est au lanceur de transformer le JSX d'une page qu'un test importe.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",

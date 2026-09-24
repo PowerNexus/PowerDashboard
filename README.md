@@ -90,9 +90,9 @@ transfert entre deux daemons, rotation du jeton de node, planificateur).
 La référence de l'API se lit sur l'écran `/admin/api` et dans
 [openapi.json](./openapi.json), tous deux tirés du même catalogue
 ([ADR 0003](./docs/adr/0003-catalogue-api-source-unique.md)). La palette de
-commandes s'ouvre avec `Ctrl+K`. L'écran `/design` montre tous les composants
+commandes s'ouvre avec `Ctrl+K`. En développement, l'écran `/design` montre tous les composants
 dans les deux thèmes, sur des données de démonstration (`apps/web/src/lib/mock.ts`,
-son seul lecteur).
+son seul lecteur) ; en production, il répond « introuvable » et sort de la navigation.
 
 ### Composants de `@gamedashboard/ui`
 

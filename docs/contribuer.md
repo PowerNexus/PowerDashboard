@@ -66,7 +66,8 @@ diverger.
   organisme manque.
 - **Aucune couleur en dur** : uniquement les tokens de
   `packages/ui/src/styles/tokens.css`. Chaque composant doit fonctionner dans
-  les deux thèmes, et la vitrine `/design` sert à le vérifier.
+  les deux thèmes, et la vitrine `/design` sert à le vérifier, en
+  développement (`pnpm dev`) : en production elle répond « introuvable ».
 - `SelectMenu` plutôt que `<select>`, `RelativeTime` pour toute date relative
   (voir le README).
 - **Textes** : le français fait foi dans `packages/i18n/src/messages/fr.json`.
