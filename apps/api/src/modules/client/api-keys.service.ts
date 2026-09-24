@@ -1,8 +1,14 @@
 import { generateApiKey, isAllowlistEntry } from "@gamedashboard/auth";
 import { SERVER_PERMISSIONS, type ServerPermission } from "@gamedashboard/contracts";
-import { apiKeys, type Database } from "@gamedashboard/db";
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { apiKeys, type Database, users } from "@gamedashboard/db";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 export interface ClientApiKey {
@@ -26,6 +32,22 @@ export interface ClientApiKey {
  * an, comme les clés applicatives.
  */
 export const CLIENT_KEY_MAX_DAYS = 365;
+
+/**
+ * Clés actives au plus par compte, personnelles comme applicatives (audit
+ * ASVS, NC-38).
+ *
+ * Sans plafond, une session volée ou un script en boucle semait des clés sans
+ * limite, chacune une porte de plus à retrouver et à fermer. Vingt couvre
+ * largement un usage réel — un bot, quelques scripts, une clé par machine — et
+ * une clé révoquée ou échue libère sa place.
+ */
+export const ACTIVE_KEYS_MAX = 20;
+
+/** Message du refus, le même pour les deux sortes de clés. */
+export function activeKeysLimitMessage(): string {
+  return `Ce compte a déjà ${ACTIVE_KEYS_MAX} clés actives, le plafond. Révoquez-en une avant d'en créer une autre.`;
+}
 
 @Injectable()
 export class ApiKeysService {
@@ -108,18 +130,40 @@ export class ApiKeysService {
 
     const generated = generateApiKey("live");
 
-    const [row] = await this.db
-      .insert(apiKeys)
-      .values({
-        userId,
-        name: name.trim(),
-        prefix: generated.prefix,
-        keyHash: generated.hash,
-        scopes: [...new Set(scopes)],
-        allowedIps,
-        expiresAt,
-      })
-      .returning();
+    const row = await this.db.transaction(async (tx) => {
+      /*
+       * Compter et insérer sous le verrou du compte : sans lui, des créations
+       * simultanées comptaient toutes sous le plafond et passaient toutes.
+       */
+      await tx.execute(sql`select 1 from ${users} where ${users.id} = ${userId} for update`);
+      const [actives] = await tx
+        .select({ n: count() })
+        .from(apiKeys)
+        .where(
+          and(
+            eq(apiKeys.userId, userId),
+            isNull(apiKeys.revokedAt),
+            or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`)),
+          ),
+        );
+      if ((actives?.n ?? 0) >= ACTIVE_KEYS_MAX) {
+        throw new ConflictException(activeKeysLimitMessage());
+      }
+
+      const [inserted] = await tx
+        .insert(apiKeys)
+        .values({
+          userId,
+          name: name.trim(),
+          prefix: generated.prefix,
+          keyHash: generated.hash,
+          scopes: [...new Set(scopes)],
+          allowedIps,
+          expiresAt,
+        })
+        .returning();
+      return inserted;
+    });
 
     if (!row) throw new BadRequestException("Clé non enregistrée.");
 

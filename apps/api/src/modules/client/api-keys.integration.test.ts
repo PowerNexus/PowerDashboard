@@ -1,5 +1,6 @@
-import type { Database } from "@gamedashboard/db";
-import { sql } from "drizzle-orm";
+import { apiKeys, type Database } from "@gamedashboard/db";
+import { ConflictException } from "@nestjs/common";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedUser } from "../../test/fixtures";
 import {
@@ -7,7 +8,7 @@ import {
   HAS_DATABASE,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
-import { ApiKeysService, CLIENT_KEY_MAX_DAYS } from "./api-keys.service";
+import { ACTIVE_KEYS_MAX, ApiKeysService, CLIENT_KEY_MAX_DAYS } from "./api-keys.service";
 
 const JOUR_MS = 86_400_000;
 
@@ -76,6 +77,53 @@ describe.skipIf(!HAS_DATABASE)("clés d'API personnelles (intégration)", () => 
     it("refuse un préfixe nul, qui ne restreindrait rien", async () => {
       await expect(creer(["0.0.0.0/0"])).rejects.toThrow(/0\.0\.0\.0\/0/);
       await expect(creer(["::/0"])).rejects.toThrow(/::\/0/);
+    });
+  });
+
+  /*
+   * Non-régression (audit ASVS, NC-38) : aucun plafond. Une session volée,
+   * ou un script en boucle, semait des clés sans limite ; chacune est une
+   * porte de plus à retrouver et à fermer.
+   */
+  describe("plafond de clés actives", () => {
+    const creer = (nom = "Bot") => keys.create(userId, nom, ["console.read"], []);
+
+    it("refuse la vingt et unième clé active, en le disant", async () => {
+      for (let i = 0; i < ACTIVE_KEYS_MAX; i += 1) await creer(`Bot ${i}`);
+
+      const refus = creer("Une de trop");
+      await expect(refus).rejects.toBeInstanceOf(ConflictException);
+      await expect(refus).rejects.toThrow(/20 clés actives/);
+    });
+
+    it("ne compte ni les clés révoquées, ni les clés échues, ni celles d'un autre compte", async () => {
+      const cles = [];
+      for (let i = 0; i < ACTIVE_KEYS_MAX; i += 1) cles.push(await creer(`Bot ${i}`));
+
+      await keys.revoke(userId, cles[0]?.key.id as string);
+      await creer("Remplaçante");
+      await db
+        .update(apiKeys)
+        .set({ expiresAt: new Date(Date.now() - 1000).toISOString() })
+        .where(eq(apiKeys.id, cles[1]?.key.id as string));
+      await creer("Remplaçante bis");
+
+      const autre = await seedUser(db);
+      await expect(keys.create(autre, "Bot", ["console.read"], [])).resolves.toBeDefined();
+    });
+
+    it("tient sous des créations simultanées", async () => {
+      // Compter puis insérer sans verrou laissait passer toutes les demandes
+      // parallèles arrivées sous le plafond.
+      const issues = await Promise.allSettled(
+        Array.from({ length: ACTIVE_KEYS_MAX + 5 }, (_, i) => creer(`Bot ${i}`)),
+      );
+
+      expect(issues.filter((issue) => issue.status === "fulfilled")).toHaveLength(ACTIVE_KEYS_MAX);
+      const [{ n }] = (await db.execute(
+        sql`select count(*)::int as n from api_keys where user_id = ${userId}`,
+      )) as unknown as [{ n: number }];
+      expect(n).toBe(ACTIVE_KEYS_MAX);
     });
   });
 });

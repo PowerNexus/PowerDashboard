@@ -1,6 +1,6 @@
-import type { Database } from "@gamedashboard/db";
-import { BadRequestException } from "@nestjs/common";
-import { sql } from "drizzle-orm";
+import { applicationKeys, type Database, users } from "@gamedashboard/db";
+import { BadRequestException, ConflictException } from "@nestjs/common";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { seedUser } from "../../test/fixtures";
 import {
@@ -8,6 +8,7 @@ import {
   HAS_DATABASE,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import { ACTIVE_KEYS_MAX } from "../client/api-keys.service";
 import { ApplicationKeysService } from "./application-keys.service";
 
 describe.skipIf(!HAS_DATABASE)("clés applicatives (intégration)", () => {
@@ -56,6 +57,57 @@ describe.skipIf(!HAS_DATABASE)("clés applicatives (intégration)", () => {
     it("refuse un préfixe nul, qui ne restreindrait rien", async () => {
       await expect(creer(["0.0.0.0/0"])).rejects.toThrow(/0\.0\.0\.0\/0/);
       await expect(creer(["::/0"])).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  /*
+   * Non-régression (audit ASVS, NC-38) : aucun plafond. Un revendeur, ou sa
+   * clé de gestion détournée, émettait des clés sans limite.
+   */
+  describe("plafond de clés actives", () => {
+    const emettre = (resellerId?: string) =>
+      keys.create(adminId, { name: "Intégration", scopes: ["servers.read"], resellerId });
+
+    async function revendeur(): Promise<string> {
+      const id = await seedUser(db);
+      await db.update(users).set({ role: "reseller" }).where(eq(users.id, id));
+      return id;
+    }
+
+    it("refuse la vingt et unième clé active d'un revendeur, sans toucher aux autres", async () => {
+      const a = await revendeur();
+      const b = await revendeur();
+      for (let i = 0; i < ACTIVE_KEYS_MAX; i += 1) await emettre(a);
+
+      const refus = emettre(a);
+      await expect(refus).rejects.toBeInstanceOf(ConflictException);
+      await expect(refus).rejects.toThrow(/20 clés actives/);
+      // Le plafond est celui du compte : un autre revendeur, ou la plateforme,
+      // émettent toujours.
+      await expect(emettre(b)).resolves.toBeDefined();
+      await expect(emettre()).resolves.toBeDefined();
+    });
+
+    it("ne compte ni les clés révoquées, ni les clés échues", async () => {
+      const a = await revendeur();
+      const emises = [];
+      for (let i = 0; i < ACTIVE_KEYS_MAX; i += 1) emises.push(await emettre(a));
+
+      await keys.revoke(emises[0]?.key.id as string, a);
+      await emettre(a);
+      await db
+        .update(applicationKeys)
+        .set({ expiresAt: new Date(Date.now() - 1000).toISOString() })
+        .where(eq(applicationKeys.id, emises[1]?.key.id as string));
+      await expect(emettre(a)).resolves.toBeDefined();
+    });
+
+    it("plafonne aussi les clés de la plateforme, sous des émissions simultanées", async () => {
+      const issues = await Promise.allSettled(
+        Array.from({ length: ACTIVE_KEYS_MAX + 5 }, () => emettre()),
+      );
+
+      expect(issues.filter((issue) => issue.status === "fulfilled")).toHaveLength(ACTIVE_KEYS_MAX);
     });
   });
 });
