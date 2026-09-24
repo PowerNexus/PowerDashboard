@@ -148,6 +148,41 @@ describe("jeton du lien de facturation", () => {
 });
 
 /**
+ * Les routes du daemon sont limitées, sans gêner Wings (NC-49).
+ *
+ * `/api/remote/` était le seul préfixe exposé sans `limit_req` : un jeton
+ * éprouvé en boucle, ou un node qui s'emballe, payait chaque requête en
+ * lecture de base. La limite doit pourtant laisser passer le trafic légitime
+ * d'un daemon — l'inventaire paginé en parallèle à son démarrage, une
+ * configuration relue par serveur démarré, le journal d'activité par lots —
+ * et surtout **ne pas lui répondre 429** : Wings abandonne sur tout 4xx et
+ * ne rejoue que les 5xx. Un compte rendu de sauvegarde refusé en 429 lui
+ * ferait effacer l'archive ; en 503, il réessaie quelques secondes plus tard.
+ */
+describe("limitation des routes du daemon", () => {
+  const bloc = /location \/api\/remote\/ \{([^}]*)\}/.exec(directives)?.[1] ?? "";
+
+  it("pose une limite par adresse sur /api/remote/", () => {
+    expect(bloc).not.toBe("");
+    expect(bloc).toMatch(/^\s*limit_req\s+zone=gd_remote\s/m);
+    expect(directives).toMatch(/^limit_req_zone \$binary_remote_addr zone=gd_remote:/m);
+  });
+
+  it("laisse passer le démarrage d'un node chargé", () => {
+    const rate = /zone=gd_remote:\S+\s+rate=(\d+)r\/s;/.exec(directives)?.[1];
+    const burst = /limit_req\s+zone=gd_remote\s+burst=(\d+)\s+nodelay;/.exec(bloc)?.[1];
+    // Des dizaines de serveurs démarrés d'un coup, plus l'inventaire paginé :
+    // plusieurs centaines de requêtes en rafale, puis un débit soutenu.
+    expect(Number(rate)).toBeGreaterThanOrEqual(10);
+    expect(Number(burst)).toBeGreaterThanOrEqual(200);
+  });
+
+  it("refuse en 503, que Wings rejoue, et non en 429, qu'il abandonne", () => {
+    expect(bloc).toMatch(/^\s*limit_req_status\s+503;/m);
+  });
+});
+
+/**
  * Le contrôle de fin de livraison reconnaît l'écran d'erreur à son titre.
  *
  * Chaque page embarque le catalogue de traductions, où ce titre figure en
