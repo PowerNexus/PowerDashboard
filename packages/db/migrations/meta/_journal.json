@@ -295,6 +295,13 @@
       "when": 1790203727958,
       "tag": "0041_backup_bytes_bigint",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790263637617,
+      "tag": "0042_users_email_lower_unique",
+      "breakpoints": true
     }
   ]
 }

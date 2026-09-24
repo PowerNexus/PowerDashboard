@@ -333,7 +333,10 @@ export class SsoService {
     const [created] = await this.db
       .insert(users)
       .values({
-        email: profile.email,
+        // En minuscules, comme toutes les autres écritures : l'unicité et
+        // chaque lecture comparent en `lower()`, et une adresse gardée telle
+        // que le fournisseur l'a écrite finissait par côtoyer sa jumelle.
+        email: profile.email.toLowerCase(),
         // Aucun mot de passe local : le compte n'existe que par le
         // fournisseur. Une chaîne vide serait un condensat valide au sens du
         // type et ouvrirait une connexion sans secret.
@@ -398,8 +401,8 @@ export class SsoService {
         ...(profile.nameLast ? { nameLast: profile.nameLast } : {}),
         // L'adresse ne bouge que si le fournisseur atteste l'avoir vérifiée :
         // sans cela, il pourrait réécrire un compte sur une adresse qui n'est
-        // pas à son titulaire.
-        ...(profile.email && profile.emailVerified ? { email: profile.email } : {}),
+        // pas à son titulaire. En minuscules, comme à la création.
+        ...(profile.email && profile.emailVerified ? { email: profile.email.toLowerCase() } : {}),
         // `lastLoginAt` n'est **pas** touché ici : c'est `issueSession` qui le
         // pose, pour toutes les façons d'entrer. Deux écrivains pour la même
         // colonne finiraient par se contredire, et l'un des deux resterait en

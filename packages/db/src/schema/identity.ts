@@ -93,8 +93,10 @@ export const users = pgTable(
   (table) => [
     // L'unicité est insensible à la casse : « Paul@ex.fr » et « paul@ex.fr »
     // désignent la même boîte, et deux comptes pour une même adresse
-    // rendraient le rapprochement SSO ambigu.
-    uniqueIndex("users_email_unique").on(table.email),
+    // rendraient le rapprochement SSO ambigu. L'index portait sur la colonne
+    // brute, sensible à la casse, alors que toutes les lectures comparent en
+    // `lower()` (NC-28, migration 0042).
+    uniqueIndex("users_email_unique").on(sql`lower(${table.email})`),
     uniqueIndex("users_external_id_unique").on(table.externalId),
   ],
 );
