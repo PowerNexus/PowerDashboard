@@ -241,6 +241,21 @@ jobs:
           GD_PASSWORD="$E2E_PASSWORD" \
             pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
 
+      # La seconde preuve du personnel est exigée par défaut (rapport ASVS,
+      # NC-10), et le compte d'essai est administrateur : la suite, qui visite
+      # l'administration (captures, accessibilité, Lighthouse), tomberait sur
+      # « seconde preuve exigée ». Levée pour cette base jetable seule, plutôt
+      # qu'un TOTP enrôlé dans la fixture : l'anti-rejeu refuse le même code
+      # deux fois dans une fenêtre de trente secondes, et la suite se connecte
+      # à chaque test. Le produit garde son défaut ; `staff-2fa.guard.test.ts`
+      # et `platform-settings.test.ts` le tiennent.
+      - name: Seconde preuve du personnel levée pour la base d'essai
+        run: |
+          docker exec ${{ job.services.postgres.id }} \
+            psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c \
+            "insert into settings (key, value) values ('security.staffRequires2fa', 'false'::jsonb)
+             on conflict (key) do update set value = excluded.value"
+
       - name: Construire
         run: pnpm build
 

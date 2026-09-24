@@ -334,7 +334,10 @@ mot de passe affichés.
    authentification › Activer*. Scannez le QR code avec une application
    (Aegis, 2FAS, Google Authenticator, 1Password…), et **gardez les codes de
    secours** : ce sont eux qui vous rouvrent le compte si le téléphone est
-   perdu.
+   perdu. **L'administration reste fermée tant que ce n'est pas fait** : la
+   seconde preuve est exigée du personnel (et des revendeurs) dès
+   l'installation, et l'espace d'administration vous renvoie ici en
+   attendant. Votre compte, lui, reste ouvert pour l'activer.
 3. **Configurer l'envoi de courriels** — *Administration › Paramètres ›
    Envoi d'e-mails* : hôte, port (587 en général), utilisateur et mot de
    passe du SMTP de votre fournisseur de messagerie. Puis *Tester l'envoi*.
@@ -342,9 +345,10 @@ mot de passe affichés.
    notifications restent muets.
 4. **Choisir qui peut créer un compte** — *Administration › Paramètres ›
    Sécurité et accès*. Les inscriptions publiques sont **fermées** par
-   défaut : seuls les comptes que vous créez existent. Activez aussi
-   *2FA obligatoire pour le personnel* dès que quelqu'un d'autre administre
-   le panel avec vous.
+   défaut : seuls les comptes que vous créez existent. *2FA obligatoire pour
+   le personnel* est **actif** par défaut : laissez-le ainsi. Un compte que
+   vous nommez administrateur, support ou revendeur devra activer sa propre
+   seconde preuve avant d'entrer dans son espace.
 
 **Facultatif : « Se connecter avec Google ».** Un bouton au-dessus du
 formulaire, pour qui préfère son compte Google au mot de passe :
@@ -585,6 +589,7 @@ régénèrent jamais un secret existant.
 | Page « 502 Bad Gateway » | Un service est arrêté | `gamedashboard status`, puis `gamedashboard logs`. `gamedashboard start` le relance. |
 | L'API ne démarre pas, journal : `APP_SECRET_KEY` | Fichier `/opt/gamedashboard/env/api.env` abîmé | Remettre `env/` depuis une sauvegarde (§ 8, *Restaurer*). **Ne jamais générer une nouvelle clé** : voir le [runbook de la clé maître](./runbooks/cle-maitre-secrets.md). |
 | Mot de passe administrateur perdu | — | `gamedashboard password moi@mondomaine.fr` : un nouveau mot de passe s'affiche une fois. La double authentification et les sessions ouvertes sont conservées. |
+| « Seconde preuve exigée » à l'entrée de l'administration | Le compte n'a pas encore de double authentification, exigée du personnel par défaut (y compris après une mise à jour d'un panel qui ne l'imposait pas) | *Compte › Sécurité › Double authentification › Activer*, puis revenir à l'administration. |
 | Le node reste « Injoignable » | Wings arrêté, port 8080 fermé, ou nom de domaine différent entre le node et le certificat | Sur le node : `journalctl -u wings -n 50`. Voir aussi le [runbook machine injoignable](./runbooks/machine-injoignable.md). |
 | `wings configure` répond 401 ou 403 | Clé expirée (trente minutes) ou déjà utilisée | *Configurer le daemon › Émettre une nouvelle clé*. |
 | La console d'un serveur reste vide | Node déclaré en `http` alors que le panel est en `https`, ou proxy Cloudflare actif | Déclarer le node en `https` ; nuage gris sur Cloudflare. |

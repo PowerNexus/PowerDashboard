@@ -90,6 +90,16 @@ jobs:
           GD_PASSWORD="$E2E_PASSWORD" \
             pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
 
+      # Comme dans ci.yml : la seconde preuve du personnel, exigée par défaut,
+      # est levée pour cette base jetable seule, sans quoi chaque capture de
+      # l'administration montrerait « seconde preuve exigée ».
+      - name: Seconde preuve du personnel levée pour la base d'essai
+        run: |
+          docker exec ${{ job.services.postgres.id }} \
+            psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c \
+            "insert into settings (key, value) values ('security.staffRequires2fa', 'false'::jsonb)
+             on conflict (key) do update set value = excluded.value"
+
       - name: Construire
         run: pnpm build
 

@@ -456,7 +456,7 @@ fi
 cat <<EOF
   À faire maintenant (détails dans docs/installation.md) :
     1. Se connecter, changer le mot de passe, activer la double authentification
-       (Compte › Sécurité).
+       (Compte › Sécurité) : l'administration l'exige avant de s'ouvrir.
     2. Configurer l'envoi de courriels (Administration › Paramètres).
     3. Installer Wings sur la machine qui fera tourner les jeux :
          gamedashboard wings   (sur cette machine), ou sur une autre :

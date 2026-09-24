@@ -43,12 +43,13 @@ describe("marque de la plateforme", () => {
 describe("défauts des réglages de sécurité", () => {
   const ATTENDUS: Record<string, boolean> = {
     /*
-     * Ouvert : verrouiller l'administration d'un panel neuf était le contraire
-     * de ce qu'on voulait. Le premier compte est administrateur, il n'a pas
-     * encore de seconde preuve, et l'espace qui permet d'en poser une est
-     * celui que la règle ferme.
+     * Exigée (rapport ASVS, NC-10) : le compte le plus puissant de la
+     * plateforme ne reste pas derrière un seul mot de passe. Le premier
+     * administrateur n'est pas enfermé dehors pour autant — l'enrôlement vit
+     * dans l'espace de compte, que `StaffTwoFactorGuard` ne ferme pas
+     * (`staff-2fa.guard.test.ts`), et l'administration y renvoie.
      */
-    "security.staffRequires2fa": false,
+    "security.staffRequires2fa": true,
     /*
      * Fermé : un panel qui s'installe avec sa page d'inscription ouverte au
      * monde est un panel dont le premier compte n'est pas forcément le vôtre.

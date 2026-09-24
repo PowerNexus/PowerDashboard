@@ -407,6 +407,22 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  it("lèvent la seconde preuve du personnel sur la base d'essai, avant la suite", () => {
+    // Exigée par défaut (NC-10), et le compte d'essai est administrateur : sans
+    // cette étape, chaque écran d'administration visité par la suite serait
+    // l'explication « seconde preuve exigée », captures comprises.
+    const [ci, , captures] = workflows as [string, string, string];
+    for (const [nom, texte] of [
+      ["ci.yml", ci],
+      ["captures.yml", captures],
+    ] as const) {
+      const levee = texte.indexOf("values ('security.staffRequires2fa', 'false'::jsonb)");
+      const suite = texte.search(/run: pnpm e2e|playwright test/);
+      expect(levee, nom).toBeGreaterThan(0);
+      expect(suite, nom).toBeGreaterThan(levee);
+    }
+  });
+
   it("ne reprennent pas une trivy-action antérieure au correctif 0.35.0", () => {
     const texte = workflows.join("\n");
     const versions = [...texte.matchAll(/aquasecurity\/trivy-action@\S+ # v?(\d+)\.(\d+)/g)];

@@ -165,6 +165,12 @@ justifie après un changement structurel, et avant de pousser.
   - **les régressions visuelles** (`e2e/visuel.spec.ts`) : chaque écran
     comparé à sa capture de référence, bureau et mobile.
 
+  Le compte d'essai est administrateur, et la seconde preuve du personnel est
+  exigée par défaut : la CI la lève pour sa base jetable seule (étape
+  « Seconde preuve du personnel levée » de `ci.yml`). Sur une base locale
+  jetable, même geste avant `pnpm e2e` :
+  `insert into settings (key, value) values ('security.staffRequires2fa', 'false')`.
+
 On teste ce qui a des règles (seuils, précédences, permissions, formats) ; le
 rendu, lui, n'est tenu que par les captures.
 
