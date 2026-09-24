@@ -423,6 +423,20 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  /*
+   * Sans `permissions:`, le jeton du workflow reçoit les droits par défaut du
+   * dépôt — écriture comprise selon son réglage — et ci.yml le tendait à
+   * Semgrep, conteneur root, sur une machine à nous. La lecture seule se pose
+   * en tête ; un job qui a besoin de plus le déclare lui-même, avec sa raison.
+   */
+  it("ne donnent au jeton que la lecture du dépôt, en tête de chaque workflow", () => {
+    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml"].map(
+      (fichier, rang) => [fichier, workflows[rang] ?? ""] as const,
+    )) {
+      expect(texte, nom).toMatch(/^permissions:\n {2}contents: read\n\n/m);
+    }
+  });
+
   it("ne reprennent pas une trivy-action antérieure au correctif 0.35.0", () => {
     const texte = workflows.join("\n");
     const versions = [...texte.matchAll(/aquasecurity\/trivy-action@\S+ # v?(\d+)\.(\d+)/g)];
