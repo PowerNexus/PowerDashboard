@@ -1,6 +1,6 @@
 import "server-only";
 import { type NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE } from "@/server/api/client";
+import { AUTH_COOKIE_OPTIONS, SECURE_COOKIES, SESSION_COOKIE } from "@/lib/session-cookie";
 import {
   CEREMONY_COOKIE,
   type Ceremony,
@@ -42,7 +42,7 @@ export async function beginCeremony(ceremony: Ceremony): Promise<NextResponse> {
     // `lax` et non `strict` : le retour du fournisseur est une navigation
     // venue d'un autre site, et `strict` empêcherait le cookie de repartir.
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: SECURE_COOKIES,
     // La cérémonie dure le temps de saisir des identifiants chez le
     // fournisseur. Au-delà, mieux vaut recommencer proprement.
     maxAge: 10 * 60,
@@ -154,7 +154,7 @@ export async function finishCeremony(
       path: "/login",
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: SECURE_COOKIES,
       // Même durée que le défi lui-même.
       maxAge: 5 * 60,
     });
@@ -164,10 +164,7 @@ export async function finishCeremony(
   const token = setCookie?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
   if (token) {
     redirect.cookies.set(SESSION_COOKIE, token, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      ...AUTH_COOKIE_OPTIONS,
       maxAge: 7 * 24 * 60 * 60,
     });
   }

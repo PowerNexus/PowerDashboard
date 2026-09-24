@@ -20,7 +20,7 @@ import {
 import { ActivityService } from "../activity/activity.service";
 import { IMPERSONATION_RETURN_COOKIE, IMPERSONATION_TTL_MS } from "../auth/impersonation";
 import type { AuthenticatedRequest } from "../auth/session.guard";
-import { SESSION_COOKIE, SessionGuard } from "../auth/session.guard";
+import { authCookieOptions, SessionGuard, sessionCookie } from "../auth/session.guard";
 import { SessionRepository } from "../auth/session.repository";
 import { ServerResizeService } from "../client/server-resize.service";
 import { MailerService } from "../mail/mailer.service";
@@ -760,17 +760,11 @@ export class AdminController {
       // retour. Même protections que le cookie de session, et il meurt avec la
       // prise en main.
       .setCookie(IMPERSONATION_RETURN_COOKIE, request.sessionToken ?? "", {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        ...authCookieOptions(),
         maxAge: IMPERSONATION_TTL_MS / 1000,
       })
-      .setCookie(SESSION_COOKIE, token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+      .setCookie(sessionCookie(), token, {
+        ...authCookieOptions(),
         maxAge: IMPERSONATION_TTL_MS / 1000,
       })
       .send({ data: { account: target.email } });

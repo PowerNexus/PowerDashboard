@@ -1,6 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import { SecurityAlertService } from "./security-alert.service";
-import { SESSION_COOKIE } from "./session.guard";
+import { authCookieOptions, sessionCookie } from "./session.guard";
 import { SESSION_TTL_MS, SessionRepository } from "./session.repository";
 import { UserRepository } from "./user.repository";
 
@@ -127,15 +127,10 @@ export class SessionIssuerService {
      */
     const user = await this.sessions.resolve(token);
 
-    reply.setCookie(SESSION_COOKIE, token, {
-      path: "/",
-      // Inaccessible au JavaScript de la page : une XSS ne peut pas voler la
-      // session, seulement agir pendant que l'utilisateur est présent.
-      httpOnly: true,
-      // `lax` et non `strict` : `strict` casserait le retour depuis un
-      // fournisseur OAuth externe.
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+    reply.setCookie(sessionCookie(), token, {
+      // `httpOnly`, `lax`, et `Secure` dès que le panel est en HTTPS : la
+      // règle commune, qui dit pourquoi chacun (`contracts/auth-cookies.ts`).
+      ...authCookieOptions(),
       maxAge: SESSION_TTL_MS / 1000,
     });
 

@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { SESSION_COOKIE } from "@/lib/session-cookie";
+import { AUTH_COOKIE_OPTIONS, SESSION_COOKIE } from "@/lib/session-cookie";
 import { apiSend } from "./client";
 import { forwardedIdentityHeaders } from "./forwarded";
 
@@ -10,20 +10,6 @@ import { forwardedIdentityHeaders } from "./forwarded";
 const RETURN_COOKIE = "gd_return";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
-
-/**
- * Mêmes protections que le cookie posé à la connexion.
- *
- * Recopiées plutôt que déduites de la réponse : lire les attributs renvoyés
- * par l'API reviendrait à laisser celle-ci décider du `httpOnly` du navigateur,
- * et un attribut perdu en route ouvrirait la session au JavaScript de la page.
- */
-const COOKIE_OPTIONS = {
-  path: "/",
-  httpOnly: true,
-  sameSite: "lax",
-  secure: process.env.NODE_ENV === "production",
-} as const;
 
 /**
  * Déconnexion.
@@ -42,7 +28,9 @@ export async function signOut(): Promise<never> {
   await apiSend("/api/v1/auth/logout", {}).catch(() => undefined);
 
   const store = await cookies();
-  store.delete(SESSION_COOKIE);
+  // Avec ses attributs : un effacement sans `Secure` est ignoré pour un nom en
+  // `__Host-`, et le cookie révoqué restait dans le navigateur.
+  store.delete({ name: SESSION_COOKIE, ...AUTH_COOKIE_OPTIONS });
 
   redirect("/login");
 }
@@ -99,9 +87,10 @@ async function relayCookies(path: string, fallback: string): Promise<{ error: st
 
       const value = decodeURIComponent(rest.join("="));
       // Une valeur vide est un effacement : l'API vide le cookie de retour
-      // quand la prise en main se termine.
-      if (value === "") store.delete(name);
-      else store.set(name, value, COOKIE_OPTIONS);
+      // quand la prise en main se termine. Mêmes protections que le cookie
+      // posé à la connexion, effacement compris (`AUTH_COOKIE_OPTIONS`).
+      if (value === "") store.delete({ name, ...AUTH_COOKIE_OPTIONS });
+      else store.set(name, value, AUTH_COOKIE_OPTIONS);
     }
 
     return { error: null };

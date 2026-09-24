@@ -41,7 +41,7 @@ import { PasskeyRepository, type PasskeySummary } from "./passkey.repository";
 import { PasskeyService } from "./passkey.service";
 import { relyingPartyFromEnv } from "./relying-party";
 import { SecurityAlertService } from "./security-alert.service";
-import { SESSION_COOKIE, SessionGuard } from "./session.guard";
+import { authCookieOptions, SessionGuard, sessionCookie } from "./session.guard";
 import {
   SESSION_TTL_MS,
   SessionRepository,
@@ -559,21 +559,18 @@ export class AuthController {
     const returning = headerCookie(request, IMPERSONATION_RETURN_COOKIE);
     const staff = returning ? await this.sessions.resolve(returning) : null;
 
-    reply.clearCookie(IMPERSONATION_RETURN_COOKIE, { path: "/" });
+    reply.clearCookie(IMPERSONATION_RETURN_COOKIE, authCookieOptions());
 
     if (!staff || staff.id !== user.impersonator.id) {
       // Session de l'agent expirée ou fermée entre-temps : on le déconnecte
       // proprement plutôt que de le laisser sur un compte qui n'est pas le sien.
-      reply.clearCookie(SESSION_COOKIE, { path: "/" }).status(204).send(null);
+      reply.clearCookie(sessionCookie(), authCookieOptions()).status(204).send(null);
       return;
     }
 
     reply
-      .setCookie(SESSION_COOKIE, returning ?? "", {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+      .setCookie(sessionCookie(), returning ?? "", {
+        ...authCookieOptions(),
         maxAge: SESSION_TTL_MS / 1000,
       })
       .status(204)
@@ -584,7 +581,7 @@ export class AuthController {
   @UseGuards(SessionGuard)
   async logout(@Req() request: ClientRequest, @Res() reply: Reply): Promise<void> {
     if (request.sessionToken) await this.sessions.revoke(request.sessionToken);
-    reply.clearCookie(SESSION_COOKIE, { path: "/" }).status(204).send(null);
+    reply.clearCookie(sessionCookie(), authCookieOptions()).status(204).send(null);
   }
 
   @Get("me")
@@ -1886,7 +1883,7 @@ export class AuthController {
      * renverrait à chaque page un cookie que le serveur refuse, c'est-à-dire
      * une déconnexion qui n'a pas l'air d'en être une.
      */
-    if (wasCurrent) reply.clearCookie(SESSION_COOKIE, { path: "/" });
+    if (wasCurrent) reply.clearCookie(sessionCookie(), authCookieOptions());
     reply.status(204).send(null);
   }
 
