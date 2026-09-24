@@ -1,3 +1,4 @@
+import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type { ActivityService } from "../activity/activity.service";
 import type { AuthenticatedRequest } from "../auth/session.guard";
@@ -63,6 +64,17 @@ describe("POST command", () => {
     expect(consigne.event).toBe("server.command");
     expect(consigne.properties).toEqual({ command: "login", argumentsLength: 14 });
     expect(JSON.stringify(consigne)).not.toContain("hunter2");
+  });
+
+  it("refuse une commande démesurée, avant de consulter les droits", async () => {
+    // Seule borne jusqu'ici : le mégaoctet du corps Fastify, envoyé tel quel
+    // sur l'entrée du jeu.
+    const { controleur, wings, activity } = monter();
+    await expect(
+      controleur.command(requete, SERVEUR, { command: `say ${"x".repeat(9000)}` }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(wings.sendCommand).not.toHaveBeenCalled();
+    expect(activity.record).not.toHaveBeenCalled();
   });
 
   it("consigne une commande sans argument telle quelle, avec une longueur nulle", async () => {

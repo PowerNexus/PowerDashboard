@@ -1,6 +1,7 @@
 import {
   ChmodRequest,
   consoleCommandTrace,
+  MAX_CONSOLE_COMMAND_LENGTH,
   PATH_REFUSAL_MESSAGES,
   PowerSignal,
   RenameRequest,
@@ -158,6 +159,11 @@ export class ServerRuntimeController {
     const command = (body as { command?: unknown })?.command;
     if (typeof command !== "string" || command.trim() === "") {
       throw new BadRequestException("Commande vide.");
+    }
+    if (command.length > MAX_CONSOLE_COMMAND_LENGTH) {
+      throw new BadRequestException(
+        `Commande trop longue (${MAX_CONSOLE_COMMAND_LENGTH} caractères au plus).`,
+      );
     }
     await this.access.require(principalOf(request), id, "console.send");
     await this.access.requireOperable(id);

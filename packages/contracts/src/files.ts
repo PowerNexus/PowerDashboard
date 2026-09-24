@@ -197,9 +197,20 @@ const RENAME_REFUSAL_MESSAGES: Record<RenameRefusal, string> = {
   unchanged: "Le nouveau nom est identique à l'ancien.",
 };
 
+/**
+ * Longueur maximale d'un chemin, en caractères : `PATH_MAX` sous Linux, où
+ * tourne le daemon. Au-delà, le système le refuserait de toute façon — après
+ * un aller-retour et un message qui ne dirait rien.
+ */
+export const MAX_PATH_LENGTH = 4096;
+
 /** Corps de `POST /api/v1/client/servers/:id/files/rename`. */
 export const RenameRequest = z
-  .object({ root: z.string(), from: EntryName, to: z.string() })
+  .object({
+    root: z.string(),
+    from: EntryName,
+    to: z.string().max(MAX_PATH_LENGTH, "Nouveau nom trop long."),
+  })
   .superRefine((value, ctx) => {
     const refus = renameRefusal(value.from, value.to);
     if (refus) {

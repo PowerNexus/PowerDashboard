@@ -22,6 +22,15 @@ export interface ConsoleCommandTrace {
   argumentsLength: number;
 }
 
+/**
+ * Longueur maximale d'une commande de console, en caractères.
+ *
+ * La seule borne était le mégaoctet du corps Fastify, qui partait tel quel
+ * sur l'entrée du jeu. Huit mille caractères laissent passer un `tellraw` ou
+ * un `data merge` chargés, et rien de ce qu'un humain tape.
+ */
+export const MAX_CONSOLE_COMMAND_LENGTH = 8192;
+
 /** Au-delà, le « premier mot » est autre chose qu'un nom de commande. */
 const MAX_COMMAND_WORD = 64;
 

@@ -20,6 +20,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from "@nestjs/common";
+import { z } from "zod";
 import { requestOrigin } from "../../common/request-origin";
 import { ActivityService } from "../activity/activity.service";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
@@ -53,6 +54,17 @@ type ClientRequest = AuthenticatedRequest & {
   ip?: string;
   headers?: Record<string, string | string[] | undefined>;
 };
+
+/**
+ * Adresse d'un invité : une adresse, et non « quelque chose qui contient un
+ * @ ». `includes("@")` laissait partir `@` ou `a@` chercher un compte et
+ * fabriquer une invitation qui n'arriverait nulle part. Même forme que
+ * l'adresse d'un compte côté administration.
+ */
+const InviteEmail = z.string().trim().email().max(255);
+
+/** Longueur maximale d'une image Docker, comme dans l'éditeur d'eggs. */
+const MAX_DOCKER_IMAGE_LENGTH = 255;
 
 /** Décalage maximal d'une étape de tâche planifiée, en secondes (15 minutes, comme Pterodactyl). */
 const MAX_TASK_OFFSET_SECONDS = 900;
@@ -424,10 +436,13 @@ export class ServerFeaturesController {
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
-    const { email, permissions } = (body ?? {}) as { email?: unknown; permissions?: unknown };
-    if (typeof email !== "string" || !email.includes("@")) {
-      throw new BadRequestException("Adresse e-mail manquante.");
-    }
+    const { email: brute, permissions } = (body ?? {}) as {
+      email?: unknown;
+      permissions?: unknown;
+    };
+    const adresse = InviteEmail.safeParse(brute);
+    if (!adresse.success) throw new BadRequestException("Adresse e-mail invalide.");
+    const email = adresse.data;
     if (!Array.isArray(permissions)) throw new BadRequestException("Permissions manquantes.");
 
     await this.access.require(principalOf(request), id, "subusers.create");
@@ -732,6 +747,14 @@ export class ServerFeaturesController {
     const image = (body as { image?: unknown })?.image;
     if (typeof image !== "string" || image.trim() === "") {
       throw new BadRequestException("Image manquante.");
+    }
+    // Le service la cherche parmi celles de l'egg et refuserait l'inconnue ;
+    // la borne évite seulement de la chercher, et de la journaliser, à
+    // n'importe quelle taille.
+    if (image.length > MAX_DOCKER_IMAGE_LENGTH) {
+      throw new BadRequestException(
+        `Nom d'image trop long (${MAX_DOCKER_IMAGE_LENGTH} caractères au plus).`,
+      );
     }
 
     await this.access.require(principalOf(request), id, "startup.docker-image");

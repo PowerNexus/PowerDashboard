@@ -130,6 +130,12 @@ describe("cible d'un renommage", () => {
     expect(RenameRequest.safeParse({ root: "/", from: "a", to: "x/" }).success).toBe(false);
     expect(RenameRequest.parse({ root: "/", from: "a", to: " b " }).to).toBe("b");
   });
+
+  it("refuse une cible plus longue qu'un chemin Linux", () => {
+    expect(
+      RenameRequest.safeParse({ root: "/", from: "a", to: `b/${"c".repeat(5000)}` }).success,
+    ).toBe(false);
+  });
 });
 
 describe("chemin relayé au daemon", () => {
