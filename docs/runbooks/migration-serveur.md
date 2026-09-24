@@ -38,6 +38,11 @@ Le client est prévenu dans les deux cas (`server.transferred`,
 - **Le node d'arrivée ne doit pas être en maintenance**, sinon le panel refuse.
   Il doit aussi avoir **un port libre** : sinon, « Plus aucun port libre sur
   le node de destination ».
+- **Le node d'arrivée doit rester dans le périmètre du revendeur** du serveur :
+  une machine confiée à un autre revendeur est refusée (pour un serveur de la
+  plateforme aussi), et une machine partagée exige que le revendeur du serveur
+  y ait une part. Pour déménager chez un revendeur sans part, lui en poser une
+  d'abord (Administration › Nodes › Revendeurs).
 - **Vérifier la place à la main.** Le panel ne contrôle ni la mémoire ni le
   disque du node d'arrivée : sous Administration › Nodes, comparer la charge
   du node aux limites du serveur.
