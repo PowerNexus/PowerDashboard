@@ -11,6 +11,7 @@ import { ActivityService } from "../activity/activity.service";
 import type { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { issueChallenge } from "./login-challenge";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import type { SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
@@ -87,7 +88,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     const issuer = new SessionIssuerService(sessionsRepo, usersRepo, {
       afterSignIn: () => undefined,
     } as unknown as SecurityAlertService);
-    const args: unknown[] = Array.from({ length: 18 }, () => ({}));
+    const args: unknown[] = Array.from({ length: 19 }, () => ({}));
     args[0] = usersRepo;
     args[1] = sessionsRepo;
     args[2] = new ActivityService(db);
@@ -96,6 +97,10 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     args[8] = issuer;
     args[9] = new AuthTokenRepository(db);
     args[14] = { afterFailure: () => undefined };
+    // Le verrou des tentatives, que le second facteur consulte (NC-20, NC-29).
+    args[18] = new PasswordConfirmationService(usersRepo, {
+      afterFailure: () => undefined,
+    } as unknown as SecurityAlertService);
     return new (AuthController as unknown as new (...a: unknown[]) => AuthController)(...args);
   }
 

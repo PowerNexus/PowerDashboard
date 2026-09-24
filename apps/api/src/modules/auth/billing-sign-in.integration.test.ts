@@ -19,6 +19,7 @@ import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { readChallenge } from "./login-challenge";
+import { PasswordConfirmationService } from "./password-confirmation.service";
 import type { SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
@@ -109,6 +110,10 @@ describe.skipIf(!HAS_DATABASE)("connexion par le lien de la facturation (intégr
       // Les consoles de Wings : aucune n'est ouverte ici.
       {} as never,
       {} as never,
+      // Le verrou des tentatives, que le second facteur consulte.
+      new PasswordConfirmationService(usersRepo, {
+        afterFailure: () => undefined,
+      } as unknown as SecurityAlertService),
     );
   }, 60_000);
 

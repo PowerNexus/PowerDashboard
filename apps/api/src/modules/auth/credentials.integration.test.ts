@@ -184,6 +184,9 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       { accepts: async () => true } as never,
       alerts,
       {} as never,
+      // Les consoles de Wings : aucune n'est ouverte ici.
+      {} as never,
+      {} as never,
       confirmation,
     );
     account_ = new AccountController(apiKeys as never, {} as never, confirmation);

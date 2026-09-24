@@ -434,8 +434,10 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
 
   it("prévient l'ancienne adresse que le compte en a changé", async () => {
     const client = await account({ password: "phrase-de-passe-solide-42" });
+    const admin = await account({ role: "admin" });
 
     await accounts.update(
+      admin.id,
       client.id,
       {
         email: "remplacante@gamedashboard.test",
