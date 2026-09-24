@@ -135,6 +135,32 @@ export class ServerProvisioningService {
         ? await this.placeGuided(requester, input)
         : await this.placeExplicit(requester, mode, input);
 
+    /**
+     * L'enveloppe du revendeur, en plus de la capacité de la machine.
+     *
+     * Les deux contrôles sont distincts et aucun ne remplace l'autre : le node
+     * dit ce que le matériel peut porter, l'enveloppe ce que le revendeur a le
+     * droit de vendre. Un revendeur avec 64 Go de matériel et 32 Go
+     * d'enveloppe n'exploite que la moitié de sa machine — c'est le sujet même
+     * du quota, pas un effet de bord.
+     *
+     * Le plafond visé est celui du **revendeur auquel le serveur se rattache**,
+     * et non celui du demandeur : un serveur créé par l'administration sur la
+     * machine d'un revendeur est compté dans sa consommation, il doit donc
+     * l'être aussi dans son refus. C'est mot pour mot la règle écrite en base à
+     * la ligne `resellerId` — un quota qui compterait autrement que ce qu'il
+     * refuse se tromperait forcément d'un côté ou de l'autre.
+     *
+     * **Ici, et non dans le placement explicite seul.** Il y vivait, si bien
+     * que la commande guidée passée pour un revendeur (offre, localisation)
+     * naissait rattachée à lui sans que son enveloppe soit jamais consultée :
+     * sa boutique vendait au-delà de `memoryMb`, `diskMb` et `serversMax`. Un
+     * seul contrôle, après les deux placements, ne peut plus oublier l'un.
+     */
+    if (resellerId) {
+      await this.quotas.assertRoom(resellerId, { memoryMb: plan.memoryMb, diskMb: plan.diskMb });
+    }
+
     const serverId = randomUUID();
 
     /**
@@ -569,26 +595,9 @@ export class ServerProvisioningService {
       throw new ConflictException(`Il ne reste que ${node.freeDiskMb} Mo de disque sur ce node.`);
     }
 
-    /**
-     * L'enveloppe du revendeur, en plus de la capacité de la machine.
-     *
-     * Les deux contrôles sont distincts et aucun ne remplace l'autre : le node
-     * dit ce que le matériel peut porter, l'enveloppe ce que le revendeur a le
-     * droit de vendre. Un revendeur avec 64 Go de matériel et 32 Go
-     * d'enveloppe n'exploite que la moitié de sa machine — c'est le sujet même
-     * du quota, pas un effet de bord.
-     *
-     * Le plafond visé est celui du **revendeur auquel le serveur se rattache**,
-     * et non celui du demandeur : un serveur créé par l'administration sur la
-     * machine d'un revendeur est compté dans sa consommation, il doit donc
-     * l'être aussi dans son refus. C'est mot pour mot la règle écrite en base à
-     * la ligne `resellerId` — un quota qui compterait autrement que ce qu'il
-     * refuse se tromperait forcément d'un côté ou de l'autre.
-     */
+    // L'enveloppe du revendeur est vérifiée par `create`, pour les deux
+    // placements à la fois.
     const resellerId = this.attribution(requester, node.ownerId);
-    if (resellerId) {
-      await this.quotas.assertRoom(resellerId, input.resources);
-    }
 
     /**
      * Une offre synthétique porte les quantités choisies.
