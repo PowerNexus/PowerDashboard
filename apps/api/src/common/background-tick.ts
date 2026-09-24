@@ -30,6 +30,13 @@ export function battre(logger: Logger, label: string, tick: () => Promise<void>)
    * savoir que la tâche est finie — un test, un arrêt propre. Les appelants
    * habituels l'ignorent sans risque.
    */
+  /*
+   * Une version en répétition (mise à jour autonome, src/modules/updates)
+   * tourne à côté de celle en service, sur la même base : ses tâches de fond
+   * doubleraient chaque sauvegarde planifiée, chaque courriel, chaque
+   * webhook. Elle n'en lance aucune.
+   */
+  if (process.env.GAMEDASHBOARD_ESSAI === "1") return Promise.resolve();
   return tick().catch((error: unknown) => {
     logger.error(`${label} : ${error instanceof Error ? error.message : "erreur inconnue"}`);
   });

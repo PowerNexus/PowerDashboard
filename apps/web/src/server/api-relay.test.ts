@@ -39,6 +39,27 @@ describe("relayablePath", () => {
     expect(relayablePath("/api/v1/status")).toBe(true);
   });
 
+  it("relaie le signal de release d'un hébergement autonome, avec sa signature", async () => {
+    expect(relayablePath("/api/v1/updates/signal")).toBe(true);
+    expect(relayablePath("/api/v1/updates/status")).toBe(false);
+
+    await relayToApi(
+      appel("/api/v1/updates/signal", {
+        method: "POST",
+        headers: {
+          "x-gamedashboard-timestamp": "1790000000",
+          "x-gamedashboard-version": "v1.2.0",
+          "x-gamedashboard-signature": "sha256=abc",
+        },
+      }),
+    );
+    const [, init] = amont.mock.calls[0] as [string, RequestInit];
+    const transmis = init.headers as Headers;
+    expect(transmis.get("x-gamedashboard-timestamp")).toBe("1790000000");
+    expect(transmis.get("x-gamedashboard-version")).toBe("v1.2.0");
+    expect(transmis.get("x-gamedashboard-signature")).toBe("sha256=abc");
+  });
+
   it("suit le vhost de production : tout ce que nginx envoie à l'API est relayé", () => {
     const vhost = readFileSync(
       fileURLToPath(new URL("../../../../infra/prod/panel.conf", import.meta.url)),

@@ -1,21 +1,16 @@
 # Héberger le panel sur un hébergement cPanel
 
 Pour un hébergement mutualisé sous cPanel qui propose **« Setup Node.js
-App »** (CloudLinux et Passenger), **PostgreSQL** et les **tâches cron**. Sur
-un serveur à soi, préférer l'installation guidée ([installation.md](./installation.md)) :
+App »** (CloudLinux et Passenger) et **PostgreSQL**. Sur un serveur à soi,
+préférer l'installation guidée ([installation.md](./installation.md)) :
 nginx et systemd y font mieux ce que ce guide contourne (voir *Limites*).
 
-Rien ne se construit sur l'hébergement : il n'a ni la mémoire ni le temps que
-demande `next build`. Le runner construit le panel après chaque CI verte sur
-`main` et pousse la construction sur la branche **`deploiement`** du dépôt
-(`.github/workflows/deploiement.yml`, `infra/cpanel/publier-construction.sh`).
-Sur l'hébergement, une tâche cron la récupère avec git
-(`infra/cpanel/deployer.sh`).
-
-La branche ne porte qu'un commit, sans parent, remplacé à chaque
-publication : le code suivi, l'interface compilée et un fichier `RELEASE`
-qui nomme le commit de `main` d'origine. Elle ne s'empile pas : le dépôt ne
-grossit pas d'une interface compilée à chaque publication.
+Chaque release publie, à côté de l'archive ordinaire, une **archive
+autonome** : `gamedashboard-vX.Y.Z-autonome.tar.gz`. Le panel y est prêt à
+tourner — API compilée en un fichier, interface Next en mode standalone,
+migrations, module natif d'argon2 — sans rien à installer. On l'extrait une
+fois ; ensuite, **le panel se met à jour de lui-même** depuis les releases
+GitHub, sans script, sans cron, sans terminal.
 
 ```
 visiteurs, Wings, facturation
@@ -32,17 +27,16 @@ et ceux de la facturation (`/api/v1/application/…`) y sont **relayés** vers
 l'API par Next (`apps/web/src/server/api-relay.ts`), exactement pour les
 chemins que nginx aiguille en production. Wings reste inchangé.
 
-Sur l'hébergement, tout vit hors de `public_html` :
+Tout vit hors de `public_html`, dans `~/gamedashboard/` :
 
 ```
-~/gamedashboard/
-  depot/                     le clone de la branche deploiement
-  env/api.env, env/web.env   réglages et secrets (0600)
-  versions/<id>/             les constructions extraites
-  actuelle -> versions/<id>  la version en service
-  passenger/api/             racine d'application de l'API
-  passenger/interface/       racine d'application de l'interface
-  journal/                   journal des mises à jour
+passenger/lanceur.cjs       choisit la version à démarrer (etat.json)
+passenger/api/app.cjs       racine d'application de l'API
+passenger/interface/app.cjs racine d'application de l'interface
+passenger/admin.cjs         crée un administrateur
+versions/vX.Y.Z/            une version, prête à tourner
+env/api.env, env/web.env    réglages et secrets (0600)
+etat.json                   version en service, précédente, mises de côté
 ```
 
 ## 1. Base PostgreSQL
@@ -64,10 +58,18 @@ cPanel préfixe les deux noms par celui du compte (`compte_gamedashboard`).
 - **HTTPS pour les deux** : cPanel › **SSL/TLS Status** › AutoSSL, puis
   « Forcer la redirection HTTPS » dans **Domaines**.
 
-## 3. Réglages
+## 3. Extraire l'archive
 
-Dans le gestionnaire de fichiers (ou le Terminal de cPanel), créer
-`~/gamedashboard/env/` et y poser deux fichiers, **permissions 0600** :
+1. Page *Releases* du dépôt, dernière version : télécharger
+   `gamedashboard-vX.Y.Z-autonome.tar.gz`.
+2. cPanel › **Gestionnaire de fichiers**, dossier personnel : *Téléverser*
+   l'archive, puis *Extraire*. Le dossier `gamedashboard/` apparaît.
+3. Effacer l'archive.
+
+## 4. Réglages
+
+Dans le gestionnaire de fichiers, créer `gamedashboard/env/` et y poser deux
+fichiers, **permissions 0600** :
 
 `api.env`
 
@@ -78,6 +80,8 @@ PANEL_ORIGIN=https://<domaine>
 # L'adresse IP du serveur : cPanel l'affiche dans la colonne « Informations
 # générales » (adresse IP partagée). Voir « Limites ».
 TRUSTED_PROXIES=127.0.0.1, ::1, <adresse IP du serveur>
+# Facultatif : mise à jour dès la publication d'une release (voir plus bas).
+GAMEDASHBOARD_SIGNAL_SECRET=
 ```
 
 `web.env`
@@ -90,42 +94,12 @@ PANEL_ORIGIN=https://<domaine>
 `APP_SECRET_KEY` chiffre les secrets rangés en base : la tirer sur son propre
 poste (`openssl rand -base64 48`, 32 caractères au moins) et **en garder une
 copie hors de l'hébergement**. Sans elle, une sauvegarde de la base ne se
-relit pas ([runbook de la clé maître](./runbooks/cle-maitre-secrets.md)). Les autres
-variables facultatives sont décrites dans `apps/api/.env.example`.
+relit pas ([runbook de la clé maître](./runbooks/cle-maitre-secrets.md)). Les
+autres variables facultatives sont décrites dans `apps/api/.env.example`.
 
 Les réglages vivent dans ces fichiers, pas dans l'écran « Setup Node.js
 App » : cPanel garde ses variables en clair dans ses propres réglages. Une
 variable posée dans l'écran l'emporte sur le fichier.
-
-## 4. Première installation
-
-**Le clone, dans « Git Version Control »** (facultatif : sans lui, le script
-clone lui-même) : *Create*, avec
-
-| | |
-|---|---|
-| Clone a Repository | activé |
-| Clone URL | `https://github.com/PowerNexus/PowerDashboard.git` |
-| Repository Path | `gamedashboard/depot` |
-| Repository Name | `GameDashboard` |
-
-cPanel clone `main` ; le script passe le clone sur `deploiement` et l'y
-tient. Ne pas le cloner dans `public_html`.
-
-**L'installation**, dans le **Terminal** de cPanel (Avancé › Terminal) :
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/PowerNexus/PowerDashboard/deploiement/infra/cpanel/deployer.sh | bash
-```
-
-Il récupère la branche, en extrait la construction dans un dossier neuf,
-installe les dépendances aux versions du lockfile (quelques minutes), joue
-les migrations, puis pose `actuelle` et les deux racines d'application. Sans
-Terminal : la même commande en tâche cron « une fois par minute », le temps
-d'un passage, puis retirer la tâche.
-
-Node 24 est cherché sous `/opt/alt/alt-nodejs24` ; ailleurs, le désigner par
-`GAMEDASHBOARD_NODE=/chemin/vers/bin`.
 
 ## 5. Applications Node.js
 
@@ -139,40 +113,29 @@ cPanel › **Setup Node.js App** › *Create Application*, deux fois :
 | Application URL | `api.<domaine>` | `<domaine>` |
 | Application startup file | `app.cjs` | `app.cjs` |
 
-Aucune variable d'environnement dans cet écran (étape 3), et **jamais**
-« Run NPM Install » : les dépendances sont celles du lockfile, posées par
-`deployer.sh` avec pnpm. Si l'écran propose un « Passenger log file », y
-mettre `gamedashboard/journal/api.log` et `…/interface.log` : c'est là que
-s'écrit une erreur de démarrage.
+Aucune variable d'environnement dans cet écran (étape 4), et **jamais**
+« Run NPM Install » : l'archive n'a besoin de rien. Si l'écran propose un
+« Passenger log file », y mettre `gamedashboard/api.log` et
+`gamedashboard/interface.log` : c'est là que s'écrit une erreur de démarrage.
 
-## 6. Tâches cron
+Ouvrir `https://<domaine>` : la première requête démarre l'interface, qui
+appelle l'API ; l'API joue alors les migrations de la base avant de
+répondre. Quelques secondes la première fois.
 
-cPanel › **Tâches cron** :
+## 6. Premier compte administrateur
 
-```bash
-# Mise à jour : ne fait rien tant que rien de neuf n'est publié.
-*/5 * * * * bash $HOME/gamedashboard/actuelle/infra/cpanel/deployer.sh >> $HOME/gamedashboard/journal/deployer.log 2>&1
-
-# Maintien en éveil : la sonde de l'interface interroge l'API.
-* * * * * curl -fsS -o /dev/null --max-time 20 https://<domaine>/api/health
-```
-
-La seconde est **indispensable**. Passenger arrête une application restée
-quelques minutes sans requête, et avec l'API s'arrêteraient le planificateur,
-la surveillance des machines, les webhooks et les relevés.
-
-## 7. Premier compte administrateur
-
-Dans le Terminal :
+La seule commande de l'installation, une fois, dans cPanel › **Terminal** :
 
 ```bash
-export PATH=/opt/alt/alt-nodejs24/root/usr/bin:$PATH
-cd ~/gamedashboard/actuelle/apps/api
-DATABASE_URL="$(node -e 'process.loadEnvFile(process.argv[1]); process.stdout.write(process.env.DATABASE_URL)' ~/gamedashboard/env/api.env)" \
-  node_modules/.bin/tsx scripts/create-admin.mts vous@exemple.fr Prénom Nom
+/opt/alt/alt-nodejs24/root/usr/bin/node ~/gamedashboard/passenger/admin.cjs vous@exemple.fr Prénom Nom
 ```
 
-## 8. Machines de jeu
+Le mot de passe provisoire s'affiche, valable vingt-quatre heures. Sans
+Terminal : la même commande en tâche cron, le temps d'un passage, avec
+`> ~/gamedashboard/admin.txt` à la fin pour lire le mot de passe — puis
+effacer la tâche **et** le fichier.
+
+## 7. Machines de jeu
 
 Comme ailleurs ([installation.md](./installation.md)) : Wings s'adresse à
 `https://<domaine>`, que l'interface relaie vers l'API.
@@ -182,6 +145,64 @@ celui déclaré pour le node). Beaucoup d'hébergements mutualisés filtrent les
 connexions sortantes : si les nodes restent « injoignables » alors que Wings
 tourne, demander l'ouverture du port à l'hébergeur, ou faire écouter Wings
 sur 443.
+
+## Mises à jour
+
+Rien à faire : l'API lit la dernière release du dépôt **toutes les trente
+minutes** (`apps/api/src/modules/updates`). Quand une version plus récente
+paraît :
+
+1. elle télécharge l'archive autonome et la vérifie contre son empreinte ;
+2. elle n'en extrait que la nouvelle version, dans `versions/` ;
+3. elle la **répète** : démarrée à part sur des ports locaux, sans tâches de
+   fond, la nouvelle version joue ses migrations et doit répondre. Sinon,
+   elle est **mise de côté** et ne sera plus essayée — rien n'a bougé pour
+   les visiteurs ;
+4. elle bascule `etat.json` et demande à Passenger de relancer les deux
+   applications (`tmp/restart.txt`) ;
+5. la nouvelle version, à son démarrage, vérifie qu'elle répond par
+   l'adresse publique et confirme ; sinon elle revient d'elle-même à la
+   précédente et se met de côté. Dernier filet : si l'API redémarre plus de
+   trois fois sans confirmer, ou si la version ne se charge même pas, le
+   lanceur revient à la précédente.
+
+Les deux dernières versions restent sur le disque. Administration › Vue
+d'ensemble › **Mises à jour** montre la version en service, la dernière
+release, le résultat de la dernière tentative, et offre **Vérifier
+maintenant** et **Revenir à la version précédente**. Chaque geste et chaque
+installation sont consignés au journal d'audit.
+
+Les **préversions** (`v1.2.0-rc.1`) ne sont jamais installées : GitHub ne les
+rend pas comme « dernière release ».
+
+**Les migrations ne se défont pas.** Revenir à la version précédente
+redémarre l'ancien code sur le schéma déjà migré : sans danger tant que les
+migrations ne font qu'ajouter, ce qui est la règle du projet.
+
+### Mise à jour dès la publication (facultatif)
+
+Le workflow de release peut prévenir le panel, qui vérifie alors aussitôt au
+lieu d'attendre la demi-heure :
+
+1. tirer un secret : `openssl rand -hex 32` ;
+2. le poser dans `api.env` : `GAMEDASHBOARD_SIGNAL_SECRET=<secret>` ;
+3. dans le dépôt GitHub, *Settings* › *Secrets and variables* › *Actions* :
+   secret `PANEL_SIGNAL_SECRET` (le même), variable `PANEL_URL`
+   (`https://<domaine>`).
+
+Le signal est signé (HMAC sur l'horodatage et la version) ; mal signé ou
+périmé, il reçoit une page introuvable. Même valide, il ne fait que hâter
+une vérification auprès de GitHub : c'est la release qui décide.
+
+### Maintien en éveil
+
+Passenger arrête une application restée quelques minutes sans requête, et
+avec l'API s'arrêteraient le planificateur, la surveillance des machines,
+les webhooks et les mises à jour. L'API s'interroge donc elle-même par
+l'adresse publique chaque minute. Après un redémarrage d'Apache, c'est la
+première requête (un visiteur, un Wings) qui la réveille ; pour ne pas en
+dépendre, une sonde externe d'`https://<domaine>/api/health` (un service de
+supervision, ou une tâche cron `curl`) fait l'affaire.
 
 ## Vérifier
 
@@ -196,27 +217,11 @@ adresse, pas celle du serveur. Sinon, `TRUSTED_PROXIES` ne contient pas la
 bonne adresse, et tous les visiteurs partageraient un seul compteur de
 tentatives de connexion.
 
-## Revenir en arrière
-
-Les deux versions précédentes restent dans `versions/` :
-
-```bash
-cd ~/gamedashboard
-ls -t versions/
-ln -sfn versions/<id> .actuelle.nouvelle && mv -Tf .actuelle.nouvelle actuelle
-touch passenger/api/tmp/restart.txt passenger/interface/tmp/restart.txt
-```
-
-Les migrations, elles, ne se défont pas : ne revenir en arrière que sur une
-version dont le schéma est compatible. Le prochain passage du cron
-réinstallera la construction publiée ; suspendre la tâche le temps de
-corriger.
-
 ## Sauvegarder
 
 `gamedashboard backup` n'existe pas ici. Deux choses à mettre à l'abri,
-ensemble : la base (cPanel › **Sauvegarde**, ou `pg_dump` dans le Terminal)
-et `~/gamedashboard/env/`, qui porte `APP_SECRET_KEY`.
+ensemble : la base (cPanel › **Sauvegarde**) et `~/gamedashboard/env/`, qui
+porte `APP_SECRET_KEY`.
 
 ## Limites
 
@@ -239,8 +244,13 @@ Ce qu'un serveur à soi fait et qu'un hébergement mutualisé ne fait pas :
 - **Un seul processus par application.** Passenger n'en démarre qu'un pour
   une application Node, qui traite les requêtes en parallèle ; les tâches de
   fond de l'API le supposent. Ne pas régler plusieurs instances.
+- **L'empreinte vient de la release.** Elle écarte un téléchargement tronqué
+  ou altéré en route ; l'origine, elle, tient au HTTPS vers le seul dépôt
+  configuré. Qui peut publier une release sur le dépôt peut donc mettre à
+  jour l'hébergement : protéger les étiquettes `v*` en conséquence.
 - **Pas d'en-tête HSTS.** nginx le pose en production. L'ajouter au
   `.htaccess` du domaine du panel :
   `Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"`.
-- **Mémoire bornée.** L'hébergement limite la mémoire du compte : un panel
-  qui renvoie des erreurs 503 sous charge s'y heurte peut-être.
+- **Mémoire bornée.** L'hébergement limite la mémoire du compte ; la
+  répétition d'une mise à jour fait tourner deux versions quelques instants.
+  Un panel qui renvoie des erreurs 503 sous charge s'y heurte peut-être.

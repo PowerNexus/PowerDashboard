@@ -94,6 +94,17 @@ jobs:
       - name: Assembler l'archive
         run: bash infra/release/assembler.sh "$VERSION" dist
 
+      # L'archive autonome : le panel prêt à tourner, qu'un hébergement cPanel
+      # installe sans outils puis met à jour de lui-même depuis cette page
+      # (docs/hebergement-cpanel.md). L'interface y est construite à part
+      # (`.next-autonome`), après l'archive ordinaire, qui n'en est pas
+      # touchée. Attestée et publiée avec le reste : les motifs des étapes
+      # suivantes la couvrent.
+      - name: Assembler l'archive autonome
+        run: |
+          GAMEDASHBOARD_AUTONOME=1 pnpm --filter @gamedashboard/web build
+          node infra/release/autonome.mjs "$VERSION" dist
+
       # Inventaire des dépendances livrées (PLAN §5.4), au format CycloneDX,
       # publié à côté de l'archive. Trivy lit le lockfile, sans les
       # dépendances de développement, qui ne sont pas livrées, et prend les
@@ -156,6 +167,10 @@ jobs:
           Mettre à jour une installation : \`gamedashboard update\` (sauvegarde d'abord, puis applique cette version).
           Comptes, secrets et base sont conservés.
 
+          Hébergement cPanel (sans terminal) : \`$ARCHIVE-autonome.tar.gz\`, à extraire dans le dossier personnel.
+          Le panel s'y met ensuite à jour de lui-même depuis cette page
+          ([guide](https://github.com/${{ github.repository }}/blob/$VERSION/docs/hebergement-cpanel.md)).
+
           ## Vérifier
 
           \`$ARCHIVE.cdx.json\` est l'inventaire des dépendances livrées (CycloneDX).
@@ -178,6 +193,30 @@ jobs:
               --title "GameDashboard $VERSION" \
               --notes-file notes.md --generate-notes --verify-tag "${PRE[@]}"
           fi
+
+      # Prévient l'hébergement autonome qu'une version vient de paraître : il
+      # la vérifie aussitôt, au lieu d'attendre sa vérification suivante (une
+      # demi-heure au plus). Facultatif : sans la variable PANEL_URL et le
+      # secret PANEL_SIGNAL_SECRET (le même que GAMEDASHBOARD_SIGNAL_SECRET
+      # dans son api.env), rien ne part. Une préversion n'est jamais
+      # installée par un hébergement : pas de signal non plus.
+      - name: Prévenir l'hébergement autonome
+        if: ${{ vars.PANEL_URL != '' }}
+        continue-on-error: true
+        env:
+          PANEL_URL: ${{ vars.PANEL_URL }}
+          SECRET: ${{ secrets.PANEL_SIGNAL_SECRET }}
+        run: |
+          [[ "$VERSION" == *-* ]] && { echo "Préversion : pas de signal."; exit 0; }
+          [ -n "$SECRET" ] || { echo "PANEL_SIGNAL_SECRET absent : pas de signal."; exit 0; }
+          HORODATAGE=$(date +%s)
+          SIGNATURE=$(printf '%s.%s' "$HORODATAGE" "$VERSION" \
+            | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.*= //')
+          curl -fsS -X POST "$PANEL_URL/api/v1/updates/signal" \
+            -H "x-gamedashboard-timestamp: $HORODATAGE" \
+            -H "x-gamedashboard-version: $VERSION" \
+            -H "x-gamedashboard-signature: sha256=$SIGNATURE" \
+            -o /dev/null -w "Signal : %{http_code}\n"
 
       # La release est déjà publiée à ce stade : un quota d'artefacts atteint
       # ne doit pas la faire paraître en échec.
