@@ -30,6 +30,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { WingsClientService } from "../wings/wings-client.service";
 import { CurseForgeClient } from "./curseforge.client";
+import { isTrustedDownload } from "./modpack-source";
 import { ModrinthClient } from "./modrinth.client";
 import { type DetectedRuntime, detectRuntime } from "./server-runtime";
 import { SpigetClient } from "./spiget.client";
@@ -158,6 +159,23 @@ export class MarketplaceService {
     }
     if (!release.downloadUrl) {
       throw new ConflictException("Cette publication n'a pas de fichier téléchargeable.");
+    }
+
+    /*
+     * L'adresse rendue par Modrinth ou CurseForge passe par la liste des
+     * dépôts connus avant d'aller au daemon, qui télécharge sans regarder
+     * depuis le réseau du node. SpigotMC n'est pas concerné : son adresse est
+     * composée ici (`spiget.client.ts`), pas lue dans une réponse.
+     */
+    const source = sourceOfProjectId(projectId);
+    if (
+      (source === "modrinth" || source === "curseforge") &&
+      !isTrustedDownload(release.downloadUrl)
+    ) {
+      this.logger.warn(`Adresse de ${projectId} refusée : ${release.downloadUrl}`);
+      throw new ConflictException(
+        "Le catalogue indique une adresse de téléchargement hors de ses dépôts habituels. Installation refusée ; réessayez plus tard, ou installez l'extension manuellement.",
+      );
     }
 
     const previous = installed.get(projectId);

@@ -24,7 +24,13 @@ const USER_AGENT = "GameDashboard/GameDashboard (panel de jeu, contact@gamedashb
 const TIMEOUT_MS = 8000;
 const SEARCH_LIMIT = 12;
 
-/** Hôtes que Modrinth autorise dans un `.mrpack` (spécification du format). */
+/**
+ * Hôtes que Modrinth autorise dans un `.mrpack` (spécification du format).
+ *
+ * Ce sont aussi ceux où Modrinth et CurseForge servent leurs fichiers : la
+ * même liste filtre les adresses que leurs API rendent pour une extension ou
+ * l'archive d'un pack (`isTrustedDownload`).
+ */
 const TRUSTED_DOWNLOAD_HOSTS = new Set([
   "cdn.modrinth.com",
   "github.com",
@@ -38,7 +44,15 @@ const TRUSTED_DOWNLOAD_HOSTS = new Set([
 /** Un mod ne pèse pas un giga : au-delà, c'est autre chose. */
 const MAX_MOD_BYTES = 512 * 1024 * 1024;
 
-function isTrustedDownload(value: string): boolean {
+/**
+ * L'adresse désigne-t-elle un dépôt connu, en https ?
+ *
+ * À appeler avant tout `pullFile` sur une adresse **rendue par un tiers** :
+ * Wings télécharge sans regarder, depuis le réseau du node. Une réponse
+ * falsifiée, ou un projet piégé, ferait sinon du daemon un relais vers
+ * `169.254.169.254` ou le réseau d'administration.
+ */
+export function isTrustedDownload(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && TRUSTED_DOWNLOAD_HOSTS.has(url.hostname.toLowerCase());
