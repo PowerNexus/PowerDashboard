@@ -57,6 +57,16 @@ Concrètement :
 - Certaines clés du `config.yml` (`system.data`, `allowed_mounts`, `remote`)
   portent `json:"-"` côté Wings : elles ne passent que par le fichier YAML,
   jamais par `POST /api/update`.
+- **Le SFTP ne connaît pas de second facteur.** Wings transmet un nom et un
+  mot de passe (ou une clé publique) à `POST /api/remote/sftp/auth`, et le
+  protocole n'a aucune étape où demander un code. Un compte protégé par la
+  double authentification entre donc en SFTP avec son **seul mot de passe**,
+  comme chez Pterodactyl. Choix tenu (audit ASVS, NC-44) : le dire plutôt
+  que refuser le mot de passe à ces comptes. Compensations : trois
+  compteurs d'échecs (adresse, adresse + identifiant, identifiant seul),
+  compte suspendu refusé, droit `files.sftp` exigé d'un sous-utilisateur, et
+  les clés SSH proposées à l'écran — elles ne quittent pas la machine de
+  leur porteur.
 - Les fonctions que Wings n'offre pas (sondes de jeu, par exemple) vivent
   dans le panel. On ne les demande pas au daemon.
 - Le projet dépend du rythme de maintenance amont. Si Wings cessait d'être

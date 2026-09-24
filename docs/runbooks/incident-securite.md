@@ -76,7 +76,10 @@ administrateurs, et **l'export lui-même est consigné**.
 Questions à trancher :
 
 - **Par où** : mot de passe deviné, session volée, clé d'API, SFTP,
-  prise en main du compte par un administrateur ?
+  prise en main du compte par un administrateur ? En SFTP, le mot de passe
+  suffit **même avec la double authentification** (le protocole ne sait pas
+  demander de code, [ADR 0001](../adr/0001-wings-conserve.md)) : un mot de
+  passe connu ouvre les fichiers sans passer par le second facteur.
 - **Quoi** : serveurs touchés, fichiers lus ou modifiés, sous-utilisateurs
   invités, clés ajoutées, rôle changé ?
 - **Depuis quand** : la première action de l'adresse ou de l'appareil

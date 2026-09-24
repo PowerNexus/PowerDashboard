@@ -57,14 +57,47 @@ const ATTEMPT_WINDOW_MS = 10 * 60_000;
 const MAX_ATTEMPTS_PER_IP = 20;
 /** Par couple adresse + identifiant, dans la même fenêtre. */
 const MAX_ATTEMPTS_PER_PAIR = 10;
+/**
+ * Par identifiant seul, toutes adresses confondues.
+ *
+ * Plus large que les deux autres : il ne sert qu'à voir une attaque répartie
+ * sur de nombreuses adresses, que les compteurs par adresse ne voient pas.
+ * Le prix est connu — quelqu'un peut, de loin, fermer le SFTP d'un compte
+ * pour dix minutes — et c'est celui de tout verrou par compte ; le
+ * gestionnaire de fichiers du panel reste ouvert.
+ */
+const MAX_ATTEMPTS_PER_USERNAME = 30;
+/** Au-delà, les plus anciens compteurs sont oubliés : la mémoire reste bornée. */
+const MAX_TRACKED = 50_000;
 
-/** États où les fichiers ne doivent pas être touchés, même par leur propriétaire. */
-const CLOSED_STATES = new Set(["installing", "restoring", "install_failed", "suspended"]);
+/**
+ * États où les fichiers ne doivent pas être touchés, même par leur propriétaire.
+ *
+ * `transferring` y manquait : pendant qu'un node archive les fichiers pour un
+ * autre, une écriture SFTP se perd, ou arrive à moitié de l'autre côté.
+ *
+ * `restoring`, lui, n'est jamais posé par le panel : la restauration n'a pas
+ * d'état de ce côté-ci, et le compte rendu de Wings
+ * (`POST /backups/:uuid/restore`) n'en relâche aucun. Le poser sans cela
+ * bloquerait le serveur jusqu'au prochain redémarrage du daemon. Wings, lui,
+ * refuse toute opération SFTP pendant qu'il restaure (son propre drapeau,
+ * `IsInProtectedState`). L'état reste ici pour le jour où le panel le
+ * tiendrait.
+ */
+const CLOSED_STATES = new Set([
+  "installing",
+  "restoring",
+  "transferring",
+  "install_failed",
+  "suspended",
+]);
 
 @Injectable()
 export class SftpAuthService {
   private readonly logger = new Logger(SftpAuthService.name);
   private readonly failures = new Map<string, { count: number; since: number }>();
+  /** Dernier ménage des compteurs expirés. */
+  private lastSweep = 0;
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -79,22 +112,30 @@ export class SftpAuthService {
    */
   async authenticate(nodeId: string, request: SftpAuthRequest): Promise<SftpAuthResponse | null> {
     /*
-     * Deux compteurs : l'adresse seule, et le couple adresse + identifiant.
+     * Trois compteurs : l'adresse seule, le couple adresse + identifiant, et
+     * l'identifiant seul.
      *
-     * Le second est plus strict, comme chez Pterodactyl : dix essais sur un
-     * même compte depuis une même adresse suffisent à dire qu'on ne connaît
-     * pas le mot de passe. Le premier attrape ce que le second ne voit pas —
-     * une adresse qui parcourt les comptes. L'adresse vient du daemon, qui la
-     * tient de la connexion : un node compromis peut la falsifier, mais il
-     * peut de toute façon se passer de cette route.
+     * Le deuxième est le plus strict, comme chez Pterodactyl : dix essais sur
+     * un même compte depuis une même adresse suffisent à dire qu'on ne connaît
+     * pas le mot de passe. Le premier attrape une adresse qui parcourt les
+     * comptes ; le troisième, un compte éprouvé depuis de nombreuses adresses,
+     * un essai chacune — que les deux autres ne voyaient pas. L'adresse vient
+     * du daemon, qui la tient de la connexion : un node compromis peut la
+     * falsifier, mais il peut de toute façon se passer de cette route.
      */
+    const username = `user|${request.username.toLowerCase()}`;
     const pair = `${request.ip}|${request.username.toLowerCase()}`;
-    if (this.throttled(request.ip) || this.throttled(pair, MAX_ATTEMPTS_PER_PAIR)) {
+    if (
+      this.throttled(request.ip) ||
+      this.throttled(pair, MAX_ATTEMPTS_PER_PAIR) ||
+      this.throttled(username, MAX_ATTEMPTS_PER_USERNAME)
+    ) {
       this.logger.warn(`SFTP : trop de tentatives depuis ${request.ip}, refus sans vérification.`);
       return null;
     }
     const refuse = (): null => {
       this.refuse(request.ip);
+      this.refuse(username);
       return this.refuse(pair);
     };
 
@@ -172,6 +213,9 @@ export class SftpAuthService {
     if (server.state && CLOSED_STATES.has(server.state)) return refuse();
 
     if (proof.keyId) void this.sshKeys.markUsed(proof.keyId);
+    // Le compteur par identifiant reste : un succès depuis une adresse ne dit
+    // rien des essais venus d'ailleurs, et l'effacer laisserait l'attaque
+    // répartie reprendre à zéro à chaque connexion de son titulaire.
     this.failures.delete(request.ip);
     this.failures.delete(pair);
 
@@ -198,6 +242,8 @@ export class SftpAuthService {
        * machine de son porteur.
        */
       if (!account.passwordHash) return null;
+      // Le mot de passe suffit, double authentification ou non : le protocole
+      // n'a aucune étape pour un code. Écart assumé et documenté (ADR 0001).
       return (await verifyPassword(account.passwordHash, request.password))
         ? { keyId: null }
         : null;
@@ -252,18 +298,41 @@ export class SftpAuthService {
     return toWingsPermissions(effectivePermissions(subuser));
   }
 
-  /** Enregistre l'échec pour cette adresse, puis refuse. */
-  private refuse(ip: string): null {
+  /** Enregistre l'échec pour cette clé, puis refuse. */
+  private refuse(key: string): null {
     const now = Date.now();
-    const current = this.failures.get(ip);
+    this.sweep(now);
+    const current = this.failures.get(key);
 
     if (!current || now - current.since > ATTEMPT_WINDOW_MS) {
-      this.failures.set(ip, { count: 1, since: now });
+      this.failures.set(key, { count: 1, since: now });
     } else {
       current.count += 1;
     }
 
     return null;
+  }
+
+  /**
+   * Oublie les compteurs dont la fenêtre est écoulée.
+   *
+   * Un compteur ne se vidait qu'au retour de la même adresse : chaque adresse
+   * de passage — un balayage d'Internet en compte des milliers — restait en
+   * mémoire pour toujours. Le ménage passe une fois par fenêtre, ou plus tôt
+   * si la table déborde ; et si elle déborde encore, les plus anciens
+   * compteurs partent en premier (ordre d'insertion de la `Map`).
+   */
+  private sweep(now: number): void {
+    if (now - this.lastSweep < ATTEMPT_WINDOW_MS && this.failures.size < MAX_TRACKED) return;
+    this.lastSweep = now;
+
+    for (const [key, entry] of this.failures) {
+      if (now - entry.since > ATTEMPT_WINDOW_MS) this.failures.delete(key);
+    }
+    for (const key of this.failures.keys()) {
+      if (this.failures.size < MAX_TRACKED) break;
+      this.failures.delete(key);
+    }
   }
 
   private throttled(key: string, limit: number = MAX_ATTEMPTS_PER_IP): boolean {
