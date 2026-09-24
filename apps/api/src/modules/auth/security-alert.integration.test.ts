@@ -146,6 +146,9 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       // Le courrier de compte (réinitialisation, vérification) n'est pas en
       // jeu ici : la connexion n'y touche pas.
       {} as never,
+      // Les consoles de Wings non plus.
+      {} as never,
+      {} as never,
     );
   });
 

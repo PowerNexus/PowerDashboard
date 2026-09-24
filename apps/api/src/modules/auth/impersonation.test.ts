@@ -96,9 +96,10 @@ describe("cookie de retour d'une prise en main", () => {
 
   it("est relu sous le même nom au retour, et rend la session de l'agent", async () => {
     const resolve = vi.fn(async (token: string) => (token === "jeton-de-l-agent" ? STAFF : null));
-    const args: unknown[] = Array.from({ length: 16 }, () => ({}));
+    const args: unknown[] = Array.from({ length: 18 }, () => ({}));
     args[1] = { revoke: async () => undefined, resolve };
     args[2] = { record: async () => undefined };
+    args[16] = { revocableForSession: () => new Map() };
     const auth = new (AuthController as unknown as new (...a: unknown[]) => AuthController)(
       ...args,
     );

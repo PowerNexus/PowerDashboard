@@ -193,7 +193,16 @@ export class ServerRuntimeController {
      */
     const withInstall = isOwner ? [...permissions, "admin.websocket.install"] : permissions;
 
-    return { data: await this.tokens.websocketGrant(id, request.user.id, withInstall) };
+    // La session qui demande est rangée avec le jeton : sa déconnexion fermera
+    // cette console (NC-43). Une clé d'API n'en a pas.
+    return {
+      data: await this.tokens.websocketGrant(
+        id,
+        request.user.id,
+        withInstall,
+        request.sessionToken ?? null,
+      ),
+    };
   }
 
   @Get("files")

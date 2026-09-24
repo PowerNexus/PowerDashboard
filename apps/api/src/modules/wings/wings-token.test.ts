@@ -145,3 +145,60 @@ describe("jeton de transfert", () => {
     expect(charge.scope).toBe("transfer");
   });
 });
+
+/**
+ * La déconnexion ferme les consoles ouvertes **par cette session** (NC-43).
+ *
+ * Un jeton de console vit dix minutes et Wings ne revérifie rien en cours de
+ * route : après `logout`, la console restait ouverte — lecture et commandes —
+ * jusqu'à l'expiration. Le jeton est rangé avec la session qui l'a demandé,
+ * et c'est elle seule qui le révoque : une prise en main porte l'identifiant
+ * du client, et se déconnecter du compte d'un autre ne doit pas couper ses
+ * consoles à lui, ni celles de ses autres appareils.
+ */
+describe("révocation des consoles d'une session qui se ferme", () => {
+  function dbAvecNode(): Database {
+    const chaine: Record<string, unknown> = {};
+    chaine.select = () => chaine;
+    chaine.from = () => chaine;
+    chaine.innerJoin = () => chaine;
+    chaine.where = () => chaine;
+    chaine.limit = async () => [
+      { scheme: "https", fqdn: "node.exemple.fr", port: 8080, token: encryptSecret("cle-du-node") },
+    ];
+    return chaine as unknown as Database;
+  }
+
+  function jtiOf(token: string): string {
+    const [, corps] = token.split(".");
+    return JSON.parse(Buffer.from(corps ?? "", "base64url").toString("utf8")).jti;
+  }
+
+  it("rend les jetons émis pour cette session, et seulement eux", async () => {
+    process.env.APP_SECRET_KEY ??= randomBytes(32).toString("base64");
+    const svc = new WingsTokenService(dbAvecNode());
+    const AUTRE_SERVEUR = "44444444-4444-4444-4444-444444444444";
+
+    const ici = await svc.websocketGrant(SERVER, USER, ["*"], "session-du-portable");
+    const ailleurs = await svc.websocketGrant(AUTRE_SERVEUR, USER, ["*"], "session-du-portable");
+    const telephone = await svc.websocketGrant(SERVER, USER, ["*"], "session-du-telephone");
+
+    const byServer = svc.revocableForSession("session-du-portable");
+    expect(Object.fromEntries(byServer)).toEqual({
+      [SERVER]: [jtiOf(ici.token)],
+      [AUTRE_SERVEUR]: [jtiOf(ailleurs.token)],
+    });
+    // Rendus une fois : une révocation ne se rejoue pas.
+    expect(svc.revocableForSession("session-du-portable").size).toBe(0);
+    // Le téléphone du même compte garde sa console.
+    expect(svc.revocableFor(SERVER, USER)).toEqual([jtiOf(telephone.token)]);
+  });
+
+  it("ne rattache à aucune session un jeton demandé par clé d'API", async () => {
+    process.env.APP_SECRET_KEY ??= randomBytes(32).toString("base64");
+    const svc = new WingsTokenService(dbAvecNode());
+    await svc.websocketGrant(SERVER, USER, ["*"], null);
+
+    expect(svc.revocableForSession("session-du-portable").size).toBe(0);
+  });
+});

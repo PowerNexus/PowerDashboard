@@ -5,6 +5,7 @@ import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { BrandingService } from "../reseller/branding.service";
+import { WingsModule } from "../wings/wings.module";
 import { AccountMailService } from "./account-mail.service";
 import { ApiKeyRepository } from "./api-key.repository";
 import { AuthController } from "./auth.controller";
@@ -26,8 +27,10 @@ import { UserRepository } from "./user.repository";
 
 @Module({
   // Les notifications, pour la cloche des alertes de sécurité. Le module ne
-  // dépend de rien : l'importer ne forme aucun cycle.
-  imports: [ActivityModule, NotificationsModule],
+  // dépend de rien : l'importer ne forme aucun cycle. Wings non plus : la
+  // déconnexion ferme les consoles de la session, et le registre des jetons
+  // émis doit être **le même** que celui qui les a signés.
+  imports: [ActivityModule, NotificationsModule, WingsModule],
   controllers: [AuthController],
   providers: [
     databaseProvider,

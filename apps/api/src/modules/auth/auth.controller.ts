@@ -30,6 +30,8 @@ import { ActivityService } from "../activity/activity.service";
 import { isAdminRole } from "../admin/admin.guard";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
+import { WingsClientService } from "../wings/wings-client.service";
+import { WingsTokenService } from "../wings/wings-token.service";
 import { AccountMailService } from "./account-mail.service";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
@@ -228,6 +230,9 @@ export class AuthController {
     @Inject(TurnstileService) private readonly turnstile: TurnstileService,
     @Inject(SecurityAlertService) private readonly alerts: SecurityAlertService,
     @Inject(AccountMailService) private readonly accountMail: AccountMailService,
+    // Les consoles ouvertes par une session se ferment avec elle (NC-43).
+    @Inject(WingsTokenService) private readonly wingsTokens: WingsTokenService,
+    @Inject(WingsClientService) private readonly wings: WingsClientService,
   ) {}
 
   /**
@@ -528,7 +533,11 @@ export class AuthController {
       return;
     }
 
-    if (request.sessionToken) await this.sessions.revoke(request.sessionToken);
+    if (request.sessionToken) {
+      await this.sessions.revoke(request.sessionToken);
+      // Une console ouverte pendant la visite ne lui survit pas.
+      await this.closeConsoles(request.sessionToken);
+    }
 
     // Des deux côtés, comme au départ : un client qui lit « untel est entré »
     // sans jamais lire « untel est sorti » ne saurait pas si la visite dure
@@ -580,8 +589,32 @@ export class AuthController {
   @Post("logout")
   @UseGuards(SessionGuard)
   async logout(@Req() request: ClientRequest, @Res() reply: Reply): Promise<void> {
-    if (request.sessionToken) await this.sessions.revoke(request.sessionToken);
+    if (request.sessionToken) {
+      await this.sessions.revoke(request.sessionToken);
+      await this.closeConsoles(request.sessionToken);
+    }
     reply.clearCookie(sessionCookie(), authCookieOptions()).status(204).send(null);
+  }
+
+  /**
+   * Ferme les consoles ouvertes par une session qui se termine (NC-43).
+   *
+   * Le jeton d'une console vit dix minutes et Wings ne revérifie rien en cours
+   * de route : sans cet appel, une console restait ouverte — lecture et
+   * commandes — après la déconnexion. Seules celles de **cette** session :
+   * les autres appareils du compte gardent les leurs.
+   *
+   * Un node injoignable n'empêche pas de partir : la session est fermée en
+   * base, et le jeton expirera de lui-même. Les nodes sont prévenus en
+   * parallèle, pour qu'un seul muet ne fasse pas attendre la déconnexion de
+   * son délai multiplié par le nombre de consoles.
+   */
+  private async closeConsoles(sessionToken: string): Promise<void> {
+    await Promise.all(
+      [...this.wingsTokens.revocableForSession(sessionToken)].map(([serverId, jtis]) =>
+        this.wings.denyWebsocketTokens(serverId, jtis).catch(() => undefined),
+      ),
+    );
   }
 
   @Get("me")

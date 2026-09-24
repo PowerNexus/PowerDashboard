@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { decryptSecret } from "@gamedashboard/auth";
+import { decryptSecret, hashToken } from "@gamedashboard/auth";
 import { type Database, nodes, servers } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
 import { eq } from "drizzle-orm";
@@ -79,6 +79,16 @@ interface IssuedToken {
   jti: string;
   serverId: string;
   userId: string;
+  /**
+   * Condensat de la session qui l'a demandé, ou `null` pour une clé d'API.
+   *
+   * La déconnexion révoque les jetons de **sa** session, pas ceux du compte :
+   * une prise en main porte l'identifiant du client, et la quitter ne doit pas
+   * couper les consoles qu'il a ouvertes lui-même, sur ses propres appareils.
+   * Le condensat plutôt que le jeton : cette liste n'a pas à détenir de quoi
+   * rouvrir une session.
+   */
+  session?: string | null;
   expiresAt: number;
 }
 
@@ -157,6 +167,26 @@ export class WingsTokenService {
     return byServer;
   }
 
+  /**
+   * Tous les jetons vivants demandés par une session, rangés par serveur.
+   *
+   * Sert à la déconnexion (NC-43) : la session tombe en base, mais une console
+   * déjà ouverte vit sur un jeton de dix minutes que Wings ne revérifie pas.
+   */
+  revocableForSession(sessionToken: string): Map<string, string[]> {
+    this.purge();
+    const session = hashToken(sessionToken);
+    const byServer = new Map<string, string[]>();
+    for (let i = this.issued.length - 1; i >= 0; i--) {
+      const token = this.issued[i];
+      if (token && token.session === session) {
+        byServer.set(token.serverId, [...(byServer.get(token.serverId) ?? []), token.jti]);
+        this.issued.splice(i, 1);
+      }
+    }
+    return byServer;
+  }
+
   private purge(): void {
     const now = Math.floor(Date.now() / 1000);
     for (let i = this.issued.length - 1; i >= 0; i--) {
@@ -164,10 +194,16 @@ export class WingsTokenService {
     }
   }
 
+  /**
+   * `sessionToken` : la session qui demande la console, pour que sa
+   * déconnexion la ferme. Absent pour une clé d'API, qui n'a pas de
+   * déconnexion.
+   */
   async websocketGrant(
     serverId: string,
     userId: string,
     permissions: readonly string[],
+    sessionToken: string | null = null,
   ): Promise<WebsocketGrant> {
     const [row] = await this.db
       .select({
@@ -188,7 +224,13 @@ export class WingsTokenService {
     const expiresAt = now + WEBSOCKET_TOKEN_TTL_SECONDS;
 
     this.purge();
-    this.issued.push({ jti, serverId, userId, expiresAt });
+    this.issued.push({
+      jti,
+      serverId,
+      userId,
+      session: sessionToken ? hashToken(sessionToken) : null,
+      expiresAt,
+    });
 
     const payload = {
       // `jti` et `iat` servent la liste de révocation du daemon : après un

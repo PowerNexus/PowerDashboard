@@ -162,6 +162,9 @@ describe.skipIf(!HAS_DATABASE)("Connexion avec Google (intégration)", () => {
       {} as never,
       {} as never,
       {} as never,
+      // Les consoles de Wings : aucune n'est ouverte ici.
+      {} as never,
+      {} as never,
     );
   });
 
