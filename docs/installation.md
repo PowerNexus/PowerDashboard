@@ -254,15 +254,18 @@ Le fichier produit, dans `/opt/gamedashboard/backups/`, contient la base
 **et** `APP_SECRET_KEY`, la clé qui chiffre les secrets rangés en base
 (jetons des nodes, mots de passe des bases de données des clients…). Sans
 cette clé, une sauvegarde de la base ne sert à rien : c'est pourquoi les
-deux voyagent ensemble. Copiez-le hors de la machine :
+deux voyagent ensemble.
+
+L'archive est **chiffrée**, avec une clé tirée à la première sauvegarde :
+`/opt/gamedashboard/backup.key`. Copiez les deux hors de la machine, **la clé
+une fois pour toutes et à part** : une sauvegarde sans sa clé ne se relit
+pas, et une clé rangée avec les sauvegardes ne protège plus rien.
 
 ```bash
 # depuis votre ordinateur
-scp 'root@panel.mondomaine.fr:/opt/gamedashboard/backups/*.tar' .
+scp 'root@panel.mondomaine.fr:/opt/gamedashboard/backups/*.tar.enc' .
+scp root@panel.mondomaine.fr:/opt/gamedashboard/backup.key .   # une fois, dans un gestionnaire de secrets
 ```
-
-Rangez-le comme un mot de passe : dans un gestionnaire de secrets ou un
-stockage chiffré, pas dans un dossier partagé.
 
 ### 4.4 Sans aucune question
 
@@ -523,15 +526,18 @@ node : `journalctl -u wings -f`.
 gamedashboard backup
 ```
 
-Un seul fichier, `/opt/gamedashboard/backups/gamedashboard-<date>.tar`,
+Un seul fichier, `/opt/gamedashboard/backups/gamedashboard-<date>.tar.enc`,
 lisible par root seul, qui contient **les deux moitiés indispensables** : la
-base (comptes, serveurs, réglages) et la clé qui déchiffre ses secrets. Les
-sept plus récentes sont gardées, les plus anciennes effacées.
+base (comptes, serveurs, réglages) et la clé qui déchiffre ses secrets. Il
+est chiffré par la clé des sauvegardes, `/opt/gamedashboard/backup.key`, à
+garder hors de la machine et à part des sauvegardes (§ 4.3). Les sept plus
+récentes sont gardées, les plus anciennes effacées.
 
 | Variable | Effet |
 |---|---|
 | `GD_GARDER=30` | nombre de sauvegardes gardées (7 par défaut) |
 | `GD_SAUVEGARDES=/mnt/disque` | dossier de destination |
+| `GD_CLE_SAUVEGARDE=/chemin/backup.key` | clé des sauvegardes, ailleurs qu'à sa place par défaut |
 
 **Chaque nuit, automatiquement** — une ligne dans la table de root
 (`sudo crontab -e`) :
@@ -553,11 +559,15 @@ Stockage des sauvegardes) : sans lui, elles meurent avec la machine.
 ### Restaurer sur une machine neuve
 
 1. Installer le panel normalement (étape 4), avec le **même domaine**.
-2. Y copier la sauvegarde, puis :
+2. Y remettre la clé des sauvegardes, gardée hors de l'ancienne machine :
+   `sudo install -m 600 -o root -g root backup.key /opt/gamedashboard/backup.key`.
+3. Y copier la sauvegarde, puis :
 
    ```bash
    sudo gamedashboard stop
-   sudo mkdir -p /tmp/restauration && sudo tar -xf gamedashboard-20260923-043000.tar -C /tmp/restauration
+   sudo mkdir -p /tmp/restauration
+   sudo openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -pass file:/opt/gamedashboard/backup.key \
+     -in gamedashboard-20260923-043000.tar.enc | sudo tar -x -C /tmp/restauration
    sudo cp -a /tmp/restauration/env/. /opt/gamedashboard/env/
    sudo -u postgres pg_restore --clean --if-exists -d gamedashboard < /tmp/restauration/base.dump
    sudo gamedashboard setup      # réaligne le mot de passe de la base et redémarre
@@ -645,7 +655,7 @@ Rien n'est caché. L'installation (`gamedashboard.sh install`, puis `infra/prod/
 | Paquets | `nginx`, `certbot`, `rsync`, `openssl`, `curl`, `sudo`, Node.js (NodeSource), PostgreSQL (apt.postgresql.org) |
 | Code du panel | `/opt/gamedashboard/app` ; les versions téléchargées dans `/opt/gamedashboard/releases/` (les deux dernières) |
 | Commande | `/usr/local/bin/gamedashboard` |
-| Sauvegardes | `/opt/gamedashboard/backups/`, par `gamedashboard backup` et avant chaque `update` |
+| Sauvegardes | `/opt/gamedashboard/backups/`, par `gamedashboard backup` et avant chaque `update`, chiffrées par `/opt/gamedashboard/backup.key` (root seul) |
 | Secrets | `/opt/gamedashboard/env/` (`api.env`, `web.env`, `.dbpass`), lisibles par root et le service seulement |
 | Utilisateur système | `gamedashboard`, sans shell ni mot de passe |
 | Base | rôle et base `gamedashboard` ; les autres bases ne sont pas touchées |
@@ -670,7 +680,7 @@ sudo -u postgres dropdb gamedashboard && sudo -u postgres dropuser gamedashboard
 sudo rm -rf /opt/gamedashboard /usr/local/bin/gamedashboard && sudo userdel gamedashboard
 ```
 
-`rm -rf /opt/gamedashboard` efface aussi les sauvegardes qui y sont : copiez-les
+`rm -rf /opt/gamedashboard` efface aussi les sauvegardes qui y sont, et leur clé : copiez-les
 d'abord ailleurs si vous voulez les garder.
 
 Les paquets (nginx, PostgreSQL, Node.js) restent installés : d'autres

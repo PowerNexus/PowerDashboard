@@ -38,7 +38,8 @@ Selon la porte, un geste, parfois plusieurs.
 | Clé applicative (facturation, boutique) | **Révoquer**, puis en émettre une nouvelle au système tiers | Administration › Clés applicatives |
 | Secret de signature d'un rappel sortant | Le régénérer | Administration › Rappels sortants |
 | `config.yml` d'un daemon, jeton de node | [Rotation du jeton de node](./rotation-jeton-node.md) | Administration › Nodes |
-| `api.env`, sauvegarde, `APP_SECRET_KEY` | [Rotation de la clé maître](./cle-maitre-secrets.md#1-rotation-de-la-clé-maître), puis rotation de **chaque** jeton de node | machine du panel |
+| `api.env`, `APP_SECRET_KEY`, sauvegarde **avec** sa clé (`backup.key`), ou archive `.tar` d'avant le chiffrement | [Rotation de la clé maître](./cle-maitre-secrets.md#1-rotation-de-la-clé-maître), puis rotation de **chaque** jeton de node | machine du panel |
+| Sauvegarde `.tar.enc` seule, sans sa clé | Rien à rotation : elle ne se lit pas. Vérifier que `backup.key` n'est pas sortie avec elle | — |
 | Serveur de jeu utilisé à mauvais escient | Suspendre le serveur | Administration › Serveurs › le serveur |
 
 **Ce que fait la suspension d'un compte**, dès la validation : plus aucune

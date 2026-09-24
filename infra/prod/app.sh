@@ -15,7 +15,7 @@
 #                             par curl : télécharge la dernière version et l'installe
 #   pnpm app:setup            installation guidée ; relancée, reconfigure et redémarre
 #   pnpm app:update           sauvegarde, puis passe à la dernière version publiée
-#   pnpm app:backup           sauvegarde la base et la clé maître dans un seul fichier
+#   pnpm app:backup           sauvegarde chiffrée de la base et de la clé maître, en un fichier
 #   pnpm app:start            démarre le panel et attend qu'il réponde
 #   pnpm app:stop             l'arrête (les serveurs de jeu continuent)
 #   pnpm app:restart          le redémarre
@@ -48,6 +48,13 @@ SITE=${GD_SITE:-https://github.com}
 INSTALLE=/opt/gamedashboard
 VERSIONS=$INSTALLE/releases
 SAUVEGARDES=${GD_SAUVEGARDES:-$INSTALLE/backups}
+# Clé des sauvegardes. Hors de env/, et c'est tout son intérêt : env/ est
+# dans l'archive, une clé rangée là s'y chiffrerait elle-même.
+CLE_SAUVEGARDE=${GD_CLE_SAUVEGARDE:-$INSTALLE/backup.key}
+# Réglages de chiffrement des sauvegardes, repris tels quels pour les relire
+# (docs/runbooks/restauration-base.md) : les changer rendrait illisibles les
+# sauvegardes déjà faites, qui ne disent pas avec quoi elles l'ont été.
+CHIFFRE=(-aes-256-cbc -pbkdf2 -iter 600000 -md sha256)
 COMMANDE=/usr/local/bin/gamedashboard
 SERVICES=(gamedashboard-api gamedashboard-web)
 NODE_MIN=24
@@ -99,7 +106,7 @@ ${G}GameDashboard — commandes${Z}
     ${P}restart            le redémarre
     ${P}status             état, adresse et version
     ${P}logs [api|web]     journaux en direct (Ctrl+C pour sortir)
-    ${P}backup             sauvegarde la base et la clé maître (dans $SAUVEGARDES)
+    ${P}backup             sauvegarde chiffrée de la base et de la clé maître (dans $SAUVEGARDES)
 
   Comptes
     ${P}admin <email> <prénom> <nom>   crée un administrateur
@@ -122,7 +129,7 @@ exige_root() {
   [ "$(id -u)" = 0 ] && return 0
   [ -n "$FICHIER" ] || echec "Il faut les droits de root." "Mettre sudo devant bash : curl … | sudo bash -s -- $ACTION"
   command -v sudo >/dev/null 2>&1 || echec "Il faut les droits de root, et sudo est absent." "Se connecter en root, puis relancer."
-  exec sudo --preserve-env=npm_lifecycle_event,GD_DEPOT,GD_SITE,GD_VERSION,GD_SAUVEGARDES,GD_GARDER \
+  exec sudo --preserve-env=npm_lifecycle_event,GD_DEPOT,GD_SITE,GD_VERSION,GD_SAUVEGARDES,GD_GARDER,GD_CLE_SAUVEGARDE \
     bash "$FICHIER" "$ACTION" "$@"
 }
 
@@ -249,10 +256,35 @@ script_api() {
 # Un seul fichier, qui contient les deux moitiés indispensables : la base, et
 # la clé qui déchiffre ses secrets. L'une sans l'autre ne restaure rien —
 # c'est l'erreur qu'un fichier unique empêche de faire.
+#
+# **Chiffré**, parce qu'il contient APP_SECRET_KEY : c'est le fichier qu'on
+# copie ailleurs, et en clair il suffisait de le lire pour déchiffrer tous
+# les secrets de la base. AES-256-CBC par `openssl enc`, présent sur toute
+# machine qui a installé le panel (deploy.sh s'en sert déjà), et qui ne
+# demande rien : `update` sauvegarde sans terminal. Il protège la lecture,
+# pas l'intégrité — le fichier reste entre les mains de l'exploitant.
+
+# La clé est tirée à la première sauvegarde, jamais remplacée ensuite : une
+# clé neuve rendrait illisibles toutes les sauvegardes déjà faites. Root
+# seul la lit ; le service, lui, n'en a pas l'usage.
+cle_sauvegarde() {
+  if [ ! -s "$CLE_SAUVEGARDE" ]; then
+    (umask 077 && openssl rand -base64 48 > "$CLE_SAUVEGARDE") \
+      || echec "Impossible d'écrire la clé des sauvegardes : $CLE_SAUVEGARDE"
+    printf '  %s!%s Clé des sauvegardes créée : %s\n' "$J" "$Z" "$CLE_SAUVEGARDE"
+    printf '    Copiez-la une fois hors de cette machine, à part des sauvegardes :\n'
+    printf '    sans elle, aucune ne se relit.\n'
+  fi
+  chown root:root "$CLE_SAUVEGARDE"
+  chmod 600 "$CLE_SAUVEGARDE"
+}
+
 sauvegarder() {
-  local garder=${GD_GARDER:-7} horodatage temp fichier
+  local garder=${GD_GARDER:-7} horodatage temp fichier claires
   [[ $garder =~ ^[0-9]+$ ]] && [ "$garder" -ge 1 ] || echec "GD_GARDER doit être un nombre, au moins 1."
+  command -v openssl >/dev/null 2>&1 || echec "openssl est absent : il chiffre les sauvegardes." "apt-get install openssl"
   install -d -m 700 "$SAUVEGARDES"
+  cle_sauvegarde
   horodatage=$(date +%Y%m%d-%H%M%S)
   temp=$(mktemp -d)
   info "Base de données…"
@@ -270,10 +302,13 @@ Sauvegarde GameDashboard du $(date '+%d/%m/%Y à %H:%M').
   env/        api.env, web.env, .dbpass — dont APP_SECRET_KEY
   RELEASE     la version qui tournait (absent pour une installation depuis git)
 
-Restaurer sur une machine où le panel est installé, avec le même domaine :
+Restaurer sur une machine où le panel est installé, avec le même domaine,
+et où la clé des sauvegardes a été remise ($CLE_SAUVEGARDE) :
 
   gamedashboard stop
-  mkdir -p /tmp/restauration && tar -xf CE-FICHIER.tar -C /tmp/restauration
+  mkdir -p /tmp/restauration
+  openssl enc -d ${CHIFFRE[*]} -pass file:$CLE_SAUVEGARDE \\
+    -in CE-FICHIER.tar.enc | tar -x -C /tmp/restauration
   cp -a /tmp/restauration/env/. /opt/gamedashboard/env/
   sudo -u postgres pg_restore --clean --if-exists -d gamedashboard < /tmp/restauration/base.dump
   gamedashboard setup
@@ -282,20 +317,33 @@ Restaurer sur une machine où le panel est installé, avec le même domaine :
 (Le dump passe par l'entrée standard : le dossier extrait n'est lisible que
 par root, et c'est voulu.)
 
-Ce fichier contient la clé maître : le ranger comme un mot de passe.
+Une fois déchiffrée, cette archive contient la clé maître : ne la laisser
+nulle part en clair.
 EOF
-  fichier="$SAUVEGARDES/gamedashboard-$horodatage.tar"
-  (umask 077 && tar -cf "$fichier" -C "$temp" .)
+  fichier="$SAUVEGARDES/gamedashboard-$horodatage.tar.enc"
+  # L'archive ne touche jamais le disque en clair : tar écrit dans openssl.
+  # La clé est lue dans son fichier (`file:`) ; en argument (`pass:`), tout
+  # utilisateur de la machine la lirait dans `ps`.
+  (umask 077 && tar -cf - -C "$temp" . | openssl enc -e "${CHIFFRE[@]}" -salt \
+    -pass "file:$CLE_SAUVEGARDE" -out "$fichier") \
+    || { rm -rf "$temp"; rm -f "$fichier"; echec "Le chiffrement de la sauvegarde a échoué." "Rien n'a été écrit ; les sauvegardes précédentes sont intactes."; }
   rm -rf "$temp"
   chmod 600 "$fichier"
-  ok "Sauvegarde : $fichier ($(du -h "$fichier" | cut -f1))"
+  ok "Sauvegarde chiffrée : $fichier ($(du -h "$fichier" | cut -f1))"
 
+  # Les archives d'avant le chiffrement (.tar, en clair) comptent dans la
+  # rotation : elles vieillissent et partent avec les autres.
   # shellcheck disable=SC2012
-  ls -1t "$SAUVEGARDES"/gamedashboard-*.tar 2>/dev/null | tail -n +"$((garder + 1))" | while read -r vieille; do
+  ls -1t "$SAUVEGARDES"/gamedashboard-*.tar* 2>/dev/null | tail -n +"$((garder + 1))" | while read -r vieille; do
     rm -f "$vieille"
     info "Ancienne sauvegarde retirée : $(basename "$vieille")"
   done
-  printf '  %s!%s Elle reste sur cette machine : copiez-la ailleurs (scp), elle contient la clé maître.\n' "$J" "$Z"
+  claires=$(find "$SAUVEGARDES" -maxdepth 1 -name 'gamedashboard-*.tar' | wc -l)
+  if [ "$claires" -gt 0 ]; then
+    info "$claires sauvegarde(s) d'avant le chiffrement, dans $SAUVEGARDES, portent encore la clé maître en clair."
+  fi
+  printf '  %s!%s Elle reste sur cette machine : copiez-la ailleurs (scp). Gardez aussi hors de la machine,\n' "$J" "$Z"
+  printf '    une fois pour toutes et à part des sauvegardes, leur clé : %s\n' "$CLE_SAUVEGARDE"
 }
 
 # ---------------------------------------------------------------------------

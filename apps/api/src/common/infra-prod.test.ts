@@ -356,6 +356,57 @@ describe("CLI autonome (gamedashboard.sh)", () => {
 });
 
 /**
+ * La sauvegarde d'exploitation contient `env/`, donc `APP_SECRET_KEY` : elle
+ * s'écrivait en clair, un `.tar` en 600 que l'on copie ensuite ailleurs (ASVS
+ * 8.1, 14.1). Elle se chiffre désormais, sans rien demander — `update` la
+ * prend sans terminal — et reste restaurable par la commande du runbook.
+ */
+describe("sauvegarde d'exploitation (app.sh backup)", () => {
+  const app = readFileSync(join(PROD, "app.sh"), "utf8");
+  /** Le corps d'une fonction du script ; vide si elle n'existe pas. */
+  const fonction = (nom: string) => {
+    const debut = app.indexOf(`${nom}() {`);
+    return debut < 0 ? "" : app.slice(debut, app.indexOf("\n}\n", debut));
+  };
+  const sauvegarder = fonction("sauvegarder");
+  const cle = fonction("cle_sauvegarde");
+  const runbook = readFileSync(join(RACINE, "docs", "runbooks", "restauration-base.md"), "utf8");
+
+  it("n'écrit l'archive qu'à travers le chiffrement", () => {
+    expect(sauvegarder).toContain('fichier="$SAUVEGARDES/gamedashboard-$horodatage.tar.enc"');
+    expect(sauvegarder).toMatch(/tar -cf - -C "\$temp" \. \| openssl enc -e "\$\{CHIFFRE\[@\]\}"/);
+    expect(sauvegarder).not.toMatch(/tar -cf "\$fichier"/);
+  });
+
+  it("lit sa clé dans un fichier hors de env/, jamais sur la ligne de commande", () => {
+    const chemin = /^CLE_SAUVEGARDE=\$\{GD_CLE_SAUVEGARDE:-([^}]+)\}$/m.exec(app)?.[1];
+    expect(chemin).toBeDefined();
+    // env/ est dans l'archive : une clé rangée là s'y chiffrerait elle-même.
+    expect(chemin).not.toContain("/env");
+    expect(sauvegarder).toContain('-pass "file:$CLE_SAUVEGARDE"');
+    // `pass:` et `env:` la montreraient à `ps`, ou à l'environnement du processus.
+    expect(app).not.toMatch(/-pass "?(pass|env):/);
+    expect(app).toMatch(/--preserve-env=\S*GD_CLE_SAUVEGARDE/);
+  });
+
+  it("tire la clé sans rien demander, et ne remplace jamais une clé existante", () => {
+    expect(sauvegarder).toContain("cle_sauvegarde");
+    expect(cle).toMatch(/if \[ ! -s "\$CLE_SAUVEGARDE" \]/);
+    expect(cle).toMatch(/umask 077 && openssl rand/);
+    expect(cle).toContain('chmod 600 "$CLE_SAUVEGARDE"');
+    // Le seul `read` admis lit la liste des anciennes archives, pas le clavier.
+    const lectures = `${sauvegarder}\n${cle}`.replace(/\| while read -r \w+; do/g, "");
+    expect(lectures).not.toMatch(/\bread\b|\/dev\/tty/);
+  });
+
+  it("se déchiffre par la commande du runbook de restauration", () => {
+    const chiffre = /^CHIFFRE=\(([^)]+)\)$/m.exec(app)?.[1];
+    expect(chiffre).toMatch(/^-aes-256-cbc -pbkdf2 -iter \d{6,} -md sha256$/);
+    expect(runbook).toContain(`openssl enc -d ${chiffre} -pass file:`);
+  });
+});
+
+/**
  * Le 19 mars 2026, 76 des 77 tags de `aquasecurity/trivy-action` ont été
  * réécrits vers un voleur de secrets (GHSA, correctif 0.35.0). Un tag se
  * réécrit, une empreinte de commit non : toute action tierce est épinglée

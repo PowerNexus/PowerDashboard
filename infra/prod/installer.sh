@@ -465,10 +465,12 @@ cat <<EOF
 
   ${G}Sauvegardez dès maintenant${Z} : gamedashboard backup, puis copiez le
   fichier produit hors de cette machine. Il contient APP_SECRET_KEY, sans
-  laquelle une sauvegarde de la base ne sert à rien.
+  laquelle une sauvegarde de la base ne sert à rien. Il est chiffré par
+  /opt/gamedashboard/backup.key, tirée à cette première sauvegarde : copiez-la
+  aussi, une fois, à part — sans elle, aucune sauvegarde ne se relit.
 
   Au quotidien, de n'importe où (gamedashboard help pour la liste) :
     gamedashboard status | start | stop | restart | logs [api|web]
-    gamedashboard backup      sauvegarde la base et la clé maître
+    gamedashboard backup      sauvegarde chiffrée de la base et de la clé maître
     gamedashboard update      sauvegarde, puis passe à la dernière version
 EOF
