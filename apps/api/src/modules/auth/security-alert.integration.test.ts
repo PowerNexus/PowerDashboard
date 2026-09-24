@@ -379,6 +379,15 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
        * écrivait encore en base pendant que le test suivant vidait les tables,
        * et le `truncate` finissait une fois sur trois en interblocage.
        */
+      /*
+       * L'envoi est libéré **une fois parti**. L'alerte le lance après la
+       * réponse, puisque la connexion ne l'attend pas : libérer aussitôt ne
+       * libérait rien — l'envoi, parti ensuite, pendait pour toujours, et
+       * `settled()` avec lui. Le test dépassait son délai une fois sur deux,
+       * sans rien dire de la connexion, qui avait répondu en quelques
+       * dizaines de millisecondes.
+       */
+      await vi.waitFor(() => expect(liberer).toBeDefined());
       liberer?.();
       await alerts.settled();
     });
