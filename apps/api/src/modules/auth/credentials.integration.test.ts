@@ -1,7 +1,7 @@
-import { hashPassword } from "@gamedashboard/auth";
+import { hashPassword, totpCodeAt, totpStep } from "@gamedashboard/auth";
 import { activityLogs, type Database, loginAttempts, users } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
-import { asc, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createThrowawayDatabase,
@@ -80,12 +80,15 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
   let mail: { send: ReturnType<typeof vi.fn>; isConfigured: () => Promise<boolean> };
   let tokens: AuthTokenRepository;
   let alerts: SecurityAlertService;
+  let twoFactor: TwoFactorRepository;
   let controller: AuthController;
   /** Réglages booléens de la plateforme ; absents, ils valent faux. */
   let settings: Record<string, boolean>;
 
   beforeAll(async () => {
     Logger.overrideLogger(false);
+    // Le secret TOTP est chiffré en base.
+    process.env.APP_SECRET_KEY ??= "clé-de-test-uniquement-pour-vitest";
     throwaway = await createThrowawayDatabase();
     db = throwaway.db;
     digest = await hashPassword(PASSWORD);
@@ -118,6 +121,7 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     const sessions = new SessionRepository(db);
     const activity = new ActivityService(db);
     tokens = new AuthTokenRepository(db);
+    twoFactor = new TwoFactorRepository(db);
     alerts = new SecurityAlertService(
       new SecurityAlertRepository(db),
       new NotificationsService(db, new NotificationPreferencesRepository(db), mailer, {
@@ -133,7 +137,7 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       userRepository,
       sessions,
       activity,
-      new TwoFactorRepository(db),
+      twoFactor,
       {} as never,
       {} as never,
       { configuration: async () => null } as never,
@@ -212,6 +216,41 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       .values(Array.from({ length: count }, () => ({ email, ip, success: false, at })));
   }
 
+  /** Active le TOTP, confirmé par le code du pas précédent : celui en cours reste libre. */
+  async function enableTotp(account: Account): Promise<string> {
+    const secret = await twoFactor.beginSetup(account.id);
+    if (!(await twoFactor.confirmSetup(account.id, totpCodeAt(secret, totpStep() - 1)))) {
+      throw new Error("TOTP non confirmé");
+    }
+    return secret;
+  }
+
+  /** Second facteur, à partir du défi rendu par la connexion. */
+  async function secondFactor(challenge: string, code: string, ip: string) {
+    const reply = fakeReply();
+    await controller.loginTwoFactor(
+      { challenge, code },
+      { ip, headers: { "user-agent": FIREFOX }, socket: { remoteAddress: "127.0.0.1" } } as never,
+      reply as never,
+    );
+    return reply;
+  }
+
+  /** Réussites consignées pour ce compte depuis cette adresse. */
+  async function successesFrom(email: string, ip: string): Promise<number> {
+    const rows = await db
+      .select({ at: loginAttempts.at })
+      .from(loginAttempts)
+      .where(
+        and(
+          eq(loginAttempts.email, email),
+          eq(loginAttempts.ip, ip),
+          eq(loginAttempts.success, true),
+        ),
+      );
+    return rows.length;
+  }
+
   /** Le journal d'audit, dans l'ordre d'écriture. */
   async function journal() {
     return await db
@@ -261,6 +300,58 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
 
       const client = await seedAccount("user");
       expect((await controller.twoFactorStatus(signedIn(client))).data.required).toBe(false);
+    });
+  });
+
+  describe("verrou par compte", () => {
+    const HOME = "203.0.113.7";
+    const OUTSIDER = "198.51.100.66";
+
+    it("n'enferme pas dehors une adresse d'où le titulaire est déjà entré", async () => {
+      const account = await seedAccount();
+      const lastWeek = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+      await db
+        .insert(loginAttempts)
+        .values({ email: account.email, ip: HOME, success: true, at: lastWeek });
+
+      // Un tiers épuise le verrou du compte depuis ailleurs.
+      await seedFailures(account.email, OUTSIDER, 10);
+
+      expect((await login(account.email, PASSWORD, OUTSIDER)).statusCode).toBe(429);
+      expect((await login(account.email, PASSWORD, "192.0.2.10")).statusCode).toBe(429);
+
+      // Le titulaire, lui, entre de chez lui : c'était tout l'objet du verrou.
+      const reply = await login(account.email, PASSWORD, HOME);
+      expect(reply.statusCode).toBe(200);
+      expect(reply.cookies.size).toBe(1);
+    });
+
+    it("ne tient pour connue qu'une adresse passée par toutes les preuves", async () => {
+      const account = await seedAccount();
+      await enableTotp(account);
+
+      // Le mot de passe seul ne compte pas comme une connexion réussie : sinon,
+      // qui le connaît déjà se ferait exempter du verrou en le tapant une fois,
+      // puis essaierait les codes à six chiffres sans limite de compte.
+      const first = await login(account.email, PASSWORD, OUTSIDER);
+      const { challenge } = first.body as { challenge: string };
+      expect(challenge).toBeTruthy();
+      expect(await successesFrom(account.email, OUTSIDER)).toBe(0);
+
+      await seedFailures(account.email, "192.0.2.10", 10);
+      expect((await secondFactor(challenge, "000000", OUTSIDER)).statusCode).toBe(429);
+
+      // Le second facteur accepté, lui, fait de l'adresse une adresse connue.
+      const other = await seedAccount();
+      const otherSecret = await enableTotp(other);
+      const step = await login(other.email, PASSWORD, HOME);
+      const accepted = await secondFactor(
+        (step.body as { challenge: string }).challenge,
+        totpCodeAt(otherSecret, totpStep()),
+        HOME,
+      );
+      expect(accepted.statusCode).toBe(200);
+      expect(await successesFrom(other.email, HOME)).toBe(1);
     });
   });
 

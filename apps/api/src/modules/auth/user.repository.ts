@@ -209,16 +209,44 @@ export class UserRepository {
 
   /**
    * Échecs récents sur les deux axes de `throttleDecision` : le compte et
-   * l'adresse. Une IP absente (proxy mal configuré) ne compte pas : elle est
-   * enregistrée sous `0.0.0.0`, et compter cette valeur verrouillerait tout le
-   * monde sur un seul compteur.
+   * l'adresse, et si l'adresse est déjà connue du compte. Une IP absente
+   * (proxy mal configuré) ne compte pas : elle est enregistrée sous `0.0.0.0`,
+   * et compter cette valeur verrouillerait tout le monde sur un seul compteur
+   * — ou, pour l'exemption, exempterait tout le monde à la fois.
    */
-  async recentFailures(email: string, ip: string | null): Promise<{ account: number; ip: number }> {
-    const [account, byIp] = await Promise.all([
+  async recentFailures(
+    email: string,
+    ip: string | null,
+  ): Promise<{ account: number; ip: number; knownIp: boolean }> {
+    const [account, byIp, knownIp] = await Promise.all([
       this.countRecentFailures(email),
       ip === null ? Promise.resolve(0) : this.countRecentFailuresByIp(ip),
+      ip === null ? Promise.resolve(false) : this.hasSucceededFrom(email, ip),
     ]);
-    return { account, ip: byIp };
+    return { account, ip: byIp, knownIp };
+  }
+
+  /**
+   * Le compte a-t-il déjà été ouvert depuis cette adresse ?
+   *
+   * Lu dans les réussites de `login_attempts`, que la rétention garde trente
+   * jours : une adresse revue dans le mois est celle d'un titulaire, pas celle
+   * de l'inconnu qui essaie de le verrouiller. Une réussite n'y est posée
+   * qu'une fois **toutes** les preuves données (voir `AuthController.login`).
+   */
+  async hasSucceededFrom(email: string, ip: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ at: loginAttempts.at })
+      .from(loginAttempts)
+      .where(
+        and(
+          sql`lower(${loginAttempts.email}) = lower(${email})`,
+          eq(loginAttempts.ip, ip),
+          eq(loginAttempts.success, true),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
   }
 
   /** Échecs récents depuis cette adresse, tous comptes confondus. */

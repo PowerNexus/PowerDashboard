@@ -315,8 +315,6 @@ export class AuthController {
       return;
     }
 
-    await this.users.recordAttempt(parsed.data.email, request.ip ?? null, true);
-
     // Rehachage progressif : c'est le seul moment où le mot de passe est en
     // clair. Une hausse des paramètres Argon2 se propage ainsi compte par
     // compte, à la connexion suivante, sans réinitialisation générale.
@@ -348,6 +346,16 @@ export class AuthController {
       return;
     }
 
+    /*
+     * La réussite n'est consignée qu'ici, une fois **toutes** les preuves
+     * données, et plus dès le mot de passe accepté.
+     *
+     * Elle fait de l'adresse une adresse connue du compte, que le verrou
+     * n'arrête plus (`throttleDecision`). Posée avant le second facteur, elle
+     * aurait exempté du verrou quiconque connaît le mot de passe, au moment
+     * précis où il lui reste six chiffres à deviner.
+     */
+    await this.users.recordAttempt(parsed.data.email, request.ip ?? null, true);
     await this.issueSession(user.id, request, reply, "password");
   }
 
@@ -432,6 +440,8 @@ export class AuthController {
       reply.status(401).send({ message: "Demande de connexion expirée. Recommencez." });
       return;
     }
+    // Toutes les preuves sont données : l'adresse devient connue du compte.
+    await this.users.recordAttempt(user.email, request.ip ?? null, true);
     await this.issueSession(user.id, request, reply, sealed.method ?? "password");
   }
 
@@ -470,7 +480,9 @@ export class AuthController {
    * Rend le délai à appliquer en cas d'échec, ou `null` après avoir répondu
    * 429 : au-delà de `MAX_ATTEMPTS_PER_ACCOUNT` échecs sur le compte ou de
    * `MAX_ATTEMPTS_PER_IP` depuis l'adresse dans la fenêtre glissante, plus
-   * rien n'est vérifié. Un délai seul ne suffisait pas : il s'attend en
+   * rien n'est vérifié. Le verrou du compte épargne les adresses d'où il a
+   * déjà été ouvert : sans cela, dix échecs volontaires d'un inconnu
+   * enfermaient dehors le titulaire. Un délai seul ne suffisait pas : il s'attend en
    * parallèle, et un million de codes TOTP se parcourt ainsi en une heure.
    *
    * La tentative refusée n'est pas enregistrée : la compter prolongerait le
