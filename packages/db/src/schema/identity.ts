@@ -175,6 +175,13 @@ export const userPasskeys = pgTable(
     counter: integer("counter").notNull().default(0),
     transports: text("transports").array().notNull().default([]),
     label: varchar("label", { length: 100 }).notNull(),
+    /**
+     * Domaine relais de la clé, quand c'est celui d'un revendeur. `null` : le
+     * domaine de la plateforme (`PANEL_ORIGIN`). Une clé est liée au domaine
+     * où elle a été créée — l'authentifiant signe ce nom — et ne sert pas
+     * ailleurs : il faut le savoir pour ne la proposer qu'au bon endroit.
+     */
+    rpId: varchar("rp_id", { length: 255 }),
     lastUsedAt: moment("last_used_at"),
     ...timestamps,
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MissingPanelOriginError, relyingPartyFromEnv } from "./relying-party";
+import { MissingPanelOriginError, relyingPartyFor, relyingPartyFromEnv } from "./relying-party";
 
 describe("relyingPartyFromEnv", () => {
   it("sépare le domaine de l'origine", () => {
@@ -36,5 +36,33 @@ describe("relyingPartyFromEnv", () => {
       );
     }
     expect(() => relyingPartyFromEnv({} as NodeJS.ProcessEnv)).toThrow(MissingPanelOriginError);
+  });
+});
+
+describe("relyingPartyFor", () => {
+  const ENV = { PANEL_ORIGIN: "https://game.example.fr" } as NodeJS.ProcessEnv;
+  const PLATEFORME = { name: "GameDashboard", resellerId: null };
+  const REVENDEUR = { name: "Revendeur", resellerId: "r1" };
+
+  it("prend le domaine vérifié d'un revendeur, avec sa portée", () => {
+    expect(relyingPartyFor("Panel.Revendeur.fr:443", REVENDEUR, ENV)).toEqual({
+      name: "Revendeur",
+      id: "panel.revendeur.fr",
+      origin: "https://panel.revendeur.fr",
+      scope: "panel.revendeur.fr",
+    });
+  });
+
+  it("retombe sur PANEL_ORIGIN pour tout hôte qui n'est pas un revendeur vérifié", () => {
+    // `resellerId` nul : l'en-tête d'arrivée ne désigne aucun domaine vérifié
+    // — peut-être forgé — et ne doit rien choisir.
+    for (const host of ["evil.example", null, ""]) {
+      expect(relyingPartyFor(host, PLATEFORME, ENV)).toEqual({
+        name: "GameDashboard",
+        id: "game.example.fr",
+        origin: "https://game.example.fr",
+        scope: null,
+      });
+    }
   });
 });

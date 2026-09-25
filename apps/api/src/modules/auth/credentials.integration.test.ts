@@ -194,6 +194,9 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       {} as never,
       {} as never,
       confirmation,
+      {
+        forHost: async () => ({ name: "GameDashboard", resellerId: null }),
+      } as unknown as BrandingService,
     );
     account_ = new AccountController(apiKeys as never, {} as never, confirmation);
   });

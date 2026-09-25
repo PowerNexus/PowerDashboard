@@ -361,7 +361,9 @@ formulaire, pour qui préfère son compte Google au mot de passe :
 1. Dans la [console Google Cloud](https://console.cloud.google.com/apis/credentials),
    *Créer des identifiants › ID client OAuth*, type **Application Web**.
 2. *URI de redirection autorisés* : `https://panel.mondomaine.fr/auth/google/callback`,
-   à l'identique.
+   à l'identique. Ajouter la même adresse pour chaque domaine vérifié de
+   revendeur (`https://panel.revendeur.fr/auth/google/callback`) : la connexion
+   revient sur le domaine d'où elle est partie.
 3. Recopier l'identifiant et le secret dans *Administration › Paramètres ›
    Connexion avec Google*, puis cocher *Proposer le bouton*.
 

@@ -17,8 +17,10 @@ import {
 } from "../../test/throwaway-database";
 import { ActivityService } from "../activity/activity.service";
 import type { PlatformSettingsService, SsoConfiguration } from "../admin/platform-settings.service";
+import type { BrandingService } from "../reseller/branding.service";
 import { AuthController } from "./auth.controller";
 import { readChallenge } from "./login-challenge";
+import { PasskeyRepository } from "./passkey.repository";
 import type { SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
 import { SessionIssuerService } from "./session-issuer.service";
@@ -150,7 +152,8 @@ describe.skipIf(!HAS_DATABASE)("Connexion avec Google (intégration)", () => {
       sessions,
       new ActivityService(db),
       new TwoFactorRepository(db),
-      {} as never,
+      // Les clés d'accès : l'écran du second facteur demande s'il y en a ici.
+      new PasskeyRepository(db),
       {} as never,
       new SsoService(db, reglages),
       {} as never,
@@ -167,6 +170,13 @@ describe.skipIf(!HAS_DATABASE)("Connexion avec Google (intégration)", () => {
       {} as never,
       // La confirmation du mot de passe : Google n'en demande pas.
       {} as never,
+      {
+        // Un seul domaine de revendeur vérifié : `panel.revendeur.fr`.
+        forHost: async (host: string | null) =>
+          host === "panel.revendeur.fr"
+            ? { name: "Revendeur", resellerId: "revendeur" }
+            : { name: "GameDashboard", resellerId: null },
+      } as unknown as BrandingService,
     );
   });
 
@@ -192,6 +202,32 @@ describe.skipIf(!HAS_DATABASE)("Connexion avec Google (intégration)", () => {
     if (!row) throw new Error("compte non créé");
     return row.id;
   }
+
+  /**
+   * Le retour revient sur le domaine d'où la cérémonie est partie.
+   *
+   * Seule l'origine du panel était admise : depuis le domaine d'un revendeur,
+   * le retour tombait sur celui de la plateforme, où le cookie de la
+   * cérémonie n'existe pas, et la connexion échouait en « demande expirée ».
+   */
+  it("admet le retour sur le domaine vérifié d'un revendeur, pas sur un autre", async () => {
+    const accepte = fakeReply();
+    await controller.googleStart(
+      { redirectUri: "https://panel.revendeur.fr/auth/google/callback" },
+      accepte as never,
+    );
+    expect(accepte.statusCode).toBe(200);
+
+    for (const ailleurs of [
+      "https://evil.example/auth/google/callback",
+      "http://panel.revendeur.fr/auth/google/callback",
+      "https://panel.revendeur.fr:8443/auth/google/callback",
+    ]) {
+      const refuse = fakeReply();
+      await controller.googleStart({ redirectUri: ailleurs }, refuse as never);
+      expect(refuse.statusCode, ailleurs).toBe(422);
+    }
+  });
 
   it("part chez Google avec PKCE, et laisse choisir le compte", async () => {
     const reply = fakeReply();

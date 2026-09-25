@@ -1,5 +1,6 @@
 import "server-only";
-import { forwardedIdentityHeaders } from "./forwarded";
+import { getBranding } from "./branding";
+import { currentHost, forwardedIdentityHeaders } from "./forwarded";
 
 const API_URL = process.env.API_URL ?? "http://127.0.0.1:3201";
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN ?? "http://localhost:3000";
@@ -49,8 +50,26 @@ export function ceremonyPath(ceremony: Ceremony): string {
  * refusent l'échange à la moindre différence — un port, une barre oblique
  * finale suffisent.
  */
-export function ceremonyRedirectUri(ceremony: Ceremony): string {
-  return new URL(`${ceremonyPath(ceremony)}/callback`, PANEL_ORIGIN).toString();
+export function ceremonyRedirectUri(ceremony: Ceremony, origin: string = PANEL_ORIGIN): string {
+  return new URL(`${ceremonyPath(ceremony)}/callback`, origin).toString();
+}
+
+/**
+ * Origine de la cérémonie : le domaine vérifié d'un revendeur quand on arrive
+ * par lui, celle du panel sinon.
+ *
+ * Le retour doit revenir **là où la cérémonie est partie** : l'état et le
+ * vérificateur PKCE vivent dans un cookie de ce domaine, et un retour sur le
+ * domaine de la plateforme ne les trouverait pas — la cérémonie échouait
+ * alors en « demande expirée ». La marque ne désigne un revendeur
+ * (`resellerId`) que pour un domaine vérifié ; l'API refait ce contrôle.
+ *
+ * Chaque domaine doit figurer parmi les adresses de retour déclarées chez le
+ * fournisseur (Google, l'annuaire), qui compare à l'identique.
+ */
+export async function ceremonyOrigin(): Promise<string> {
+  const [host, branding] = await Promise.all([currentHost(), getBranding()]);
+  return host !== null && branding.resellerId !== null ? `https://${host}` : PANEL_ORIGIN;
 }
 
 /** État de l'authentification unique, pour la page de connexion. */
@@ -93,7 +112,7 @@ export async function startCeremony(ceremony: Ceremony): Promise<{
   const response = await fetch(`${API_URL}/api/v1/auth/${ceremony}/start`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ redirectUri: ceremonyRedirectUri(ceremony) }),
+    body: JSON.stringify({ redirectUri: ceremonyRedirectUri(ceremony, await ceremonyOrigin()) }),
     cache: "no-store",
   }).catch(() => null);
 
@@ -127,7 +146,11 @@ export async function completeCeremony(
     // Cette cérémonie ouvre une session : l'appareil qui apparaîtra dans la
     // liste doit être celui du visiteur, pas le serveur de rendu.
     headers: { "content-type": "application/json", ...(await forwardedIdentityHeaders()) },
-    body: JSON.stringify({ code, codeVerifier, redirectUri: ceremonyRedirectUri(ceremony) }),
+    body: JSON.stringify({
+      code,
+      codeVerifier,
+      redirectUri: ceremonyRedirectUri(ceremony, await ceremonyOrigin()),
+    }),
     cache: "no-store",
   });
 }

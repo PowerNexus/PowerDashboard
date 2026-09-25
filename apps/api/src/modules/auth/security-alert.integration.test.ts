@@ -155,6 +155,9 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       {} as never,
       // Le verrou et la trace des échecs, que la connexion emploie.
       new PasswordConfirmationService(users, alerts),
+      {
+        forHost: async () => ({ name: "GameDashboard", resellerId: null }),
+      } as unknown as BrandingService,
     );
   });
 

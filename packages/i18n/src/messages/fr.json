@@ -1599,6 +1599,7 @@
     "passkeyLabel": "Nom de la clé",
     "passkeyLabelHint": "Pour la reconnaître dans la liste. Demandé maintenant, car après la cérémonie on ne sait plus laquelle on vient de toucher.",
     "passkeyLabelPlaceholder": "YubiKey du bureau",
+    "passkeyDomain": "Utilisable seulement sur {domain}",
     "passkeyLastUsed": "Dernier emploi",
     "passkeyNeverUsed": "Jamais employée",
     "sshSection": "Accès SFTP par clé",
