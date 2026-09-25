@@ -59,6 +59,12 @@ export const eggs = pgTable(
      * d'exécuté : ce sont des suggestions, la console envoie ce qu'on tape.
      */
     consoleCommands: text("console_commands").array().notNull().default([]),
+    /**
+     * Commandes de la vue joueurs (`kick {player} {reason}`…), extension propre
+     * à GameDashboard. Jamais servie à Wings : le panel les tape lui-même dans
+     * la console.
+     */
+    playerCommands: jsonb("player_commands").notNull().default({}),
 
     /** Provenance, pour distinguer un egg importé d'un egg écrit à la main (§8.3). */
     sourceId: uuid("source_id").references(() => eggSources.id, { onDelete: "set null" }),

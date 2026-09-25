@@ -7,6 +7,7 @@ import type { WingsClientService } from "../wings/wings-client.service";
 import type { WingsTokenService } from "../wings/wings-token.service";
 import type { FileUploadService } from "./file-upload.service";
 import type { ServerAccessService } from "./server-access.service";
+import type { ServerPlayersService } from "./server-players.service";
 import { ServerRuntimeController } from "./server-runtime.controller";
 
 /**
@@ -40,6 +41,7 @@ function monter() {
     {} as WingsTokenService,
     activity as unknown as ActivityService,
     {} as FileUploadService,
+    {} as ServerPlayersService,
   );
   return { controleur, wings, activity };
 }

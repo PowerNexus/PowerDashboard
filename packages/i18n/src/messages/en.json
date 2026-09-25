@@ -1286,7 +1286,8 @@
     "schedules": "Schedules",
     "activity": "Activity log",
     "incidents": "Incidents",
-    "engine": "Engine"
+    "engine": "Engine",
+    "players": "Players"
   },
   "network": {
     "title": "Network",
@@ -2471,5 +2472,36 @@
     "reactivateBody": "Suspension reason: {reason}. The holder will be able to sign in again; their API keys and SFTP will work again.",
     "reactivateConfirm": "Reactivate",
     "reactivated": "Account reactivated."
+  },
+  "players": {
+    "title": "Players",
+    "subtitle": "Who is online, and the game's moderation commands.",
+    "act": "Act on a player",
+    "actHint": "The panel types the command declared by the game into the console. The player may be offline.",
+    "counter": "{online} / {max} players",
+    "unknownCount": "Player count unknown",
+    "observed": "Checked",
+    "noProbe": "No recent check",
+    "noProbeHint": "The panel checks the server every minute while it runs. Start it, or wait for the next check.",
+    "empty": "Nobody is online",
+    "emptyHint": "You can still ban or whitelist an offline player.",
+    "partial": "The game only reports some of the connected players: the list below is a sample.",
+    "noCommands": "No moderation commands for this game",
+    "noCommandsHint": "This server's egg declares no player commands (player_commands key). Use the console instead.",
+    "playerLabel": "Player",
+    "actionLabel": "Action",
+    "reasonLabel": "Reason",
+    "reasonHint": "Optional. Shown to the player by the game.",
+    "send": "Send",
+    "sent": "{action}: command sent for {player}.",
+    "action": {
+      "kick": "Kick",
+      "ban": "Ban",
+      "pardon": "Unban",
+      "whitelist_add": "Add to whitelist",
+      "whitelist_remove": "Remove from whitelist",
+      "op": "Make operator",
+      "deop": "Remove operator"
+    }
   }
 }

@@ -47,6 +47,9 @@ export const SERVER_PERMISSIONS = [
   // Rappels sortants du client : son propre point d'entrée, sur son serveur.
   "webhooks.read",
   "webhooks.manage",
+  // Vue joueurs : voir qui est connecté n'est pas agir sur eux.
+  "players.read",
+  "players.manage",
 ] as const;
 
 export const ServerPermission = z.enum(SERVER_PERMISSIONS);
@@ -56,7 +59,7 @@ export const SubuserRolePreset = z.enum(["viewer", "moderator", "developer", "ow
 export type SubuserRolePreset = z.infer<typeof SubuserRolePreset>;
 
 export const ROLE_PRESETS: Record<SubuserRolePreset, readonly ServerPermission[]> = {
-  viewer: ["console.read", "files.read", "backups.read", "activity.read"],
+  viewer: ["console.read", "files.read", "backups.read", "activity.read", "players.read"],
   moderator: [
     "console.read",
     "console.send",
@@ -66,6 +69,8 @@ export const ROLE_PRESETS: Record<SubuserRolePreset, readonly ServerPermission[]
     "files.read",
     "backups.read",
     "activity.read",
+    "players.read",
+    "players.manage",
   ],
   developer: SERVER_PERMISSIONS.filter(
     (p) => !p.startsWith("subusers.") && p !== "settings.reinstall",
@@ -383,6 +388,20 @@ export const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       },
     ],
   },
+  {
+    key: "players",
+    label: "Joueurs",
+    description: "Voir les joueurs connectés et les modérer par les commandes du jeu.",
+    permissions: [
+      { value: "players.read", label: "Voir les joueurs connectés" },
+      {
+        value: "players.manage",
+        label: "Expulser, bannir et gérer la liste blanche",
+        warning:
+          "Nommer un opérateur exige en plus « Envoyer des commandes » : il obtient les pleins pouvoirs dans le jeu.",
+      },
+    ],
+  },
 ];
 
 /**
@@ -413,6 +432,8 @@ export const SUPPORT_SERVER_PERMISSIONS: readonly ServerPermission[] = [
   // L'assistance peut constater qu'un rappel n'arrive pas ; elle ne déclare
   // pas d'adresse à la place du client.
   "webhooks.read",
+  // Voir qui est connecté aide à diagnostiquer ; expulser ne regarde que le client.
+  "players.read",
 ];
 
 /** Une permission est-elle dans ce que l'assistance peut exercer ? */

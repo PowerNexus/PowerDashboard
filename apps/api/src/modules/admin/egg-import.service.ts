@@ -470,6 +470,7 @@ export class EggImportService {
       features: parsed.features,
       fileDenylist: parsed.fileDenylist,
       consoleCommands: parsed.consoleCommands,
+      playerCommands: parsed.playerCommands,
       sourceId: origin.sourceId,
       sourceRef: origin.sourceRef,
       importedAt: new Date().toISOString(),

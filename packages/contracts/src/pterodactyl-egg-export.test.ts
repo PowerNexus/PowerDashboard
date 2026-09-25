@@ -36,6 +36,7 @@ const RICHE: ParsedEgg = {
   features: ["eula", "java_version"],
   fileDenylist: ["*.jar.old"],
   consoleCommands: ["say <message>", "whitelist add <joueur>"],
+  playerCommands: { kick: "kick {player} {reason}", whitelist_add: "whitelist add {player}" },
   variables: [
     {
       name: "Fichier du serveur",
@@ -72,6 +73,7 @@ describe("exportPterodactylEgg", () => {
       features: [],
       fileDenylist: [],
       variables: [],
+      playerCommands: {},
     };
     expect(parsePterodactylEgg(exportPterodactylEgg(minimal))).toEqual(minimal);
   });

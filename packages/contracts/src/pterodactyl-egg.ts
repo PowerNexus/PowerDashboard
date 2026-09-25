@@ -11,6 +11,8 @@
  * de ce qu'on en accepte doit pouvoir être éprouvé sans les deux.
  */
 
+import { type PlayerCommands, readPlayerCommands } from "./player-commands";
+
 /** Versions du format qu'on sait lire. */
 export const SUPPORTED_EGG_VERSIONS = ["PTDL_v1", "PTDL_v2"] as const;
 export type SupportedEggVersion = (typeof SUPPORTED_EGG_VERSIONS)[number];
@@ -44,6 +46,8 @@ export interface ParsedEgg {
   /** Commandes du jeu proposées à la console (`say <message>`). */
   consoleCommands: string[];
   variables: ParsedEggVariable[];
+  /** Extension propre à GameDashboard : commandes de la vue joueurs (`player_commands`). */
+  playerCommands: PlayerCommands;
 }
 
 /** Ce qu'on reproche à un fichier, dit de façon à pouvoir le corriger. */
@@ -181,6 +185,7 @@ export function parsePterodactylEgg(input: unknown): ParsedEgg {
     // un egg venu de chez lui arrive donc sans commande proposée.
     consoleCommands: readStringArray(raw.console_commands),
     variables: readVariables(raw.variables),
+    playerCommands: readPlayerCommands(raw.player_commands),
   };
 }
 
@@ -247,6 +252,11 @@ export interface PterodactylEggExport {
     rules: string;
     field_type: "text";
   }[];
+  /**
+   * Clé propre à GameDashboard, absente quand l'egg n'en déclare pas.
+   * Pterodactyl ignore les clés qu'il ne connaît pas : l'export reste lisible.
+   */
+  player_commands?: PlayerCommands;
 }
 
 /**
@@ -298,6 +308,9 @@ export function exportPterodactylEgg(
       rules: variable.rules,
       field_type: "text",
     })),
+    ...(Object.keys(egg.playerCommands).length > 0
+      ? { player_commands: { ...egg.playerCommands } }
+      : {}),
   };
 }
 

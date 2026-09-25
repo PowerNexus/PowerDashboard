@@ -29,6 +29,7 @@ export * from "./openapi";
 export * from "./password";
 export * from "./permissions";
 export * from "./platform-settings";
+export * from "./player-commands";
 export * from "./provisioning";
 export * from "./pterodactyl-egg";
 export * from "./realtime";

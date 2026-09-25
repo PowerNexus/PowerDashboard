@@ -1326,6 +1326,104 @@
         }
       }
     },
+    "/api/v1/client/servers/{server}/players": {
+      "get": {
+        "summary": "Joueurs connectés (dernière sonde, échantillon) et actions proposées par l'egg.",
+        "description": "Clé personnelle. Portée requise : `players.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers-by-server-players",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "players.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "players.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « players.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      },
+      "post": {
+        "summary": "Expulser, bannir, gracier un joueur, gérer la liste blanche ou les opérateurs (op exige aussi console.send).",
+        "description": "Clé personnelle. Portée requise : `players.manage`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-post-servers-by-server-players",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "players.manage"
+            ]
+          }
+        ],
+        "x-gd-scope": "players.manage",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « players.manage »."
+          },
+          "2XX": {
+            "description": "Effectué."
+          }
+        }
+      }
+    },
     "/api/v1/client/servers/{server}/websocket": {
       "post": {
         "summary": "Obtenir un jeton websocket de dix minutes pour la console.",

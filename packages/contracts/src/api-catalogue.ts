@@ -77,6 +77,21 @@ export const CLIENT_ROUTES: ApiRoute[] = [
     group: "Serveurs",
   },
   {
+    method: "GET",
+    path: "/servers/{server}/players",
+    summary: "Joueurs connectés (dernière sonde, échantillon) et actions proposées par l'egg.",
+    scope: "players.read",
+    group: "Serveurs",
+  },
+  {
+    method: "POST",
+    path: "/servers/{server}/players",
+    summary:
+      "Expulser, bannir, gracier un joueur, gérer la liste blanche ou les opérateurs (op exige aussi console.send).",
+    scope: "players.manage",
+    group: "Serveurs",
+  },
+  {
     method: "POST",
     path: "/servers/{server}/websocket",
     summary: "Obtenir un jeton websocket de dix minutes pour la console.",

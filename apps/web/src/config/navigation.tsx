@@ -28,6 +28,7 @@ import {
   Store,
   Terminal,
   User,
+  UserRound,
   Users,
   Webhook,
 } from "lucide-react";
@@ -194,6 +195,7 @@ export function serverNav(
       items: [
         { label: t("console"), href: base, icon: <Terminal /> },
         { label: t("files"), href: `${base}/files`, icon: <Files /> },
+        { label: t("players"), href: `${base}/players`, icon: <UserRound /> },
         // Retirée quand le catalogue est fermé : l'API refuse déjà la route, et
         // laisser l'entrée mènerait à un écran qui ne peut que dire non.
         ...(features.marketplace
