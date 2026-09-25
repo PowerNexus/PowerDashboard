@@ -1,7 +1,7 @@
 import type { Database } from "@gamedashboard/db";
 import { describe, expect, it } from "vitest";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
-import { BrandingService } from "./branding.service";
+import { BrandingService, brandingInput } from "./branding.service";
 
 /**
  * Marque de la plateforme : tous ses champs sont lus, pas seulement le nom et
@@ -75,5 +75,43 @@ describe("BrandingService — marque de la plateforme", () => {
     expect((await svc.forHost(null)).name).toBe("Avant");
     svc.forgetAll();
     expect((await svc.forHost(null)).name).toBe("Après");
+  });
+});
+
+/**
+ * Non-régression : la route du revendeur recopiait les champs un par un et
+ * avait oublié `replyTo`. Le formulaire l'envoyait, la route le jetait, et
+ * chaque enregistrement de la marque effaçait l'adresse de réponse.
+ */
+describe("brandingInput — champs lus dans le corps", () => {
+  it("garde l'adresse de réponse, et tous les champs de la marque", () => {
+    const lu = brandingInput({
+      name: "Revendeur",
+      logoUrl: "/brand/fichier/0b6f2c1e-4a8d-4c52-9d0e-7a1b2c3d4e5f",
+      replyTo: "support@revendeur.fr",
+    });
+    expect(lu.replyTo).toBe("support@revendeur.fr");
+    expect(lu.name).toBe("Revendeur");
+    expect(Object.keys(lu).sort()).toEqual(
+      [
+        "accent",
+        "faviconUrl",
+        "footerText",
+        "loginTagline",
+        "logoUrl",
+        "name",
+        "replyTo",
+        "supportUrl",
+        "termsUrl",
+      ].sort(),
+    );
+  });
+
+  it("vide ce qui n'est pas une chaîne", () => {
+    expect(brandingInput({ name: 42, replyTo: ["a@b.fr"] })).toMatchObject({
+      name: "",
+      replyTo: "",
+    });
+    expect(brandingInput(null).accent).toBe("");
   });
 });
