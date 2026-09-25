@@ -37,6 +37,10 @@ NOM=${NOM//[^a-zA-Z0-9_.-]/-}
 VOLUME=$NOM-w
 RESEAU=$NOM-reseau
 BASE=$NOM-postgres
+# Tout conteneur d'un job porte ces deux étiquettes : `gd-ci` pour le balayage
+# des restes, `gd-ci.job` pour que `fermer` retire aussi ceux des outils
+# (Trivy, Semgrep, ZAP), qu'un job annulé laisserait tourner malgré `--rm`.
+ETIQUETTES=(--label gd-ci --label "gd-ci.job=$NOM")
 
 # Variables transmises au conteneur, si elles sont posées sur le runner.
 TRANSMISES=(CI APP_SECRET_KEY E2E_EMAIL E2E_PASSWORD TURBO_TELEMETRY_DISABLED NEXT_TELEMETRY_DISABLED
@@ -59,7 +63,7 @@ ouvrir() {
   docker network create --label gd-ci "$RESEAU" >/dev/null
   docker volume create --label gd-ci "$VOLUME" >/dev/null
 
-  local options=(--name "$NOM" --label gd-ci --network "$RESEAU" -w /w
+  local options=(--name "$NOM" "${ETIQUETTES[@]}" --network "$RESEAU" -w /w
     -v "$VOLUME:/w"
     # Caches d'une exécution à l'autre, sur la machine du runner : le store
     # pnpm et le navigateur de Playwright.
@@ -70,6 +74,12 @@ ouvrir() {
     # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
     -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
+    # Cache de build de Next (« No build cache found » sinon, et tout est
+    # recompilé) : `next build` vide son dossier de sortie sauf `cache`, et
+    # assembler.sh l'exclut de l'archive. Un volume pour chaque sortie, la
+    # construction ordinaire et celle de l'archive autonome.
+    -v gd-ci-next-cache:/w/apps/web/.next/cache
+    -v gd-ci-next-autonome-cache:/w/apps/web/.next-autonome/cache
     -e TZ=UTC)
   local nom
   for nom in "${TRANSMISES[@]}"; do
@@ -77,7 +87,7 @@ ouvrir() {
   done
 
   if [ "$postgres" = 1 ]; then
-    docker run -d --name "$BASE" --label gd-ci --network "$RESEAU" \
+    docker run -d --name "$BASE" "${ETIQUETTES[@]}" --network "$RESEAU" \
       -e POSTGRES_USER=gamedashboard -e POSTGRES_PASSWORD=gamedashboard \
       -e POSTGRES_DB=gamedashboard -e TZ=UTC "$IMAGE_POSTGRES" >/dev/null
     options+=(-e "DATABASE_URL=postgres://gamedashboard:gamedashboard@$BASE:5432/gamedashboard")
@@ -109,15 +119,22 @@ PREPARER
   fi
 }
 
-# Un job tué net (runner arrêté, machine éteinte) ne passe pas par `fermer` :
-# son conteneur `sleep infinity` tournerait pour toujours et empêcherait Docker
-# Desktop de se mettre en veille (docs/runner-auto-heberge.md). Chaque job
-# retire donc ce que les précédents ont laissé depuis plus de deux heures,
-# bien au-delà du plus long délai d'un job.
+# Un job tué net (runner arrêté, machine éteinte, annulation) ne passe pas
+# toujours par `fermer` : ses conteneurs s'accumuleraient et empêcheraient
+# Docker Desktop de se mettre en veille (docs/runner-auto-heberge.md). Chaque
+# job retire donc ce que les précédents ont laissé : tout conteneur arrêté
+# tout de suite, et ceux qui tournent depuis plus d'une heure, le double du
+# plus long délai d'un job (30 min). Le filtre par nom rattrape aussi les
+# conteneurs créés avant les étiquettes.
 balayer() {
   local limite id nom cree
-  limite=$(($(date +%s) - 7200))
-  for id in $(docker ps -aq --filter label=gd-ci); do
+  local filtre
+  for filtre in label=gd-ci name=gd-ci-; do
+    docker ps -aq --filter "$filtre" --filter status=exited --filter status=created \
+      --filter status=dead | xargs -r docker rm -f >/dev/null 2>&1 || true
+  done
+  limite=$(($(date +%s) - 3600))
+  for id in $(docker ps -aq --filter label=gd-ci) $(docker ps -aq --filter name=gd-ci-); do
     read -r nom cree < <(docker inspect -f '{{.Name}} {{.Created}}' "$id" 2>/dev/null) || continue
     if [ "$(date -d "$cree" +%s 2>/dev/null || echo "$limite")" -lt "$limite" ]; then
       docker rm -f "$id" >/dev/null 2>&1 || true
@@ -126,7 +143,7 @@ balayer() {
       docker volume rm -f "${nom#/}-w" >/dev/null 2>&1 || true
     fi
   done
-  docker network prune -f --filter label=gd-ci --filter until=2h >/dev/null 2>&1 || true
+  docker network prune -f --filter label=gd-ci --filter until=1h >/dev/null 2>&1 || true
 }
 
 lancer() {
@@ -143,7 +160,7 @@ lancer() {
 outil() {
   local image=$1
   shift
-  docker run --rm --network "$RESEAU" -v "$VOLUME:/w" -w /w "$image" "$@"
+  docker run --rm "${ETIQUETTES[@]}" --network "$RESEAU" -v "$VOLUME:/w" -w /w "$image" "$@"
 }
 
 psql() {
@@ -165,6 +182,7 @@ rapatrier() {
 
 fermer() {
   docker rm -f "$NOM" "$BASE" >/dev/null 2>&1 || true
+  docker ps -aq --filter "label=gd-ci.job=$NOM" | xargs -r docker rm -f >/dev/null 2>&1 || true
   docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
   docker network rm "$RESEAU" >/dev/null 2>&1 || true
 }

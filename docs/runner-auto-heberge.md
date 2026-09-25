@@ -39,8 +39,11 @@ conteneur Linux** et y exécute toutes ses commandes, par
    sortir (archive de release, captures, rapports).
 4. `linux.sh fermer`, toujours exécuté, retire conteneurs, volume et réseau.
 
-Le store pnpm et le Chromium de Playwright restent d'une exécution à l'autre
-dans les volumes Docker `gd-ci-pnpm-store` et `gd-ci-playwright`. Le scan ZAP
+Le store pnpm, le Chromium de Playwright et le cache de build de Next restent
+d'une exécution à l'autre dans les volumes Docker `gd-ci-pnpm-store`,
+`gd-ci-playwright`, `gd-ci-next-cache` et `gd-ci-next-autonome-cache`
+(construction de l'archive autonome). Les vider (`docker volume rm`) ne coûte
+qu'un job plus lent. Le scan ZAP
 (`infra/ci/zap-baseline.sh`) partage le réseau du conteneur du job.
 
 Rien de ce qu'un job écrit en root ne reste dans `_work` : le dossier du
@@ -118,16 +121,24 @@ conteneur `gd-ci-…` : `docker ps -a --filter name=gd-ci-` les montre, et
 
 ### Veille de Docker Desktop
 
-Entre deux jobs, Docker ne doit rien garder d'actif : chaque job retire ses
-conteneurs, même en échec (`linux.sh fermer`), et le suivant retire ceux
-qu'un job tué net aurait laissés depuis plus de deux heures (`linux.sh
-balayer`, conteneurs marqués `gd-ci`). Il reste à laisser Docker Desktop
-arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
+Entre deux jobs, Docker ne doit rien garder d'actif. Tout conteneur d'un job
+(Node, PostgreSQL, Trivy, Semgrep, ZAP) porte les étiquettes `gd-ci` et
+`gd-ci.job=<job>` : `linux.sh fermer`, exécuté même en échec, les retire tous.
+Le job suivant retire ce qu'un job tué net aurait laissé (`linux.sh
+balayer`) : les conteneurs arrêtés tout de suite, ceux qui tournent encore
+au bout d'une heure. Pour vider à la main ce qui date d'avant ces étiquettes :
+
+```bash
+docker ps -aq --filter name=gd-ci- | xargs -r docker rm -f
+docker ps -aq --filter ancestor=ghcr.io/zaproxy/zaproxy | xargs -r docker rm -f
+```
+
+Il reste à laisser Docker Desktop arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
 Resources → Advanced → Resource Saver**, activé, délai de 5 minutes. La
 machine virtuelle est alors arrêtée, sa mémoire rendue à Windows, et elle
 redémarre d'elle-même à la première commande `docker` du job suivant (quelques
-secondes de plus au démarrage). Les caches (`gd-ci-pnpm-store`,
-`gd-ci-playwright`) et les images survivent à la veille.
+secondes de plus au démarrage). Les caches (volumes `gd-ci-pnpm-store`,
+`gd-ci-playwright`, `gd-ci-next-*`) et les images survivent à la veille.
 
 ### Mémoire de Docker Desktop
 

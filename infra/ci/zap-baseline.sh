@@ -115,7 +115,11 @@ fi
 # Les règles sont donc celles de l'image épinglée, ni plus ni moins ; on en
 # gagne en changeant l'empreinte, pas au hasard d'une exécution.
 code=0
-ZAP=$(docker create --network "$RESEAU" "$IMAGE" \
+# Dans la CI, étiqueté comme les conteneurs du job : `linux.sh fermer` le
+# retire même si ce script est tué avant son `trap`.
+ETIQUETTES=()
+[ -n "$CONTENEUR" ] && ETIQUETTES=(--label gd-ci --label "gd-ci.job=$CONTENEUR")
+ZAP=$(docker create "${ETIQUETTES[@]}" --network "$RESEAU" "$IMAGE" \
   zap-baseline.py -t "$CIBLE" -c regles.tsv -r rapport.html -J rapport.json -z -silent)
 tar -C "$TRAVAIL" --owner=1000 --group=1000 --numeric-owner -cf - wrk | docker cp - "$ZAP:/zap"
 docker start -a "$ZAP" || code=$?
