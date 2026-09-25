@@ -61,7 +61,7 @@ ouvrir() {
     -v "$VOLUME:/w"
     # Caches d'une exécution à l'autre, sur la machine du runner : le store
     # pnpm et le navigateur de Playwright.
-    -v gd-ci-pnpm-store:/root/.local/share/pnpm/store
+    -v gd-ci-pnpm-store:/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
     -e TZ=UTC)
   local nom
@@ -86,6 +86,10 @@ ouvrir() {
     cat <<'PREPARER'
 git config --global --add safe.directory /w
 npm install -g --no-fund --no-audit --loglevel=error "$(node -p 'require("./package.json").packageManager')"
+# Le store sur le volume de cache, pas dans /w : pnpm le posait sinon dans
+# /w/.pnpm-store (autre système de fichiers que son dossier par défaut), perdu
+# à chaque job et lu par Trivy et Semgrep.
+pnpm config set --global store-dir /pnpm-store
 pnpm --version
 PREPARER
   )"
@@ -103,7 +107,14 @@ PREPARER
 }
 
 lancer() {
-  docker exec -w /w "$NOM" bash -euo pipefail -c "$1"
+  local code=0
+  docker exec -w /w "$NOM" bash -euo pipefail -c "$1" || code=$?
+  # 137 = tué par SIGKILL : dans un conteneur, presque toujours le manque de
+  # mémoire de la machine virtuelle de Docker Desktop.
+  if [ "$code" = 137 ]; then
+    echo "::error::Commande tuée (code 137), probablement faute de mémoire. Docker dispose de $(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%.1f Go", $1/1073741824}') ; en donner davantage à WSL (docs/runner-auto-heberge.md)." >&2
+  fi
+  return "$code"
 }
 
 outil() {

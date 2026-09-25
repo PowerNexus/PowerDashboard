@@ -608,6 +608,14 @@ describe("actions GitHub des workflows", () => {
     expect(texte).not.toContain("trivy-action@");
     expect(texte).not.toContain("semgrep-action@");
   });
+
+  // Régression : sans store-dir, pnpm posait son store dans /w/.pnpm-store,
+  // perdu à chaque job (tout retéléchargé) et lu par Trivy et Semgrep.
+  it("gardent le store pnpm sur le volume de cache, hors du dépôt", () => {
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toContain("-v gd-ci-pnpm-store:/pnpm-store");
+    expect(linux).toContain("pnpm config set --global store-dir /pnpm-store");
+  });
 });
 
 /**

@@ -116,6 +116,22 @@ Arrêter le runner pendant un job fait échouer ce job : attendre qu'il soit
 conteneur `gd-ci-…` : `docker ps -a --filter name=gd-ci-` les montre, et
 `docker rm -f` puis `docker volume prune` les retirent.
 
+### Mémoire de Docker Desktop
+
+Le build de Next.js et les tests tournent dans la machine virtuelle WSL 2 de
+Docker Desktop, qui ne reçoit par défaut que la moitié de la mémoire de
+Windows. Une commande tuée en « code 137 » en manque : le job le dit et
+donne la mémoire vue par Docker. Pour en donner davantage (8 Go au moins),
+dans `%UserProfile%\.wslconfig` du compte qui lance Docker Desktop :
+
+```ini
+[wsl2]
+memory=12GB
+swap=8GB
+```
+
+puis `wsl --shutdown` et relancer Docker Desktop.
+
 ## Vérifier
 
 Relancer la CI d'une PR (onglet *Checks* → *Re-run all jobs*). Les trois jobs
