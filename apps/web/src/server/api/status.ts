@@ -22,6 +22,8 @@ export interface StatusComponent {
   name: string;
   location: string;
   state: PlatformState;
+  /** Absente d'une API antérieure : la page s'en passe. */
+  uptime?: { ratio: number | null; since: string };
 }
 
 export interface StatusIncidentUpdate {

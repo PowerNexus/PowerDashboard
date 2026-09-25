@@ -16,6 +16,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { StatusIncidentCard } from "@/components/status-incident";
+import { StatusUptime } from "@/components/status-uptime";
 import { getBranding } from "@/server/api/branding";
 import { fetchStatus } from "@/server/api/status";
 
@@ -138,6 +139,7 @@ export default async function StatusPage() {
                       <div>
                         <p className="font-semibold text-fg">{component.name}</p>
                         <p className="text-muted text-xs">{component.location}</p>
+                        <StatusUptime uptime={component.uptime} />
                       </div>
                     </div>
                     <Badge variant={STATE_TONE[component.state]}>

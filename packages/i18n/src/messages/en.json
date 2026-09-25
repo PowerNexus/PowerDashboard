@@ -80,14 +80,17 @@
       "server": "Your servers",
       "backup": "Backups",
       "billing": "Billing",
-      "reseller": "Reselling"
+      "reseller": "Reselling",
+      "infrastructure": "Machines"
     },
     "event": {
       "server": {
         "installed": "Install finished",
         "transferred": "Server moved to another machine",
         "transfer_failed": "Move interrupted",
-        "quota_stopped": "Server stopped for lack of quota"
+        "quota_stopped": "Server stopped for lack of quota",
+        "unreachable": "Server unreachable",
+        "recovered": "Server back online"
       },
       "subuser": {
         "invited": "Invitation to manage a server"
@@ -108,6 +111,10 @@
       },
       "marketplace": {
         "update_available": "Add-on update available"
+      },
+      "node": {
+        "unreachable": "Machine unreachable",
+        "recovered": "Machine back online"
       }
     },
     "mandatoryHint": "Always sent: this is decided without you, and you must be able to learn it other than from the silence of your players.",
@@ -1731,7 +1738,10 @@
       "identified": "Cause identified",
       "monitoring": "Monitoring",
       "resolved": "Resolved"
-    }
+    },
+    "uptimeWindow": "{value} uptime over {days} days",
+    "uptimeSince": "{value} uptime since {date}",
+    "uptimeTooEarly": "Uptime tracked for less than an hour"
   },
   "subusers": {
     "title": "Sub-users",

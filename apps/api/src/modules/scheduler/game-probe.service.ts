@@ -1,5 +1,10 @@
 import { Socket } from "node:net";
 import {
+  MISSES_BEFORE_ALERT,
+  outageDuration,
+  reachabilityTransition,
+} from "@gamedashboard/contracts";
+import {
   allocations,
   type Database,
   eggs,
@@ -15,10 +20,11 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
 import { detectRuntime } from "../marketplace/server-runtime";
+import { NotificationsService } from "../notifications/notifications.service";
 import { buildStatusRequest, type MinecraftStatus, readStatusResponse } from "./minecraft-ping";
 
 /**
@@ -65,6 +71,12 @@ const TICK_MS = 60_000;
  */
 const TIMEOUT_MS = 3_000;
 
+/**
+ * Fenêtre des sondes retenues pour décider d'une panne : les trois dernières
+ * minutes et une marge pour un tour en retard.
+ */
+const RECENT_WINDOW_MS = 5 * 60_000;
+
 /** Sondes menées de front. Une connexion TCP coûte peu, mais pas rien. */
 const CONCURRENCY = 16;
 
@@ -90,7 +102,10 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
 
-  constructor(@Inject(DATABASE) private readonly db: Database) {}
+  constructor(
+    @Inject(DATABASE) private readonly db: Database,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
+  ) {}
 
   onModuleInit(): void {
     this.timer = setInterval(() => battre(this.logger, "game-probe", () => this.tick()), TICK_MS);
@@ -108,6 +123,8 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const targets = await this.targets();
+      // Même sans cible : un serveur tombé puis arrêté doit être levé.
+      await this.forgetStopped(targets.map((target) => target.id));
       if (targets.length === 0) return;
 
       let silent = 0;
@@ -116,6 +133,8 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
         const results = await Promise.all(batch.map((target) => this.probe(target, now)));
         silent += results.filter((status) => status === null).length;
       }
+
+      await this.alert(targets, now);
 
       if (silent > 0) {
         this.logger.warn(
@@ -128,6 +147,88 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.running = false;
     }
+  }
+
+  /**
+   * Prévient quand un serveur tombe ou revient.
+   *
+   * La décision vient des dernières sondes de chaque cible, pas du seul tour
+   * en cours (`reachabilityTransition`) : une sonde manquée ne suffit pas.
+   * `servers.unreachable_since` porte l'état entre deux tours, et seule sa
+   * **transition** notifie : une panne de trois heures fait un message à
+   * l'entrée et un à la sortie, pas cent quatre-vingts.
+   */
+  private async alert(targets: ProbeTarget[], now: Date): Promise<void> {
+    const ids = targets.map((target) => target.id);
+    const known = await this.db
+      .select({ id: servers.id, since: servers.unreachableSince })
+      .from(servers)
+      .where(inArray(servers.id, ids));
+    const since = new Map(known.map((row) => [row.id, row.since]));
+
+    for (const target of targets) {
+      const recent = await this.db
+        .select({ reachable: serverHealth.reachable })
+        .from(serverHealth)
+        .where(
+          and(
+            eq(serverHealth.serverId, target.id),
+            // Les sondes de ce passage seulement : des échecs d'hier, avant un
+            // arrêt, ne doivent pas compter pour la panne d'aujourd'hui.
+            gte(serverHealth.at, new Date(now.getTime() - RECENT_WINDOW_MS).toISOString()),
+          ),
+        )
+        .orderBy(desc(serverHealth.at))
+        .limit(MISSES_BEFORE_ALERT);
+
+      const down = since.get(target.id) ?? null;
+      const transition = reachabilityTransition(
+        recent.map((row) => row.reachable),
+        down !== null,
+      );
+
+      if (transition === "down") {
+        await this.db
+          .update(servers)
+          .set({ unreachableSince: now.toISOString() })
+          .where(eq(servers.id, target.id));
+        await this.notifications.notifyServerOwner(target.id, {
+          type: "server.unreachable",
+          title: `${target.name} ne répond plus`,
+          body: `Le serveur tourne mais ne répond plus aux joueurs sur ${target.host}:${target.port} depuis ${MISSES_BEFORE_ALERT} minutes. Consultez sa console.`,
+          level: "danger",
+        });
+      } else if (transition === "up" && down !== null) {
+        await this.db
+          .update(servers)
+          .set({ unreachableSince: null })
+          .where(eq(servers.id, target.id));
+        await this.notifications.notifyServerOwner(target.id, {
+          type: "server.recovered",
+          title: `${target.name} répond de nouveau`,
+          body: `Le serveur est de nouveau joignable, après ${outageDuration(new Date(down), now)} d'interruption.`,
+          level: "success",
+        });
+      }
+    }
+  }
+
+  /**
+   * Lève sans bruit la panne d'un serveur qui n'est plus censé tourner.
+   *
+   * Arrêté par son propriétaire, il ne répond pas, et c'est normal : garder la
+   * marque ferait annoncer un « retour » au prochain démarrage, pour une panne
+   * que personne n'a subie depuis l'arrêt.
+   */
+  private async forgetStopped(running: string[]): Promise<void> {
+    await this.db
+      .update(servers)
+      .set({ unreachableSince: null })
+      .where(
+        running.length === 0
+          ? isNotNull(servers.unreachableSince)
+          : and(isNotNull(servers.unreachableSince), notInArray(servers.id, running)),
+      );
   }
 
   /**
