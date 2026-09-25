@@ -503,6 +503,18 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
   },
 ];
 
+/**
+ * Ancre d'un groupe de réglages dans la page d'administration.
+ *
+ * Construite ici, et jamais écrite à la main ailleurs : le bandeau d'accueil
+ * pointait vers `#reglages-hostbill` alors que le groupe s'appelle `billing`
+ * depuis que la facturation n'est plus propre à HostBill. Le lien ouvrait la
+ * page sans y descendre, et rien ne le signalait.
+ */
+export function settingsAnchor(groupKey: string): string {
+  return `reglages-${groupKey}`;
+}
+
 /** Index plat, pour valider une clé reçue sans parcourir les groupes. */
 export const SETTING_BY_KEY: ReadonlyMap<string, SettingDescriptor> = new Map(
   PLATFORM_SETTINGS.flatMap((group) => group.settings.map((s) => [s.key, s] as const)),

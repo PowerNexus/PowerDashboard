@@ -1,3 +1,4 @@
+import { settingsAnchor } from "@gamedashboard/contracts";
 import { AlertBanner } from "@gamedashboard/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -38,7 +39,7 @@ export async function BillingSetupNotice({ show }: { show: boolean }) {
       </ul>
       <p className="mt-3">
         <Link
-          href="/admin/settings#reglages-hostbill"
+          href={`/admin/settings#${settingsAnchor("billing")}`}
           className="inline-flex items-center gap-1.5 font-semibold text-sm"
         >
           {t("billingSetupAction")} <ArrowRight className="size-4" />

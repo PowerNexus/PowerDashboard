@@ -1,6 +1,10 @@
 "use client";
 
-import { PLATFORM_SETTINGS, type SettingDescriptor } from "@gamedashboard/contracts";
+import {
+  PLATFORM_SETTINGS,
+  type SettingDescriptor,
+  settingsAnchor,
+} from "@gamedashboard/contracts";
 import {
   AlertBanner,
   Badge,
@@ -265,7 +269,7 @@ function PlatformSettingsForm({
         return (
           <SettingsSection
             key={group.key}
-            id={`reglages-${group.key}`}
+            id={settingsAnchor(group.key)}
             title={group.label}
             description={group.description}
             footer={
