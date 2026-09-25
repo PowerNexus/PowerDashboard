@@ -1888,6 +1888,11 @@
     "reportWritten": "{files} file(s) placed, {removed} file(s) from the previous version removed.",
     "reportMissing": "Not placed, check before starting: {files}.",
     "reportKept": "Kept as is (modified since, or belonging to the server): {files}.",
+    "installRunning": "Installing {name}",
+    "installRunningBody": "The server is stopped while the installation runs, including the backup taken first. This page updates by itself; you can leave it, the installation carries on.",
+    "installStarted": "Started",
+    "installFinished": "Finished",
+    "installFailedTitle": "Installing {name} failed",
     "packSourceDown": "{source} did not answer: {reason}"
   },
   "adminServerDetail": {

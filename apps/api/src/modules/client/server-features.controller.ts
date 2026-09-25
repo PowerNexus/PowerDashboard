@@ -12,6 +12,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpCode,
   Inject,
   Logger,
   Param,
@@ -897,6 +898,7 @@ export class ServerFeaturesController {
         unavailableReason: state.unavailableReason,
         current: state.current,
         packSources: state.packSources,
+        install: state.install,
       },
     };
   }
@@ -910,6 +912,7 @@ export class ServerFeaturesController {
    * l'arborescence d'un serveur par un choix dans une liste.
    */
   @Post("engine/install")
+  @HttpCode(202)
   async installEngine(
     @Req() request: ClientRequest,
     @Param("id") id: string,
@@ -964,37 +967,58 @@ export class ServerFeaturesController {
         }
       : undefined;
 
-    const installed = await this.relay(() =>
-      this.engine.install(id, payload.optionId as string, payload.versionId as string, {
+    /*
+     * L'installation part **en tâche de fond** : un modpack enchaîne des
+     * centaines de téléchargements, la sauvegarde préalable peut prendre une
+     * demi-heure, et l'interface, le vhost ou Passenger couperaient la requête
+     * bien avant. Les refus sûrs (version, chargeur, archive, runtime, une
+     * installation déjà en cours) tombent ici, avant la réponse ; le compte
+     * rendu se lit ensuite sur `GET engine` (`meta.install`).
+     */
+    const optionId = payload.optionId as string;
+    const versionId = payload.versionId as string;
+    const run = await this.relay(() =>
+      this.engine.start(id, optionId, versionId, {
         installedBy: request.user.id,
         beforeWrite,
+        onSettled: async (outcome) => {
+          if ("error" in outcome) {
+            await this.log(request, id, "engine.install_failed", {
+              optionId,
+              versionId,
+              error: outcome.error,
+              backupFirst,
+            });
+            return;
+          }
+          const installed = outcome.result;
+          // Des comptes et non des listes : un pack pose des centaines de
+          // fichiers, et le journal n'est pas un inventaire.
+          await this.log(request, id, "engine.install", {
+            optionId,
+            versionId,
+            label: installed.label,
+            files: installed.files,
+            missing: installed.missing.length,
+            kept: installed.kept.length,
+            removed: installed.removed,
+            backupFirst,
+          });
+          /*
+           * Le retrait de l'acceptation est un événement **à part**.
+           *
+           * Le noyer dans les propriétés de l'installation le rendrait
+           * invisible : qui relit un journal pour savoir depuis quand un
+           * serveur ne peut plus démarrer cherche « acceptation », pas
+           * « moteur installé ».
+           */
+          if (installed.eulaReset) {
+            await this.log(request, id, "server.eula_reset", { reason: installed.label });
+          }
+        },
       }),
     );
-    // Des comptes et non des listes : un pack pose des centaines de fichiers,
-    // et le journal n'est pas un inventaire.
-    await this.log(request, id, "engine.install", {
-      optionId: payload.optionId,
-      versionId: payload.versionId,
-      label: installed.label,
-      files: installed.files,
-      missing: installed.missing.length,
-      kept: installed.kept.length,
-      removed: installed.removed,
-      backupFirst,
-    });
-
-    /*
-     * Le retrait de l'acceptation est un événement **à part**.
-     *
-     * Le noyer dans les propriétés de l'installation le rendrait invisible :
-     * qui relit un journal pour savoir depuis quand un serveur ne peut plus
-     * démarrer cherche « acceptation », pas « moteur installé ».
-     */
-    if (installed.eulaReset) {
-      await this.log(request, id, "server.eula_reset", { reason: installed.label });
-    }
-
-    return { data: installed };
+    return { data: run };
   }
 
   /**

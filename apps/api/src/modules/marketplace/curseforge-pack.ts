@@ -23,8 +23,9 @@ import { cheminSur, nomSur } from "./pack-files";
  *    un `manifest.json` qui les désigne par `projectID`/`fileID`, plus un
  *    dossier de surcharges (`overrides`, nom donné par le manifeste). Les
  *    fichiers sont résolus en lot (`POST /v1/mods/files`), leur nature par
- *    `POST /v1/mods` (seuls les mods, classe 6, vont sur un serveur : packs de
- *    ressources et shaders sont du client), puis tirés par le daemon.
+ *    `POST /v1/mods` (les mods, classe 6, vont dans `mods/` ; les datapacks,
+ *    classe 6945, dans le dossier `datapacks` du monde ; packs de ressources
+ *    et shaders sont du client), puis tirés par le daemon.
  *
  * **Un fichier dont `downloadUrl` est nul** appartient à un auteur qui refuse
  * la distribution par l'API. Le panel ne le contourne pas : l'installation est
@@ -39,8 +40,19 @@ import { cheminSur, nomSur } from "./pack-files";
 const MINECRAFT = 432;
 const MODPACK_CLASS = 4471;
 
-/** Classes de projet CurseForge (Minecraft). Seuls les mods vont sur un serveur. */
+/**
+ * Classes de projet CurseForge (Minecraft).
+ *
+ * Les mods vont dans `mods/`. Les datapacks vont dans le dossier `datapacks`
+ * du monde : c'est là que le serveur les charge, et nulle part ailleurs — les
+ * écarter comme « du client » faisait démarrer le pack sans ses recettes ni
+ * ses structures, sans rien en dire. Packs de ressources et shaders ne servent
+ * qu'au client. Toute autre classe (mondes, personnalisations…) n'a pas de
+ * place connue sur un serveur : elle est écartée **et nommée** au compte rendu.
+ */
 const MOD_CLASS = 6;
+const DATAPACK_CLASS = 6945;
+const CLIENT_CLASSES = new Set([12, 6552]);
 
 /** Types de chargeur, tels que CurseForge les numérote. */
 const MOD_LOADER_TYPE: Record<string, number> = { forge: 1, fabric: 4, neoforge: 6 };
@@ -90,13 +102,18 @@ export interface CurseForgeManifest {
 
 /** Ce que la résolution d'un manifeste donne à installer. */
 export interface ResolvedManifest {
+  /** Mods, à tirer dans `mods/`. */
   pulls: { url: string; path: string }[];
+  /** Datapacks, à tirer dans le dossier `datapacks` du monde (nom de fichier sûr). */
+  datapacks: { url: string; fileName: string }[];
   /** Fichiers que leur auteur refuse de laisser distribuer : l'installation s'arrête. */
   blocked: string[];
   /** Fichiers du manifeste introuvables chez CurseForge, ou refusés (adresse, taille, nom). */
   unusable: string[];
-  /** Fichiers écartés parce qu'ils ne servent qu'au client (ressources, shaders…). */
+  /** Fichiers écartés parce qu'ils ne servent qu'au client (ressources, shaders). */
   clientOnly: number;
+  /** Projets d'une classe qui n'a pas de place connue sur un serveur, nommés. */
+  skipped: string[];
 }
 
 @Injectable()
@@ -216,7 +233,14 @@ export class CurseForgePackService {
     ]);
     const modById = new Map(mods.map((mod) => [mod.id, mod]));
 
-    const out: ResolvedManifest = { pulls: [], blocked: [], unusable: [], clientOnly: 0 };
+    const out: ResolvedManifest = {
+      pulls: [],
+      datapacks: [],
+      blocked: [],
+      unusable: [],
+      clientOnly: 0,
+      skipped: [],
+    };
     for (const entry of manifest.files) {
       const file = byId.get(entry.fileID);
       const mod = modById.get(entry.projectID);
@@ -226,8 +250,13 @@ export class CurseForgePackService {
       }
       // La classe n'est connue que par le projet ; un projet muet est tenu
       // pour un mod, ce qu'il est dans l'immense majorité des packs.
-      if (mod?.classId !== undefined && mod.classId !== MOD_CLASS) {
+      const classId = mod?.classId ?? MOD_CLASS;
+      if (CLIENT_CLASSES.has(classId)) {
         out.clientOnly += 1;
+        continue;
+      }
+      if (classId !== MOD_CLASS && classId !== DATAPACK_CLASS) {
+        out.skipped.push(mod?.name ?? file.displayName);
         continue;
       }
       if (!file.downloadUrl) {
@@ -243,7 +272,11 @@ export class CurseForgePackService {
         out.unusable.push(file.fileName);
         continue;
       }
-      out.pulls.push({ url: file.downloadUrl, path: `mods/${file.fileName}` });
+      if (classId === DATAPACK_CLASS) {
+        out.datapacks.push({ url: file.downloadUrl, fileName: file.fileName });
+      } else {
+        out.pulls.push({ url: file.downloadUrl, path: `mods/${file.fileName}` });
+      }
     }
     return out;
   }

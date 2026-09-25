@@ -1,6 +1,11 @@
 "use server";
 
-import type { EngineOption, InstalledEngine } from "@gamedashboard/contracts";
+import type {
+  EngineInstallReport,
+  EngineInstallRun,
+  EngineOption,
+  InstalledEngine,
+} from "@gamedashboard/contracts";
 import { revalidatePath } from "next/cache";
 import { apiFetch, apiReadFor, apiSend, apiSendFor } from "./client";
 
@@ -23,17 +28,12 @@ export interface EngineState {
   current: InstalledEngine | null;
   /** Le sort de chaque catalogue de modpacks : un CurseForge sans clé le dit. */
   packSources: { source: string; error: string | null }[];
+  /** La dernière installation lancée : en cours, terminée ou échouée. */
+  install: EngineInstallRun | null;
 }
 
 /** Ce qu'une installation a fait, pour le dire à l'écran. */
-export interface EngineInstallResult {
-  label: string;
-  files: number;
-  missing: string[];
-  kept: string[];
-  removed: number;
-  notice: string | null;
-}
+export type EngineInstallResult = EngineInstallReport;
 
 export async function fetchEngineState(serverId: string, query: string): Promise<EngineState> {
   const params = query.trim() === "" ? "" : `?q=${encodeURIComponent(query.trim())}`;
@@ -44,10 +44,11 @@ export async function fetchEngineState(serverId: string, query: string): Promise
       unavailableReason: string | null;
       current: InstalledEngine | null;
       packSources?: { source: string; error: string | null }[];
+      install?: EngineInstallRun | null;
     };
   }>(`/api/v1/client/servers/${serverId}/engine${params}`);
 
-  return { ...data, ...meta, packSources: meta.packSources ?? [] };
+  return { ...data, ...meta, packSources: meta.packSources ?? [], install: meta.install ?? null };
 }
 
 /**
@@ -57,22 +58,27 @@ export async function fetchEngineState(serverId: string, query: string): Promise
  * « quel moteur, quelle version » est transmis, et l'API résout le reste. Une
  * URL venue du navigateur ferait du daemon un téléchargeur de fichiers
  * arbitraires.
+ *
+ * L'API répond dès l'installation lancée (202) : elle se poursuit en tâche de
+ * fond, et l'écran en relit l'état (`EngineState.install`) jusqu'à sa fin.
+ * Attendre ici la fin d'un modpack dépassait l'échéance des appels (10 s) : on
+ * voyait une erreur, jamais le compte rendu.
  */
 export async function installEngine(
   serverId: string,
   optionId: string,
   versionId: string,
   backupFirst = false,
-): Promise<{ error: string | null; result: EngineInstallResult | null }> {
+): Promise<{ error: string | null; run: EngineInstallRun | null }> {
   try {
-    const { data } = await apiSendFor<{ data: EngineInstallResult }>(
+    const { data } = await apiSendFor<{ data: EngineInstallRun }>(
       `/api/v1/client/servers/${serverId}/engine/install`,
       { optionId, versionId, backupFirst },
     );
     revalidatePath(`/server/${serverId}/engine`);
-    return { error: null, result: data };
+    return { error: null, run: data };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Opération refusée.", result: null };
+    return { error: error instanceof Error ? error.message : "Opération refusée.", run: null };
   }
 }
 

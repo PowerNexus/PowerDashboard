@@ -1,9 +1,10 @@
 import { BadRequestException } from "@nestjs/common";
+import { HTTP_CODE_METADATA } from "@nestjs/common/constants";
 import { describe, expect, it, vi } from "vitest";
 import type { ActivityService } from "../activity/activity.service";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
 import type { AuthenticatedRequest } from "../auth/session.guard";
-import type { EngineInstallOptions, EngineService } from "../marketplace/engine.service";
+import type { EngineService, EngineStartOptions } from "../marketplace/engine.service";
 import type { EulaService } from "../marketplace/eula.service";
 import type { MarketplaceService } from "../marketplace/marketplace.service";
 import type { WingsClientService } from "../wings/wings-client.service";
@@ -20,7 +21,8 @@ import type { SubusersService } from "./subusers.service";
 
 /**
  * Changement de moteur avec sauvegarde préalable : une sauvegarde ordinaire,
- * sous sa propre permission, attendue avant la première écriture.
+ * sous sa propre permission, attendue avant la première écriture. Lancé en
+ * tâche de fond : la requête rend l'état « en cours », le journal suit l'issue.
  */
 
 const requete = {
@@ -38,17 +40,40 @@ function monter() {
     create: vi.fn(async () => ({ id: "sauv-1", name: "Avant changement de moteur" })),
     awaitCompletion: vi.fn(async () => {}),
   };
+  const settled: Promise<void>[] = [];
+  let issue: "succes" | "echec" = "succes";
   const engine = {
-    install: vi.fn(async (_id: string, _o: string, _v: string, options: EngineInstallOptions) => {
-      await options.beforeWrite?.();
+    start: vi.fn(async (_id: string, o: string, v: string, options: EngineStartOptions) => {
+      // Comme le service : la suite se déroule après la réponse.
+      settled.push(
+        (async () => {
+          await options.beforeWrite?.();
+          await options.onSettled?.(
+            issue === "succes"
+              ? {
+                  result: {
+                    label: "Pack",
+                    files: 3,
+                    eulaReset: true,
+                    missing: [],
+                    kept: ["config/a.toml"],
+                    removed: 1,
+                    notice: null,
+                  },
+                }
+              : { error: "La sauvegarde préalable a échoué : rien n'a été modifié." },
+          );
+        })(),
+      );
       return {
-        label: "Pack",
-        files: 3,
-        eulaReset: false,
-        missing: [],
-        kept: ["config/a.toml"],
-        removed: 1,
-        notice: null,
+        status: "running" as const,
+        optionId: o,
+        versionId: v,
+        label: "Pack v2",
+        startedAt: "2026-09-25T10:00:00.000Z",
+        finishedAt: null,
+        report: null,
+        error: null,
       };
     }),
   };
@@ -70,23 +95,28 @@ function monter() {
     {} as EulaService,
     {} as PlatformSettingsService,
   );
-  return { controleur, access, backups, engine };
+  const fin = () => Promise.all(settled);
+  const echouer = () => {
+    issue = "echec";
+  };
+  return { controleur, access, backups, engine, activity, fin, echouer };
 }
 
 describe("POST engine/install", () => {
   it("sauvegarde d'abord quand on le demande, et attend qu'elle soit close", async () => {
-    const { controleur, access, backups, engine } = monter();
+    const { controleur, access, backups, engine, fin } = monter();
 
     await controleur.installEngine(requete, "srv-1", {
       optionId: "modpack:pack",
       versionId: "v2",
       backupFirst: true,
     });
+    await fin();
 
     expect(access.require).toHaveBeenCalledWith(expect.anything(), "srv-1", "backups.create");
     expect(backups.create).toHaveBeenCalledWith("srv-1", "Avant changement de moteur", []);
     expect(backups.awaitCompletion).toHaveBeenCalledWith("srv-1", "sauv-1", expect.any(Number));
-    expect(engine.install).toHaveBeenCalledWith(
+    expect(engine.start).toHaveBeenCalledWith(
       "srv-1",
       "modpack:pack",
       "v2",
@@ -94,10 +124,47 @@ describe("POST engine/install", () => {
     );
   });
 
-  it("sans demande, aucune sauvegarde n'est faite en douce", async () => {
-    const { controleur, access, backups } = monter();
+  it("rend aussitôt l'installation en cours, et journalise son issue une fois close", async () => {
+    const { controleur, activity, fin } = monter();
+
+    const reponse = await controleur.installEngine(requete, "srv-1", {
+      optionId: "modpack:pack",
+      versionId: "v2",
+    });
+    // Régression : la requête attendait la fin de l'installation, et
+    // l'interface abandonnait au bout de dix secondes sans compte rendu.
+    expect(reponse.data).toMatchObject({ status: "running", label: "Pack v2" });
+    expect(
+      Reflect.getMetadata(HTTP_CODE_METADATA, ServerFeaturesController.prototype.installEngine),
+    ).toBe(202);
+
+    await fin();
+    const evenements = activity.record.mock.calls.map(
+      (call) => (call as unknown as [{ event: string }])[0].event,
+    );
+    expect(evenements).toEqual(["engine.install", "server.eula_reset"]);
+  });
+
+  it("un échec en tâche de fond est journalisé avec sa raison", async () => {
+    const { controleur, activity, fin, echouer } = monter();
+    echouer();
 
     await controleur.installEngine(requete, "srv-1", { optionId: "modpack:pack", versionId: "v2" });
+    await fin();
+
+    expect(activity.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "engine.install_failed",
+        properties: expect.objectContaining({ error: expect.stringMatching(/sauvegarde/) }),
+      }),
+    );
+  });
+
+  it("sans demande, aucune sauvegarde n'est faite en douce", async () => {
+    const { controleur, access, backups, fin } = monter();
+
+    await controleur.installEngine(requete, "srv-1", { optionId: "modpack:pack", versionId: "v2" });
+    await fin();
 
     expect(backups.create).not.toHaveBeenCalled();
     expect(access.require).not.toHaveBeenCalledWith(expect.anything(), "srv-1", "backups.create");

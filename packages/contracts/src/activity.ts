@@ -56,6 +56,9 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
    * se confondre non plus, puisque l'un autorise et l'autre empêche.
    */
   "engine.install": { category: "settings", label: "Moteur du serveur remplacé" },
+  // L'installation part en tâche de fond : son échec arrive après la réponse,
+  // et le journal est le seul endroit où il reste une fois l'écran fermé.
+  "engine.install_failed": { category: "settings", label: "Changement de moteur échoué" },
   "server.eula_accepted": { category: "settings", label: "Contrat de licence accepté" },
   "server.eula_reset": {
     category: "settings",

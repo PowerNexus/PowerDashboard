@@ -29,6 +29,13 @@ describe("chemins venus d'une archive", () => {
     expect(appartientAuServeur("mods/worldedit.jar")).toBe(false);
   });
 
+  it("laisse au pack les datapacks posés à même le dossier datapacks d'un monde", () => {
+    expect(appartientAuServeur("world/datapacks/recettes.zip")).toBe(false);
+    expect(appartientAuServeur("world/datapacks/recettes/data/x.json")).toBe(true);
+    expect(appartientAuServeur("world/level.dat")).toBe(true);
+    expect(appartientAuServeur("logs/datapacks/x.zip")).toBe(true);
+  });
+
   it("regroupe les chemins par dossier, racine comprise", () => {
     expect(dossiersDe(["a.txt", "mods/x.jar", "mods/y.jar", "config/m/z.toml"])).toEqual([
       "",

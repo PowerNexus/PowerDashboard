@@ -1,9 +1,9 @@
 "use client";
 
-import type { InstalledEngine } from "@gamedashboard/contracts";
+import type { EngineInstallRun, InstalledEngine } from "@gamedashboard/contracts";
 import { AlertBanner, Badge, Button, Card, CardBody, RelativeTime } from "@gamedashboard/ui";
 import { useTranslations } from "next-intl";
-import type { EngineInstallResult } from "@/server/api/engine";
+import { AutoRefresh } from "@/lib/use-auto-refresh";
 
 /**
  * Ce que le panel a posé sur ce serveur, et la mise à jour du pack s'il y en a.
@@ -76,18 +76,63 @@ export function EngineCurrent({
   );
 }
 
+/** Relecture de l'écran pendant une installation : assez pour suivre, sans marteler l'API. */
+const INSTALL_REFRESH_MS = 5_000;
+
 /**
- * Ce que la dernière installation a fait, en clair : fichiers manquants,
- * fichiers gardés parce que modifiés, et ce qui reste à faire à la main.
+ * La dernière installation lancée, telle que l'API la retient.
+ *
+ * Elle se déroule en tâche de fond : tant qu'elle est en cours, l'écran se
+ * relit de lui-même (`AutoRefresh`), puis montre son compte rendu — fichiers
+ * manquants, fichiers gardés parce que modifiés, ce qui reste à faire à la
+ * main — ou la raison de son échec.
  */
-export function EngineInstallReport({ result }: { result: EngineInstallResult }) {
+export function EngineInstallState({ install }: { install: EngineInstallRun | null }) {
   const t = useTranslations("engine");
+  if (!install) return null;
+
+  if (install.status === "running") {
+    return (
+      <AlertBanner variant="info" title={t("installRunning", { name: install.label })}>
+        <AutoRefresh intervalMs={INSTALL_REFRESH_MS} />
+        <span className="flex flex-col gap-1">
+          <span>{t("installRunningBody")}</span>
+          <span className="text-muted text-xs">
+            {t("installStarted")} <RelativeTime value={install.startedAt} />
+          </span>
+        </span>
+      </AlertBanner>
+    );
+  }
+
+  const finished = install.finishedAt ? (
+    <span className="text-muted text-xs">
+      {t("installFinished")} <RelativeTime value={install.finishedAt} />
+    </span>
+  ) : null;
+
+  if (install.status === "failed" || !install.report) {
+    return (
+      <AlertBanner
+        variant="danger"
+        title={t("installFailedTitle", { name: install.label })}
+        dismissible
+      >
+        <span className="flex flex-col gap-1">
+          <span>{install.error}</span>
+          {finished}
+        </span>
+      </AlertBanner>
+    );
+  }
+
+  const result = install.report;
   const shown = (items: string[]) =>
     items.slice(0, 8).join(", ") + (items.length > 8 ? ` (+${items.length - 8})` : "");
 
   return (
     <AlertBanner
-      variant={result.missing.length > 0 ? "warning" : "success"}
+      variant={result.missing.length > 0 || result.notice ? "warning" : "success"}
       title={t("reportTitle", { name: result.label })}
       dismissible
     >
@@ -100,6 +145,7 @@ export function EngineInstallReport({ result }: { result: EngineInstallResult })
           <span>{t("reportKept", { files: shown(result.kept) })}</span>
         ) : null}
         {result.notice ? <span>{result.notice}</span> : null}
+        {finished}
       </span>
     </AlertBanner>
   );

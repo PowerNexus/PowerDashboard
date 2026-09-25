@@ -1,5 +1,5 @@
-import { type Database, serverEngines, servers } from "@gamedashboard/db";
-import { Logger } from "@nestjs/common";
+import { type Database, serverEngineInstalls, serverEngines, servers } from "@gamedashboard/db";
+import { ConflictException, Logger } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedLocation, seedNode, seedServer, seedUser } from "../../test/fixtures";
@@ -13,7 +13,7 @@ import { RemoteServerService } from "../remote/remote-server.service";
 import type { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 import type { WingsClientService } from "../wings/wings-client.service";
 import type { CurseForgePackService } from "./curseforge-pack";
-import { EngineService } from "./engine.service";
+import { EngineService, INSTALL_INTERRUPTED } from "./engine.service";
 import type { EngineSourcesService } from "./engine-sources";
 import type { EulaService } from "./eula.service";
 import type { ModpackSourceService } from "./modpack-source";
@@ -21,7 +21,7 @@ import type { PackInstallerService, PackOutcome, PreparedPack } from "./pack-ins
 import type { DetectedRuntime } from "./server-runtime";
 
 /**
- * Suivi du moteur installé.
+ * Suivi du moteur installé, et de l'installation menée en tâche de fond.
  *
  * `EngineState.current` valait toujours `null` : l'écran ne pouvait dire ni
  * ce que le panel avait posé, ni qu'un modpack avait une version plus récente.
@@ -75,9 +75,11 @@ describe.skipIf(!HAS_DATABASE)("suivi du moteur installé (intégration)", () =>
   let userId: string;
   let service: EngineService;
   const events: string[] = [];
+  let etat = "offline";
   const wings = {
-    power: vi.fn(async () => {
-      events.push("stop");
+    resources: vi.fn(async () => ({ state: etat })),
+    power: vi.fn(async (_server: string, signal: string) => {
+      events.push(signal);
     }),
     pullFile: vi.fn(async () => {}),
     deleteFiles: vi.fn(async () => {}),
@@ -114,13 +116,14 @@ describe.skipIf(!HAS_DATABASE)("suivi du moteur installé (intégration)", () =>
   beforeEach(async () => {
     await db.execute(
       sql.raw(
-        "truncate table server_engines, servers, allocations, eggs, nests, nodes, locations, users cascade",
+        "truncate table server_engine_installs, server_engines, servers, allocations, eggs, nests, nodes, locations, users cascade",
       ),
     );
     const nodeId = await seedNode(db, { locationId: await seedLocation(db) });
     userId = await seedUser(db);
     serverId = await seedServer(db, { nodeId, ownerId: userId });
     events.length = 0;
+    etat = "offline";
     vi.clearAllMocks();
 
     service = new EngineService(
@@ -214,6 +217,136 @@ describe.skipIf(!HAS_DATABASE)("suivi du moteur installé (intégration)", () =>
       .from(servers)
       .where(eq(servers.id, serverId));
     expect(row?.state).toBeNull();
+  });
+
+  it("une sauvegarde préalable ratée redémarre le serveur qu'elle a trouvé en marche", async () => {
+    etat = "running";
+    const beforeWrite = vi.fn(async () => {
+      throw new ConflictException("La sauvegarde préalable a échoué : rien n'a été modifié.");
+    });
+
+    await expect(service.install(serverId, "modpack:pack", "v1", { beforeWrite })).rejects.toThrow(
+      /sauvegarde préalable/,
+    );
+    // Régression : le serveur restait arrêté alors que rien n'avait été écrit.
+    expect(events).toEqual(["stop", "start"]);
+    expect(installer.run).not.toHaveBeenCalled();
+  });
+
+  it("un serveur trouvé arrêté n'est pas démarré après une sauvegarde ratée", async () => {
+    const beforeWrite = vi.fn(async () => {
+      throw new ConflictException("Quota de sauvegardes atteint.");
+    });
+    await expect(
+      service.install(serverId, "modpack:pack", "v1", { beforeWrite }),
+    ).rejects.toThrow();
+    expect(events).toEqual(["stop"]);
+  });
+
+  it("une installation qui échoue après la première écriture ne redémarre rien", async () => {
+    etat = "running";
+    installer.run.mockRejectedValueOnce(new ConflictException("Index illisible."));
+    await expect(service.install(serverId, "modpack:pack", "v1")).rejects.toThrow();
+    expect(events).toEqual(["stop"]);
+  });
+
+  it("part en tâche de fond : « en cours », une seule à la fois, puis son compte rendu en base", async () => {
+    let finir: () => void = () => {};
+    installer.run.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finir = () => resolve(outcome("v1", { "mods/a.jar": "10:t1" }));
+        }),
+    );
+    const onSettled = vi.fn(async () => {});
+
+    const run = await service.start(serverId, "modpack:pack", "v1", {
+      installedBy: userId,
+      onSettled,
+    });
+    expect(run).toMatchObject({ status: "running", optionId: "modpack:pack", versionId: "v1" });
+    const pendant = await service.state(serverId, "");
+    expect(pendant.install?.status).toBe("running");
+    // Rien n'est proposé pendant l'installation : l'écran se relit sans
+    // interroger les catalogues à chaque fois.
+    expect(pendant.platforms).toEqual([]);
+    expect(sources.options).not.toHaveBeenCalled();
+
+    // Une seconde demande pendant la première : refusée, rien de lancé.
+    const seconde = service.start(serverId, "modpack:pack", "v1");
+    await expect(seconde).rejects.toBeInstanceOf(ConflictException);
+    await expect(seconde).rejects.toThrow(/déjà en cours/);
+
+    await vi.waitFor(() => expect(installer.run).toHaveBeenCalledTimes(1));
+    finir();
+    await service.settled();
+
+    const install = await service.lastInstall(serverId);
+    expect(install).toMatchObject({
+      status: "done",
+      error: null,
+      report: { label: "Pack de test", files: 1, missing: [], eulaReset: false },
+    });
+    expect(install?.finishedAt).not.toBeNull();
+    expect(onSettled).toHaveBeenCalledWith({ result: expect.objectContaining({ files: 1 }) });
+
+    // Close, elle laisse la place à la suivante.
+    await service.start(serverId, "modpack:pack", "v1");
+    await service.settled();
+    expect(installer.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("un échec en tâche de fond est retenu avec sa raison, sans détail interne", async () => {
+    installer.run.mockRejectedValueOnce(
+      new ConflictException("L'archive ne contient pas d'index lisible."),
+    );
+    await service.start(serverId, "modpack:pack", "v1");
+    await service.settled();
+    expect(await service.lastInstall(serverId)).toMatchObject({
+      status: "failed",
+      error: "L'archive ne contient pas d'index lisible.",
+      report: null,
+    });
+
+    installer.run.mockRejectedValueOnce(new Error("connect ECONNREFUSED 10.0.0.5:5432"));
+    await service.start(serverId, "modpack:pack", "v1");
+    await service.settled();
+    const echec = await service.lastInstall(serverId);
+    expect(echec?.status).toBe("failed");
+    expect(echec?.error).not.toMatch(/10\.0\.0\.5/);
+    const [row] = await db
+      .select({ state: servers.state })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    expect(row?.state).toBeNull();
+  });
+
+  it("une installation restée « en cours » après un redémarrage est close en échec, et le serveur rendu", async () => {
+    await db.insert(serverEngineInstalls).values({
+      serverId,
+      status: "running",
+      optionId: "modpack:pack",
+      versionId: "v1",
+      label: "Pack v1",
+      startedAt: new Date().toISOString(),
+    });
+    await db.update(servers).set({ state: "installing" }).where(eq(servers.id, serverId));
+
+    expect(await service.closeInterrupted()).toBe(1);
+
+    expect(await service.lastInstall(serverId)).toMatchObject({
+      status: "failed",
+      error: INSTALL_INTERRUPTED,
+    });
+    const [row] = await db
+      .select({ state: servers.state })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    expect(row?.state).toBeNull();
+    // Le serveur n'est plus bloqué : une nouvelle installation passe.
+    await service.start(serverId, "modpack:pack", "v1");
+    await service.settled();
+    expect((await service.lastInstall(serverId))?.status).toBe("done");
   });
 
   it("la veille signale une version plus récente, une seule fois, et la panne n'efface rien", async () => {

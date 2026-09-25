@@ -13,7 +13,7 @@ import {
   parseManifest,
 } from "./curseforge-pack";
 import { isTrustedDownload, ModpackSourceService } from "./modpack-source";
-import { planifier, suiviApres } from "./pack-files";
+import { nomSur, planifier, suiviApres } from "./pack-files";
 import { PackWorkspace } from "./pack-workspace";
 import type { DetectedRuntime } from "./server-runtime";
 
@@ -133,6 +133,7 @@ export class PackInstallerService {
       throw new NotFoundException("Cette version n'appartient pas à ce modpack.");
     }
     this.assertTrusted(version.archive.url);
+    this.assertFileName(version.archive.fileName);
 
     const loaders = version.loaders
       .map((value) => packLoaderOf(value))
@@ -184,6 +185,7 @@ export class PackInstallerService {
       );
     }
     this.assertTrusted(archive.downloadUrl);
+    this.assertFileName(archive.fileName);
 
     return {
       source: "curseforge",
@@ -236,7 +238,20 @@ export class PackInstallerService {
       );
 
       const gameVersion = incoming.gameVersion || prepared.gameVersion;
-      const loaderNotice = await installLoader(incoming.loader, gameVersion);
+      /*
+       * Les fichiers du pack sont posés : un échec du chargeur ne doit plus
+       * rien effacer du suivi. Sans ce filet, l'erreur remontait avant
+       * l'enregistrement, et la mise à jour suivante tenait tous les fichiers
+       * du pack pour neufs — écrasant ceux que l'utilisateur avait modifiés,
+       * et laissant ceux que la nouvelle version retire.
+       */
+      let loaderNotice: string | null;
+      try {
+        loaderNotice = await installLoader(incoming.loader, gameVersion);
+      } catch (error) {
+        this.logger.warn(`Chargeur non posé sur ${serverId} : ${describe(error)}`);
+        loaderNotice = echecChargeur(incoming.loader);
+      }
 
       const missing = [...failedMoves, ...failedPulls];
       const written = plan.ecrire.filter((path) => !missing.includes(path));
@@ -360,19 +375,61 @@ export class PackInstallerService {
       resolved.pulls.filter((pull) => !moves.has(pull.path)).map((pull) => [pull.path, pull.url]),
     );
 
+    const notices: string[] = [];
+    /*
+     * Les datapacks vont dans le dossier `datapacks` du monde, le seul que le
+     * serveur lit. Suivis comme le reste du pack : une mise à jour remplace
+     * ceux qu'elle change et retire ceux qu'elle abandonne (`appartientAuServeur`
+     * laisse ce dossier-là au pack), sans toucher à ceux posés à la main.
+     */
+    if (resolved.datapacks.length > 0) {
+      const level = await ws.levelName();
+      if (level === null) {
+        notices.push(
+          `${resolved.datapacks.length} datapack(s) n'ont pas été posés : le nom du monde (level-name de server.properties) n'est pas un simple dossier. Posez-les à la main dans le dossier datapacks du monde.`,
+        );
+      } else {
+        for (const datapack of resolved.datapacks) {
+          const path = `${level}/datapacks/${datapack.fileName}`;
+          if (!moves.has(path)) pulls.set(path, datapack.url);
+        }
+        notices.push(`${resolved.datapacks.length} datapack(s) posé(s) dans ${level}/datapacks.`);
+      }
+    }
+    if (resolved.clientOnly > 0) {
+      notices.push(
+        `${resolved.clientOnly} fichier(s) réservés au client (packs de ressources, shaders) n'ont pas été posés.`,
+      );
+    }
+    if (resolved.skipped.length > 0) {
+      notices.push(
+        `${resolved.skipped.length} fichier(s) d'un type que le panel ne sait pas placer sur un serveur n'ont pas été posés (${liste(resolved.skipped)}).`,
+      );
+    }
+
     return {
       moves,
       pulls,
       loader: manifest.loader,
       gameVersion: manifest.gameVersion,
       name: manifest.name,
-      notices:
-        resolved.clientOnly > 0
-          ? [
-              `${resolved.clientOnly} fichier(s) réservés au client (packs de ressources, shaders) n'ont pas été posés.`,
-            ]
-          : [],
+      notices,
     };
+  }
+
+  /**
+   * Le nom sous lequel le daemon enregistre l'archive, dans le dossier de
+   * travail. Il vient de l'API du catalogue comme l'adresse : un « ../ » ou un
+   * chemin y ferait écrire l'archive ailleurs que là où on la retire ensuite.
+   * Même règle que pour le pack serveur (`serverPackOf`) et chaque mod.
+   */
+  private assertFileName(fileName: string): void {
+    if (!nomSur(fileName)) {
+      this.logger.warn(`Nom d'archive de modpack refusé : ${fileName}`);
+      throw new ConflictException(
+        "L'archive de ce modpack porte un nom de fichier invalide. Installation refusée.",
+      );
+    }
   }
 
   private assertTrusted(url: string): void {
@@ -385,6 +442,18 @@ export class PackInstallerService {
       );
     }
   }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Ce que l'écran dit quand le chargeur n'a pas pu être posé après les fichiers. */
+function echecChargeur(loader: { loader: PackLoader; version: string } | null): string {
+  const name = loader
+    ? `${loader.loader === "fabric" ? "Fabric Loader" : loader.loader} ${loader.version}`.trim()
+    : "le chargeur";
+  return `Les fichiers du pack sont posés, mais la pose de ${name} a échoué : le serveur peut ne pas démarrer. Relancez l'installation de cette version pour reposer le chargeur.`;
 }
 
 function refusChargeur(packLoader: string, serverLoader: string): string {

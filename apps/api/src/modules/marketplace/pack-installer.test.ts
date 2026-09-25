@@ -410,3 +410,180 @@ describe("modpack CurseForge", () => {
     ).rejects.toThrow(/n'appartient pas/);
   });
 });
+
+describe("défauts relevés en revue", () => {
+  const EDGE = "https://edge.forgecdn.net/files";
+
+  function curseforge(routes: Record<string, unknown>) {
+    const client = {
+      call: vi.fn(async (path: string, body?: unknown) => {
+        const key = body === undefined ? path : `POST ${path}`;
+        if (!(key in routes)) throw new Error(`route inattendue ${key}`);
+        return { data: routes[key] };
+      }),
+    };
+    return new CurseForgePackService(client as unknown as CurseForgeClient);
+  }
+
+  const packFile = (fileName = "pack-1.0.zip") => ({
+    id: 100,
+    modId: 42,
+    displayName: "Pack 1.0",
+    fileName,
+    downloadUrl: `${EDGE}/100/pack-1.0.zip`,
+    fileDate: "2026-02-01T00:00:00Z",
+    gameVersions: ["1.20.1", "Forge"],
+    serverPackFileId: null,
+  });
+
+  /** Un manifeste avec un mod, un datapack (classe 6945) et un monde (classe 17). */
+  function packAvecDatapack(daemon: FauxWings, datapack: string) {
+    daemon.archives.set(`${EDGE}/100/pack-1.0.zip`, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        manifestVersion: 1,
+        name: "Pack",
+        minecraft: { version: "1.20.1", modLoaders: [{ id: "forge-47.2.0", primary: true }] },
+        files: [
+          { projectID: 1, fileID: 11, required: true },
+          { projectID: 5, fileID: 55, required: true },
+          { projectID: 7, fileID: 77, required: true },
+        ],
+        overrides: "overrides",
+      }),
+    });
+    const cf = curseforge({
+      "/mods/42/files/100": packFile(),
+      "/mods/42": { id: 42, name: "Pack", summary: "" },
+      "POST /mods/files": [
+        { id: 11, modId: 1, displayName: "A", fileName: "a.jar", downloadUrl: `${EDGE}/11/a.jar` },
+        {
+          id: 55,
+          modId: 5,
+          displayName: "Recettes",
+          fileName: datapack,
+          downloadUrl: `${EDGE}/55/${datapack}`,
+        },
+        {
+          id: 77,
+          modId: 7,
+          displayName: "Carte",
+          fileName: "carte.zip",
+          downloadUrl: `${EDGE}/77/c.zip`,
+        },
+      ],
+      "POST /mods": [
+        { id: 1, name: "Mod A", classId: 6 },
+        { id: 5, name: "Recettes du pack", classId: 6945 },
+        { id: 7, name: "Carte d'aventure", classId: 17 },
+      ],
+    });
+    return installer(daemon, new ModpackSourceService(), cf);
+  }
+
+  it("pose un datapack du manifeste dans le dossier datapacks du monde, et le dit", async () => {
+    const daemon = new FauxWings();
+    daemon.put("server.properties", "motd=x\nlevel-name=monde\\ principal\n");
+    daemon.put("monde principal/level.dat", "monde");
+
+    const outcome = await poser(
+      packAvecDatapack(daemon, "recettes-1.zip"),
+      "curseforge-pack:42",
+      "100",
+      FORGE,
+    );
+
+    // Régression : tout ce qui n'était pas un mod passait pour « du client »,
+    // et le datapack était écarté sans un mot.
+    expect(daemon.has("monde principal/datapacks/recettes-1.zip")).toBe(true);
+    expect(daemon.has("mods/a.jar")).toBe(true);
+    expect(daemon.pulled).not.toContain(`${EDGE}/77/c.zip`);
+    expect(outcome.notice).toMatch(/1 datapack\(s\) posé\(s\) dans monde principal\/datapacks/);
+    expect(outcome.notice).toMatch(/Carte d'aventure/);
+    expect(outcome.notice).not.toMatch(/réservés au client/);
+    expect(outcome.record.files["monde principal/datapacks/recettes-1.zip"]).toBeDefined();
+  });
+
+  it("une mise à jour remplace le datapack du pack au lieu de garder les deux versions", async () => {
+    const daemon = new FauxWings();
+    const v1 = await poser(
+      packAvecDatapack(daemon, "recettes-1.zip"),
+      "curseforge-pack:42",
+      "100",
+      FORGE,
+    );
+    daemon.put("world/datapacks/a-moi.zip", "posé à la main");
+
+    await poser(
+      packAvecDatapack(daemon, "recettes-2.zip"),
+      "curseforge-pack:42",
+      "100",
+      FORGE,
+      v1.record.files,
+    );
+
+    expect(daemon.under("world/datapacks")).toEqual([
+      "world/datapacks/a-moi.zip",
+      "world/datapacks/recettes-2.zip",
+    ]);
+  });
+
+  it("refuse le nom d'archive d'un .mrpack qui sortirait du dossier de travail", async () => {
+    const daemon = new FauxWings();
+    const source = modrinth(daemon, { v1: mrpack([]) });
+    vi.spyOn(source, "version").mockResolvedValueOnce({
+      id: "v1",
+      projectId: "pack",
+      label: "v1",
+      gameVersion: "1.21.1",
+      loaders: ["fabric"],
+      publishedAt: "2026-01-01T00:00:00Z",
+      archive: { url: `${CDN}/pack/v1.mrpack`, fileName: "../../mods/x.mrpack" },
+    });
+
+    // Régression : le nom venait de l'API sans contrôle, contrairement au pack serveur.
+    await expect(installer(daemon, source).prepare("modpack:pack", "v1", FABRIC)).rejects.toThrow(
+      /nom de fichier invalide/,
+    );
+    expect(daemon.pulled).toEqual([]);
+  });
+
+  it("refuse le nom d'archive d'un pack CurseForge sans pack serveur", async () => {
+    const cf = curseforge({
+      "/mods/42/files/100": packFile("../pack.zip"),
+      "/mods/42": { id: 42, name: "Pack", summary: "" },
+    });
+    await expect(
+      installer(new FauxWings(), new ModpackSourceService(), cf).prepare(
+        "curseforge-pack:42",
+        "100",
+        FORGE,
+      ),
+    ).rejects.toThrow(/nom de fichier invalide/);
+  });
+
+  it("un chargeur qui échoue après les fichiers n'efface pas le suivi du pack", async () => {
+    const daemon = new FauxWings();
+    const source = modrinth(daemon, {
+      v1: mrpack([mod("a.jar")], { "overrides/config/a.toml": "a=1" }),
+    });
+    const loader = vi.fn(async (): Promise<string | null> => {
+      throw new Error("Fabric injoignable");
+    });
+
+    const outcome = await poser(
+      installer(daemon, source),
+      "modpack:pack",
+      "v1",
+      FABRIC,
+      {},
+      loader,
+    );
+
+    // Régression : l'erreur remontait avant l'enregistrement, et la mise à
+    // jour suivante tenait tous les fichiers pour neufs.
+    expect(Object.keys(outcome.record.files).sort()).toEqual(["config/a.toml", "mods/a.jar"]);
+    expect(outcome.notice).toMatch(/la pose de Fabric Loader 0\.16\.10 a échoué/);
+    expect(daemon.under(STAGING)).toEqual([]);
+  });
+});

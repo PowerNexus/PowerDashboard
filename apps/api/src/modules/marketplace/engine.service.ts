@@ -1,4 +1,6 @@
 import {
+  type EngineInstallReport,
+  type EngineInstallRun,
   type EngineOption,
   type InstalledEngine,
   javaMajorFor,
@@ -11,6 +13,7 @@ import {
   eggs,
   eggVariables,
   nests,
+  serverEngineInstalls,
   serverEngines,
   servers,
   serverVariables,
@@ -18,20 +21,31 @@ import {
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
+  type OnApplicationBootstrap,
 } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
-import { WingsClientService } from "../wings/wings-client.service";
+import {
+  DAEMON_UNAVAILABLE_MESSAGE,
+  WingsClientService,
+  WingsUnavailableError,
+} from "../wings/wings-client.service";
 import { CurseForgePackService } from "./curseforge-pack";
 import { EngineSourcesService } from "./engine-sources";
 import { EulaService } from "./eula.service";
 import type { UpdateFound } from "./marketplace.service";
 import { ModpackSourceService } from "./modpack-source";
-import { PackInstallerService, type PackOutcome } from "./pack-installer.service";
+import {
+  PackInstallerService,
+  type PackOutcome,
+  type PreparedPack,
+} from "./pack-installer.service";
 import { type DetectedRuntime, detectRuntime } from "./server-runtime";
 
 /**
@@ -77,23 +91,16 @@ export interface EngineState {
    * et un CurseForge sans résultat donneraient le même écran.
    */
   packSources: { source: PackSource; error: string | null }[];
+  /** La dernière installation lancée, en cours ou close ; `null` s'il n'y en a jamais eu. */
+  install: EngineInstallRun | null;
 }
 
 /** Ce que rend une installation, pour l'écran et le journal. */
-export interface EngineInstallResult {
-  label: string;
-  /** Fichiers écrits. */
-  files: number;
-  eulaReset: boolean;
-  /** Fichiers que le pack demandait et qui n'ont pas pu être posés. */
-  missing: string[];
-  /** Fichiers gardés tels quels : modifiés depuis la version précédente, ou au serveur. */
-  kept: string[];
-  /** Fichiers de la version précédente du pack retirés. */
-  removed: number;
-  /** Ce qui reste à faire à la main, en clair. */
-  notice: string | null;
-}
+export type EngineInstallResult = EngineInstallReport;
+
+/** Raison écrite sur une installation que l'API n'a pas pu mener à terme. */
+export const INSTALL_INTERRUPTED =
+  "L'API a redémarré pendant l'installation : elle n'a pas pu être menée à terme. Vérifiez les fichiers du serveur, puis relancez l'installation.";
 
 export interface EngineInstallOptions {
   installedBy?: string;
@@ -104,9 +111,34 @@ export interface EngineInstallOptions {
   beforeWrite?: () => Promise<void>;
 }
 
+/** Issue d'une installation menée en tâche de fond. */
+export type EngineInstallSettled = { result: EngineInstallResult } | { error: string };
+
+export interface EngineStartOptions extends EngineInstallOptions {
+  /**
+   * Appelé une fois l'installation close, réussie ou non : c'est là que
+   * l'appelant tient son journal, la requête qui l'a lancée ayant répondu
+   * depuis longtemps. Son propre échec est consigné, sans plus.
+   */
+  onSettled?: (outcome: EngineInstallSettled) => Promise<void>;
+}
+
+/** Tout ce qui a été résolu, et refusé s'il le fallait, avant de toucher au serveur. */
+interface InstallPlan {
+  optionId: string;
+  versionId: string;
+  runtime: DetectedRuntime;
+  prepared: PreparedPack | null;
+  image: string | null;
+  /** Ce qui est installé, lisible, pour l'écran pendant l'installation. */
+  label: string;
+}
+
 @Injectable()
-export class EngineService {
+export class EngineService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EngineService.name);
+  /** Installations en cours dans ce processus, pour les tests (`settled`). */
+  private readonly inFlight = new Set<Promise<void>>();
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
@@ -135,6 +167,26 @@ export class EngineService {
         platforms: [],
         packs: [],
         packSources: [],
+        install: await this.lastInstall(serverId),
+      };
+    }
+
+    /*
+     * Pendant une installation, rien n'est proposé : l'écran se relit toutes
+     * les quelques secondes jusqu'à la fin, et chaque relecture interrogerait
+     * sinon Modrinth et CurseForge (une quinzaine d'appels) pour des listes
+     * dont aucun bouton n'est cliquable.
+     */
+    const install = await this.lastInstall(serverId);
+    if (install?.status === "running") {
+      return {
+        runtime,
+        unavailableReason: null,
+        current: await this.current(serverId),
+        platforms: [],
+        packs: [],
+        packSources: [],
+        install,
       };
     }
 
@@ -164,7 +216,66 @@ export class EngineService {
             { source: "curseforge", error: curseforge.error },
           ]
         : [],
+      install,
     };
+  }
+
+  /** La dernière installation lancée sur ce serveur, telle que la base la retient. */
+  async lastInstall(serverId: string): Promise<EngineInstallRun | null> {
+    const [row] = await this.db
+      .select()
+      .from(serverEngineInstalls)
+      .where(eq(serverEngineInstalls.serverId, serverId))
+      .limit(1);
+    if (!row) return null;
+    return {
+      status: row.status === "done" || row.status === "failed" ? row.status : "running",
+      optionId: row.optionId,
+      versionId: row.versionId,
+      label: row.label,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt,
+      report: (row.report as EngineInstallReport | null) ?? null,
+      error: row.error,
+    };
+  }
+
+  /**
+   * Au démarrage : clôt en échec les installations restées « en cours ».
+   *
+   * Elles appartenaient à un processus qui n'existe plus (arrêt, plantage,
+   * mise à jour du panel) : sans cette clôture, le serveur resterait refusé à
+   * toute nouvelle installation (409) et verrouillé « en installation » pour
+   * toujours. `battre` : un échec ici est consigné, il n'abat pas l'API — et
+   * une version en répétition (`GAMEDASHBOARD_ESSAI`), qui partage la base de
+   * celle en service, ne clôt pas les installations de cette dernière.
+   */
+  onApplicationBootstrap(): void {
+    void battre(this.logger, "installations de moteur interrompues", async () => {
+      const closed = await this.closeInterrupted();
+      if (closed > 0)
+        this.logger.warn(`${closed} installation(s) de moteur interrompue(s) close(s).`);
+    });
+  }
+
+  /** Clôt les installations « en cours » et rend leurs serveurs. Rend leur nombre. */
+  async closeInterrupted(): Promise<number> {
+    const now = new Date().toISOString();
+    const rows = await this.db
+      .update(serverEngineInstalls)
+      .set({ status: "failed", error: INSTALL_INTERRUPTED, finishedAt: now })
+      .where(eq(serverEngineInstalls.status, "running"))
+      .returning({ serverId: serverEngineInstalls.serverId });
+    const ids = rows.map((row) => row.serverId);
+    if (ids.length > 0) {
+      // Seul l'état posé par l'installation est levé : un serveur que le daemon
+      // réinstalle au même moment garde le sien.
+      await this.db
+        .update(servers)
+        .set({ state: null, updatedAt: now })
+        .where(and(inArray(servers.id, ids), eq(servers.state, "installing")));
+    }
+    return ids.length;
   }
 
   /**
@@ -265,11 +376,129 @@ export class EngineService {
   }
 
   /**
-   * Installe un moteur : plateforme ou modpack.
+   * Lance une installation **en tâche de fond**, et rend aussitôt son état.
    *
-   * L'opération n'est **pas** réversible par elle-même : ce qui est écrasé est
-   * écrasé. C'est pour cela que l'appelant doit avoir arrêté le serveur, et
-   * que l'écran conseille une sauvegarde avant.
+   * Un modpack enchaîne des centaines de téléchargements et peut attendre une
+   * demi-heure sa sauvegarde préalable : l'interface, le vhost et Passenger
+   * coupent une requête bien avant. Ce qui peut être refusé l'est ici, avant
+   * de répondre (version introuvable, chargeur, archive, runtime Java) ; le
+   * reste se déroule après la réponse, et son sort est écrit en base
+   * (`server_engine_installs`), où l'écran le relit.
+   *
+   * Une seule installation à la fois par serveur : la ligne est prise d'un
+   * seul `INSERT … ON CONFLICT … WHERE status <> 'running'`, et une seconde
+   * demande pendant la première est refusée (409).
+   */
+  async start(
+    serverId: string,
+    optionId: string,
+    versionId: string,
+    options: EngineStartOptions = {},
+  ): Promise<EngineInstallRun> {
+    const plan = await this.plan(serverId, optionId, versionId);
+    const run = await this.claim(serverId, plan, options.installedBy);
+
+    // `battre` et non un simple `void` : un rejet non rattrapé abat le
+    // processus sous Node 24, et `finish` consigne déjà l'échec en base.
+    const running = battre(this.logger, `installation de moteur (${serverId})`, () =>
+      this.finish(serverId, plan, options),
+    ).finally(() => {
+      this.inFlight.delete(running);
+    });
+    this.inFlight.add(running);
+    return run;
+  }
+
+  /** Attend les installations en cours. Pour les tests ; les requêtes ne l'appellent jamais. */
+  async settled(): Promise<void> {
+    while (this.inFlight.size > 0) await Promise.all([...this.inFlight]);
+  }
+
+  /** Prend la ligne d'installation du serveur, ou refuse s'il y en a une en cours. */
+  private async claim(
+    serverId: string,
+    plan: InstallPlan,
+    startedBy: string | undefined,
+  ): Promise<EngineInstallRun> {
+    const row = {
+      status: "running",
+      optionId: plan.optionId.slice(0, 160),
+      versionId: plan.versionId.slice(0, 120),
+      label: plan.label.slice(0, 200),
+      report: null,
+      error: null,
+      startedBy: startedBy ?? null,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    };
+    const taken = await this.db
+      .insert(serverEngineInstalls)
+      .values({ serverId, ...row })
+      .onConflictDoUpdate({
+        target: serverEngineInstalls.serverId,
+        set: row,
+        setWhere: sql`${serverEngineInstalls.status} <> 'running'`,
+      })
+      .returning({ serverId: serverEngineInstalls.serverId });
+    if (taken.length === 0) {
+      throw new ConflictException(
+        "Une installation est déjà en cours sur ce serveur. Attendez qu'elle se termine.",
+      );
+    }
+    return {
+      status: "running",
+      optionId: row.optionId,
+      versionId: row.versionId,
+      label: row.label,
+      startedAt: row.startedAt,
+      finishedAt: null,
+      report: null,
+      error: null,
+    };
+  }
+
+  /** L'installation proprement dite, après la réponse ; son sort va en base. */
+  private async finish(serverId: string, plan: InstallPlan, options: EngineStartOptions) {
+    let outcome: EngineInstallSettled;
+    try {
+      const result = await this.apply(serverId, plan, options);
+      outcome = { result };
+      await this.settle(serverId, { status: "done", report: result, error: null });
+    } catch (error) {
+      const reason = reasonOf(error);
+      if (!(error instanceof HttpException)) {
+        this.logger.error(`Installation de moteur sur ${serverId} : ${describe(error)}`);
+      }
+      outcome = { error: reason };
+      await this.settle(serverId, { status: "failed", report: null, error: reason });
+    }
+    if (options.onSettled) {
+      await options.onSettled(outcome).catch((error: unknown) => {
+        this.logger.warn(`Journal de l'installation sur ${serverId} : ${describe(error)}`);
+      });
+    }
+  }
+
+  private async settle(
+    serverId: string,
+    values: { status: "done" | "failed"; report: EngineInstallResult | null; error: string | null },
+  ): Promise<void> {
+    await this.db
+      .update(serverEngineInstalls)
+      .set({
+        status: values.status,
+        report: values.report as Record<string, unknown> | null,
+        error: values.error?.slice(0, 1000) ?? null,
+        finishedAt: new Date().toISOString(),
+      })
+      .where(eq(serverEngineInstalls.serverId, serverId));
+  }
+
+  /**
+   * Installe un moteur : plateforme ou modpack, d'un seul tenant.
+   *
+   * Pour les tests et les appels internes ; l'API passe par `start`, qui mène
+   * la même opération en tâche de fond.
    */
   async install(
     serverId: string,
@@ -277,20 +506,42 @@ export class EngineService {
     versionId: string,
     options: EngineInstallOptions = {},
   ): Promise<EngineInstallResult> {
+    return this.apply(serverId, await this.plan(serverId, optionId, versionId), options);
+  }
+
+  /**
+   * Tout ce qui peut être refusé l'est **avant** d'arrêter le serveur : une
+   * version introuvable, un chargeur qui ne convient pas, une archive hors
+   * des dépôts connus, un runtime Java absent de l'egg. Un refus à ce stade
+   * laisse le serveur tel qu'on l'a trouvé — en marche compris.
+   */
+  private async plan(serverId: string, optionId: string, versionId: string): Promise<InstallPlan> {
     const runtime = await this.runtimeOf(serverId);
     if (!runtime) {
       throw new BadRequestException("Le moteur de ce serveur n'a pas pu être déterminé.");
     }
-
-    /*
-     * Tout ce qui peut être refusé l'est **avant** d'arrêter le serveur : une
-     * version introuvable, un chargeur qui ne convient pas, une archive hors
-     * des dépôts connus, un runtime Java absent de l'egg. Un refus à ce stade
-     * laisse le serveur tel qu'on l'a trouvé — en marche compris.
-     */
     const isPack = optionId.startsWith("modpack:") || optionId.startsWith("curseforge-pack:");
     const prepared = isPack ? await this.installer.prepare(optionId, versionId, runtime) : null;
     const image = await this.runtimeImageFor(serverId, prepared?.gameVersion ?? versionId);
+    const label = prepared
+      ? `${prepared.label || "Modpack"} ${prepared.versionLabel}`.trim()
+      : `${this.sources.labelOf?.(optionId) ?? optionId} ${versionId}`;
+    return { optionId, versionId, runtime, prepared, image, label };
+  }
+
+  /**
+   * Mène l'installation préparée.
+   *
+   * L'opération n'est **pas** réversible par elle-même : ce qui est écrasé est
+   * écrasé. C'est pour cela que le serveur est arrêté, et que l'écran
+   * conseille une sauvegarde avant.
+   */
+  private async apply(
+    serverId: string,
+    plan: InstallPlan,
+    options: EngineInstallOptions,
+  ): Promise<EngineInstallResult> {
+    const { optionId, versionId, runtime, prepared, image } = plan;
 
     /*
      * Arrêt avant écriture, et non « si possible ».
@@ -298,7 +549,10 @@ export class EngineService {
      * Remplacer le jar d'un serveur qui tourne laisse la machine virtuelle sur
      * un fichier supprimé : le serveur continue quelques minutes, puis tombe
      * pour une raison qui n'a plus aucun rapport visible avec ce qu'on a fait.
+     * L'état d'avant est relevé : si rien n'est écrit, le serveur est rendu tel
+     * qu'on l'a trouvé, redémarré s'il tournait.
      */
+    const wasRunning = await this.isRunning(serverId);
     await this.wings.power(serverId, "stop").catch(() => undefined);
 
     /*
@@ -316,10 +570,12 @@ export class EngineService {
     await this.setState(serverId, "installing");
 
     let installed: Omit<EngineInstallResult, "eulaReset">;
+    let untouched = true;
     try {
       // La sauvegarde préalable voit un serveur arrêté, que personne ne peut
       // redémarrer pendant qu'elle se fait.
       if (options.beforeWrite) await options.beforeWrite();
+      untouched = false;
 
       if (prepared) {
         const previous = await this.trackedPackFiles(serverId);
@@ -351,6 +607,16 @@ export class EngineService {
       }
     } finally {
       await this.setState(serverId, null);
+      /*
+       * La sauvegarde préalable a échoué (quota plein, daemon muet…) : rien
+       * n'a été écrit, et le serveur ne doit pas rester arrêté pour autant.
+       * Il repart s'il tournait — une installation refusée n'est pas une panne.
+       */
+      if (untouched && wasRunning) {
+        await this.wings.power(serverId, "start").catch((error: unknown) => {
+          this.logger.warn(`Redémarrage de ${serverId} après refus : ${describe(error)}`);
+        });
+      }
     }
 
     /*
@@ -367,6 +633,16 @@ export class EngineService {
     const eulaReset = await this.eula.reset(serverId, `moteur remplacé par ${installed.label}`);
 
     return { ...installed, eulaReset };
+  }
+
+  /** Le serveur tourne-t-il ? Faux quand le daemon ne le dit pas : on ne redémarre pas à l'aveugle. */
+  private async isRunning(serverId: string): Promise<boolean> {
+    try {
+      const resources = await this.wings.resources(serverId);
+      return resources.state === "running" || resources.state === "starting";
+    } catch {
+      return false;
+    }
   }
 
   /** Fichiers suivis du pack en place, vides si le moteur actuel n'en est pas un. */
@@ -655,6 +931,22 @@ export class EngineService {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * La raison d'un échec, telle que l'écran peut la montrer.
+ *
+ * Les refus du panel (`HttpException`) sont écrits pour être lus. Le message
+ * brut du daemon nomme la machine et son adresse privée : il reste au journal,
+ * comme pour les requêtes relayées. Le reste est une panne interne, dite
+ * sans détail.
+ */
+export function reasonOf(error: unknown): string {
+  if (error instanceof WingsUnavailableError) {
+    return error.isRefusal && error.detail ? error.detail : DAEMON_UNAVAILABLE_MESSAGE;
+  }
+  if (error instanceof HttpException) return error.message;
+  return "L'installation a échoué sur une erreur interne du panel : l'exploitant en trouvera la cause dans le journal de l'API.";
 }
 
 function isPackSource(value: string): value is PackSource {

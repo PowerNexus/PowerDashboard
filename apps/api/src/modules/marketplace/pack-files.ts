@@ -74,13 +74,18 @@ const DOSSIERS_DU_SERVEUR = new Set(["logs", "crash-reports", "backups"]);
  * Le chemin appartient-il au serveur plutôt qu'au pack ?
  *
  * Les mondes (`world`, `world_nether`, et tout dossier de la racine qui
- * commence par `world`), les listes de joueurs et `server.properties` ne sont
+ * commence par `world`, hors les datapacks posés par le pack dans leur dossier
+ * `datapacks`), les listes de joueurs et `server.properties` ne sont
  * **jamais** écrasés s'ils existent, ni retirés. Un pack qui en publie un les
  * pose sur un serveur neuf, pas sur un serveur qui a déjà vécu.
  */
 export function appartientAuServeur(path: string): boolean {
   const [first = "", ...rest] = path.split("/");
   if (rest.length === 0 && FICHIERS_DU_SERVEUR.has(first)) return true;
+  // Un datapack posé à même le dossier `datapacks` d'un monde est au pack :
+  // sans cette exception, une mise à jour garderait l'ancienne version à côté
+  // de la nouvelle, et le monde chargerait les deux.
+  if (rest.length === 2 && rest[0] === "datapacks" && !DOSSIERS_DU_SERVEUR.has(first)) return false;
   if (/^world/i.test(first) || DOSSIERS_DU_SERVEUR.has(first)) return true;
   return false;
 }

@@ -277,3 +277,37 @@ export const serverEngines = pgTable("server_engines", {
   installedAt: moment("installed_at").notNull(),
   ...timestamps,
 });
+
+/**
+ * La dernière installation de moteur lancée sur un serveur, et son sort.
+ *
+ * Une installation de modpack enchaîne des centaines de téléchargements et
+ * peut attendre une demi-heure une sauvegarde préalable : aucune requête HTTP
+ * ne tient jusque-là (échéance de l'interface, du vhost, de Passenger). Elle
+ * part donc en tâche de fond, et c'est cette ligne qui porte son état jusqu'à
+ * l'écran : `running`, puis `done` avec son compte rendu, ou `failed` avec sa
+ * raison.
+ *
+ * Une ligne par serveur, remplacée à chaque lancement : c'est aussi le verrou
+ * qui interdit deux installations à la fois. Une ligne restée `running` après
+ * un redémarrage de l'API est close en échec au démarrage suivant, sans quoi
+ * le serveur resterait bloqué pour toujours.
+ */
+export const serverEngineInstalls = pgTable("server_engine_installs", {
+  serverId: uuid("server_id")
+    .primaryKey()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  /** `running`, `done` ou `failed`. */
+  status: varchar("status", { length: 8 }).notNull(),
+  optionId: varchar("option_id", { length: 160 }).notNull(),
+  versionId: varchar("version_id", { length: 120 }).notNull(),
+  /** Ce qui est installé, lisible (« Pack 1.2 », « Paper 1.21.1 »). */
+  label: varchar("label", { length: 200 }).notNull(),
+  /** Compte rendu d'une installation terminée (fichiers posés, manquants, gardés…). */
+  report: jsonb("report").$type<Record<string, unknown>>(),
+  /** Raison d'un échec, en clair. */
+  error: varchar("error", { length: 1000 }),
+  startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+  startedAt: moment("started_at").notNull(),
+  finishedAt: moment("finished_at"),
+});

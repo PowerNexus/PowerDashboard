@@ -1888,6 +1888,11 @@
     "reportWritten": "{files} fichier(s) posé(s), {removed} fichier(s) de la version précédente retiré(s).",
     "reportMissing": "Non posés, à vérifier avant de démarrer : {files}.",
     "reportKept": "Gardés tels quels (modifiés depuis, ou propres au serveur) : {files}.",
+    "installRunning": "Installation de {name} en cours",
+    "installRunningBody": "Le serveur est arrêté le temps de l'installation, sauvegarde préalable comprise. Cette page se met à jour d'elle-même ; vous pouvez la quitter, l'installation continue.",
+    "installStarted": "Lancée",
+    "installFinished": "Terminée",
+    "installFailedTitle": "L'installation de {name} a échoué",
     "packSourceDown": "{source} n'a pas répondu : {reason}"
   },
   "adminServerDetail": {

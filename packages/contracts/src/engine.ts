@@ -90,6 +90,51 @@ export const InstalledEngine = z.object({
 });
 export type InstalledEngine = z.infer<typeof InstalledEngine>;
 
+/** Ce qu'une installation de moteur a fait, pour l'écran et le journal. */
+export const EngineInstallReport = z.object({
+  label: z.string(),
+  /** Fichiers écrits. */
+  files: z.number().int().nonnegative(),
+  /** Fichiers que le pack demandait et qui n'ont pas pu être posés. */
+  missing: z.array(z.string()),
+  /** Fichiers gardés tels quels : modifiés depuis la version précédente, ou au serveur. */
+  kept: z.array(z.string()),
+  /** Fichiers de la version précédente du pack retirés. */
+  removed: z.number().int().nonnegative(),
+  /** Ce qui reste à faire à la main, en clair (chargeur Forge, fichiers du client…). */
+  notice: z.string().nullable(),
+  /** L'acceptation du contrat de licence a été retirée (nouveau moteur). */
+  eulaReset: z.boolean(),
+});
+export type EngineInstallReport = z.infer<typeof EngineInstallReport>;
+
+export const EngineInstallStatus = z.enum(["running", "done", "failed"]);
+export type EngineInstallStatus = z.infer<typeof EngineInstallStatus>;
+
+/**
+ * La dernière installation de moteur lancée sur un serveur.
+ *
+ * Une installation part **en tâche de fond** : un modpack enchaîne des
+ * centaines de téléchargements, et la sauvegarde préalable peut prendre une
+ * demi-heure — aucune requête HTTP ne tient jusque-là. L'écran relit cet état
+ * tant qu'il vaut `running`, puis montre le compte rendu (`done`) ou la raison
+ * de l'échec (`failed`).
+ */
+export const EngineInstallRun = z.object({
+  status: EngineInstallStatus,
+  optionId: z.string(),
+  versionId: z.string(),
+  /** Ce qui est installé, lisible. */
+  label: z.string(),
+  startedAt: z.string().datetime({ offset: true }),
+  finishedAt: z.string().datetime({ offset: true }).nullable(),
+  /** Compte rendu, quand l'installation est terminée. */
+  report: EngineInstallReport.nullable(),
+  /** Raison de l'échec, en clair. */
+  error: z.string().nullable(),
+});
+export type EngineInstallRun = z.infer<typeof EngineInstallRun>;
+
 /**
  * Chargeur d'un modpack, lu dans le vocabulaire de son catalogue.
  *

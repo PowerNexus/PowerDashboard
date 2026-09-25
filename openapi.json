@@ -2529,7 +2529,7 @@
     },
     "/api/v1/client/servers/{server}/engine": {
       "get": {
-        "summary": "Moteur du serveur : plateformes proposées, modpacks Modrinth et CurseForge, moteur posé par le panel (meta.current) avec la mise à jour de pack relevée par la veille, et sort de chaque catalogue (meta.packSources).",
+        "summary": "Moteur du serveur : plateformes proposées, modpacks Modrinth et CurseForge, moteur posé par le panel (meta.current) avec la mise à jour de pack relevée par la veille, sort de chaque catalogue (meta.packSources) et dernière installation lancée (meta.install : status running, done avec son compte rendu report, ou failed avec sa raison error ; startedAt, finishedAt).",
         "description": "Clé personnelle. Portée requise : `files.read`.",
         "tags": [
           "Moteur"
@@ -2588,7 +2588,7 @@
     },
     "/api/v1/client/servers/{server}/engine/install": {
       "post": {
-        "summary": "Installer une plateforme ou un modpack, ou mettre à jour le pack en place (même optionId, autre versionId) : { optionId, versionId, backupFirst? }. Arrête le serveur ; backupFirst (portée backups.create) prend une sauvegarde ordinaire et l'attend avant toute écriture. Exige aussi files.delete et power.stop. Rend les fichiers posés, manquants et gardés.",
+        "summary": "Installer une plateforme ou un modpack, ou mettre à jour le pack en place (même optionId, autre versionId) : { optionId, versionId, backupFirst? }. Répond 202 aussitôt : l'installation se poursuit en tâche de fond, son état et son compte rendu (fichiers posés, manquants, gardés) se lisent sur GET engine (meta.install). Refus immédiats : version, chargeur ou archive refusés, installation déjà en cours (409). Arrête le serveur ; backupFirst (portée backups.create) prend une sauvegarde ordinaire et l'attend avant toute écriture, et son échec redémarre le serveur s'il tournait. Exige aussi files.delete et power.stop.",
         "description": "Clé personnelle. Portée requise : `files.write`.",
         "tags": [
           "Moteur"

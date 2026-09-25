@@ -1,6 +1,6 @@
 import { ConflictException, Logger } from "@nestjs/common";
 import type { WingsClientService } from "../wings/wings-client.service";
-import { cheminSur, dossiersDe, empreinte } from "./pack-files";
+import { cheminSur, dossiersDe, empreinte, nomSur } from "./pack-files";
 
 /**
  * Le dossier de travail d'une installation de modpack, **dans le conteneur**.
@@ -70,6 +70,19 @@ export class PackWorkspace {
   /** Lit un fichier texte du dossier de travail, `null` s'il manque. */
   async read(path: string): Promise<string | null> {
     return this.wings.readFile(this.serverId, `${STAGING}/${path}`).catch(() => null);
+  }
+
+  /**
+   * Le dossier du monde du serveur (`level-name` de `server.properties`,
+   * `world` par défaut), là où vont les datapacks.
+   *
+   * `null` quand le nom n'est pas un simple dossier sûr : les datapacks ne
+   * sont alors pas posés, et le compte rendu le dit. Un fichier illisible
+   * (serveur neuf, jamais démarré) vaut le défaut de Minecraft.
+   */
+  async levelName(): Promise<string | null> {
+    const raw = await this.wings.readFile(this.serverId, "server.properties").catch(() => null);
+    return nomDuMonde(raw);
   }
 
   /**
@@ -231,6 +244,17 @@ export class PackWorkspace {
     const at = relative === "" ? `/${STAGING}` : `/${STAGING}/${relative}`;
     return this.wings.listDirectory(this.serverId, at).catch(() => []);
   }
+}
+
+/** Lit `level-name` dans le texte de `server.properties` (échappements Java retirés). */
+export function nomDuMonde(properties: string | null): string | null {
+  let value = "world";
+  for (const line of (properties ?? "").split(/\r?\n/)) {
+    const match = line.match(/^\s*level-name\s*[=:]\s*(.*)$/);
+    if (match) value = (match[1] ?? "").replace(/\\(.)/g, "$1").trim();
+  }
+  if (value === "") value = "world";
+  return nomSur(value) ? value : null;
 }
 
 function describe(error: unknown): string {

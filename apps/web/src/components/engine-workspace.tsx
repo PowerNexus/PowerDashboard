@@ -17,13 +17,8 @@ import { Boxes, Cpu, PackageX, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
-import {
-  type EngineInstallResult,
-  type EngineState,
-  type EulaState,
-  installEngine,
-} from "@/server/api/engine";
-import { EngineCurrent, EngineInstallReport } from "./engine-current";
+import { type EngineState, type EulaState, installEngine } from "@/server/api/engine";
+import { EngineCurrent, EngineInstallState } from "./engine-current";
 import { EngineInstallDialog } from "./engine-install-dialog";
 import { ServerBlockBanner, useServerBlock } from "./server-block-context";
 
@@ -131,7 +126,13 @@ export function EngineWorkspace({
     versionLabel: string;
     update: boolean;
   } | null>(null);
-  const [report, setReport] = useState<EngineInstallResult | null>(null);
+  /*
+   * Une installation en cours (en tâche de fond, côté API) : rien d'autre ne
+   * se lance, et les catalogues ne sont pas relus — l'écran se rafraîchit
+   * jusqu'à sa fin (`EngineInstallState`).
+   */
+  const installing = initial.install?.status === "running";
+  const busy = pending || bloc !== null || installing;
 
   const choose = (option: EngineOption, versionId: string) =>
     setToInstall({
@@ -155,7 +156,6 @@ export function EngineWorkspace({
         backupFirst,
       );
       setError(outcome.error);
-      setReport(outcome.result);
       setToInstall(null);
       if (!outcome.error) router.refresh();
     });
@@ -170,11 +170,11 @@ export function EngineWorkspace({
           {error}
         </AlertBanner>
       ) : null}
-      {report ? <EngineInstallReport result={report} /> : null}
+      <EngineInstallState install={initial.install} />
 
       <EngineCurrent
         current={initial.current}
-        busy={pending || bloc !== null}
+        busy={busy}
         onUpdate={(versionId, versionLabel) =>
           initial.current &&
           setToInstall({
@@ -188,7 +188,7 @@ export function EngineWorkspace({
         }
       />
 
-      {initial.runtime === null ? (
+      {installing ? null : initial.runtime === null ? (
         <AlertBanner variant="warning" title={t("unavailable")}>
           {initial.unavailableReason}
         </AlertBanner>
@@ -216,7 +216,7 @@ export function EngineWorkspace({
                   <EngineCard
                     key={option.id}
                     option={option}
-                    busy={pending || bloc !== null}
+                    busy={busy}
                     onInstall={(versionId) => choose(option, versionId)}
                   />
                 ))}
@@ -296,7 +296,7 @@ export function EngineWorkspace({
                     <EngineCard
                       key={option.id}
                       option={option}
-                      busy={pending || bloc !== null}
+                      busy={busy}
                       onInstall={(versionId) => choose(option, versionId)}
                     />
                   ))}
