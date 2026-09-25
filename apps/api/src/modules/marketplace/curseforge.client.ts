@@ -3,6 +3,7 @@ import type {
   MarketplaceProject,
   ProjectLoader,
   ProjectRelease,
+  ReleaseDependency,
 } from "@gamedashboard/contracts";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
@@ -100,6 +101,8 @@ interface CurseForgeFile {
   gameVersions: string[];
   /** Vide lorsque l'auteur refuse la distribution par un tiers. */
   downloadUrl: string | null;
+  /** `relationType` : 3 obligatoire, 5 incompatible (API CurseForge). */
+  dependencies?: { modId: number; relationType: number }[];
 }
 
 @Injectable()
@@ -365,9 +368,23 @@ function toReleases(
         // afficher, pas un défaut à masquer par une valeur inventée.
         downloadUrl: file.downloadUrl ?? null,
         fileName: file.fileName,
+        dependencies: toDependencies(file.dependencies ?? []),
       };
     })
     .filter((r): r is ProjectRelease => r !== null);
+}
+
+/** Relations de CurseForge retenues : 3 obligatoire, 5 incompatible. */
+export function toDependencies(
+  raw: NonNullable<CurseForgeFile["dependencies"]>,
+): ReleaseDependency[] {
+  return raw.flatMap((dep): ReleaseDependency[] =>
+    dep.relationType === 3
+      ? [{ projectId: `curseforge:${dep.modId}`, kind: "required" }]
+      : dep.relationType === 5
+        ? [{ projectId: `curseforge:${dep.modId}`, kind: "incompatible" }]
+        : [],
+  );
 }
 
 /**

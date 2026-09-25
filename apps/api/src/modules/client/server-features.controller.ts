@@ -3,6 +3,7 @@ import {
   type CronFields,
   CronSyntaxError,
   PowerSignal,
+  RELEASE_VERSION_MAX_LENGTH,
 } from "@gamedashboard/contracts";
 import {
   BadRequestException,
@@ -89,6 +90,21 @@ function arrivalHost(request: ClientRequest): string | null {
   const raw = request.headers?.["x-gd-host"];
   const value = (Array.isArray(raw) ? raw[0] : raw)?.trim().toLowerCase() ?? "";
   return value === "" ? null : value;
+}
+
+/**
+ * Version d'extension demandée, facultative.
+ *
+ * Absente, l'installation prend la plus récente compatible. Présente, elle
+ * doit être une chaîne non vide et bornée : elle n'est que comparée aux
+ * publications du catalogue, jamais transmise telle quelle au daemon.
+ */
+function readReleaseVersion(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string" || raw.trim() === "" || raw.length > RELEASE_VERSION_MAX_LENGTH) {
+    throw new BadRequestException("Version d'extension invalide.");
+  }
+  return raw;
 }
 
 function principalOf(request: ClientRequest) {
@@ -803,7 +819,10 @@ export class ServerFeaturesController {
   ) {
     await this.requireMarketplace();
     await this.access.require(principalOf(request), id, "files.read");
-    const result = await this.relay(() => this.marketplace.catalogue(id, query ?? ""));
+    const [result, installed] = await Promise.all([
+      this.relay(() => this.marketplace.catalogue(id, query ?? "")),
+      this.marketplace.installed(id),
+    ]);
     return {
       data: result.entries,
       // Le sort de chaque source accompagne le catalogue : une source tombée
@@ -813,6 +832,8 @@ export class ServerFeaturesController {
         runtime: result.runtime,
         unavailableReason: result.unavailableReason,
         sources: result.sources,
+        // Ce qui est installé, indépendamment de la recherche du moment.
+        installed,
       },
     };
   }
@@ -835,11 +856,14 @@ export class ServerFeaturesController {
     if (typeof projectId !== "string" || projectId.trim() === "") {
       throw new BadRequestException("Extension manquante.");
     }
+    const version = readReleaseVersion((body as { version?: unknown })?.version);
 
     await this.requireMarketplace();
     await this.access.require(principalOf(request), id, "files.write");
     await this.access.requireOperable(id);
-    const installed = await this.relay(() => this.marketplace.install(id, projectId));
+    const installed = await this.relay(() =>
+      this.marketplace.install(id, projectId, version, request.user.id),
+    );
     await this.log(request, id, "marketplace.install", { projectId, ...installed });
     return { data: installed };
   }

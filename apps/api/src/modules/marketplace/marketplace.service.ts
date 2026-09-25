@@ -1,11 +1,18 @@
 import {
   type AddonState,
   addonState,
+  chooseRelease,
+  compatibleReleases,
   GAME_SOURCES,
   gameVersionFromPing,
   type InstalledAddon,
+  isInstallable,
+  latestCompatibleRelease,
   type MarketplaceProject,
   type MarketplaceSource,
+  type ProjectRelease,
+  RELEASE_CHOICES_MAX,
+  type ReleaseChoice,
   RUNTIME_STATE_FRESH_WINDOW,
 } from "@gamedashboard/contracts";
 import {
@@ -38,6 +45,31 @@ import { SpigetClient } from "./spiget.client";
 export interface CatalogueEntry {
   project: MarketplaceProject;
   state: AddonState;
+  /**
+   * Versions que l'utilisateur peut choisir, de la plus récente à la plus
+   * ancienne : compatibles et téléchargeables seulement, bornées à
+   * `RELEASE_CHOICES_MAX`.
+   */
+  choices: string[];
+}
+
+/** Une extension installée, telle que la liste la montre. */
+export interface InstalledExtension {
+  projectId: string;
+  source: MarketplaceSource;
+  name: string;
+  version: string;
+  /** Publication compatible plus récente, ou `null`. */
+  latestVersion: string | null;
+  installedAt: string;
+  /** `null` : jamais vérifiée depuis son installation (ancienne ligne). */
+  checkedAt: string | null;
+}
+
+/** Une mise à jour apparue lors d'un passage de la veille. */
+export interface UpdateFound {
+  name: string;
+  version: string;
 }
 
 /** Une source interrogée et son sort, pour pouvoir le dire à l'écran. */
@@ -119,6 +151,9 @@ export class MarketplaceService {
       entries: projects.map((project) => ({
         project,
         state: addonState(project, runtime, installed.get(project.id)),
+        choices: compatibleReleases(project, runtime)
+          .slice(0, RELEASE_CHOICES_MAX)
+          .map((release) => release.version),
       })),
       sources: found.sources,
     };
@@ -131,11 +166,22 @@ export class MarketplaceService {
    * relue depuis le catalogue à ce moment précis. Accepter une URL du
    * navigateur ferait du daemon un téléchargeur de fichiers arbitraires, pilotable
    * par quiconque a accès à un serveur.
+   *
+   * `version` choisit une publication précise, y compris antérieure à celle
+   * installée (voir `chooseRelease`). Seule la version vient du client ;
+   * l'adresse reste relue ici.
    */
   async install(
     serverId: string,
     projectId: string,
-  ): Promise<{ version: string; fileName: string }> {
+    version?: string,
+    installedBy?: string,
+  ): Promise<{
+    version: string;
+    fileName: string;
+    /** Dépendances posées en même temps, faute d'être déjà là. */
+    dependencies: { name: string; version: string }[];
+  }> {
     const runtime = await this.runtimeOf(serverId);
     if (!runtime) throw new BadRequestException("Ce serveur n'a pas de catalogue d'extensions.");
 
@@ -143,30 +189,61 @@ export class MarketplaceService {
     if (!found) throw new NotFoundException("Extension introuvable dans le catalogue.");
 
     const installed = await this.installedFor(serverId);
-    const state = addonState(found, runtime, installed.get(projectId));
+    const choice = chooseRelease(found, runtime, installed.get(projectId), version);
 
-    const release =
-      state.kind === "installable" || state.kind === "update-available" ? state.release : null;
+    if (choice.kind === "refused") {
+      throw new ConflictException(REFUS[choice.reason]);
+    }
+    const release = choice.release;
+    this.assertDownloadable(projectId, release);
 
-    if (!release) {
-      throw new ConflictException(
-        state.kind === "download-blocked"
-          ? "L'auteur de cette extension interdit son téléchargement par un tiers. Installez-la manuellement."
-          : state.kind === "up-to-date"
-            ? "Cette extension est déjà à jour."
-            : "Cette extension n'est pas compatible avec ce serveur.",
+    /*
+     * Les dépendances sont résolues **avant** tout téléchargement : une
+     * dépendance introuvable ou un conflit déclaré arrête tout, sans laisser
+     * dans le conteneur une moitié d'installation.
+     */
+    const dependencies = await this.planDependencies(runtime, projectId, release, installed);
+
+    // Les dépendances d'abord : l'extension qui les attend démarre avec elles.
+    for (const dep of dependencies) {
+      await this.place(
+        serverId,
+        runtime,
+        dep.project.id,
+        dep.project,
+        dep.release,
+        installed,
+        installedBy,
       );
     }
+    await this.place(serverId, runtime, projectId, found, release, installed, installedBy);
+
+    return {
+      version: release.version,
+      fileName: release.fileName,
+      dependencies: dependencies.map((dep) => ({
+        name: dep.project.name,
+        version: dep.release.version,
+      })),
+    };
+  }
+
+  /**
+   * Refuse une publication sans fichier, ou dont l'adresse sort des dépôts
+   * connus.
+   *
+   * L'adresse rendue par Modrinth ou CurseForge passe par la liste des
+   * dépôts connus avant d'aller au daemon, qui télécharge sans regarder
+   * depuis le réseau du node. SpigotMC n'est pas concerné : son adresse est
+   * composée ici (`spiget.client.ts`), pas lue dans une réponse.
+   */
+  private assertDownloadable(
+    projectId: string,
+    release: ProjectRelease,
+  ): asserts release is ProjectRelease & { downloadUrl: string } {
     if (!release.downloadUrl) {
       throw new ConflictException("Cette publication n'a pas de fichier téléchargeable.");
     }
-
-    /*
-     * L'adresse rendue par Modrinth ou CurseForge passe par la liste des
-     * dépôts connus avant d'aller au daemon, qui télécharge sans regarder
-     * depuis le réseau du node. SpigotMC n'est pas concerné : son adresse est
-     * composée ici (`spiget.client.ts`), pas lue dans une réponse.
-     */
     const source = sourceOfProjectId(projectId);
     if (
       (source === "modrinth" || source === "curseforge") &&
@@ -177,7 +254,82 @@ export class MarketplaceService {
         "Le catalogue indique une adresse de téléchargement hors de ses dépôts habituels. Installation refusée ; réessayez plus tard, ou installez l'extension manuellement.",
       );
     }
+  }
 
+  /**
+   * Dépendances obligatoires à poser avec `release`, dans l'ordre où les
+   * installer.
+   *
+   * Seules les dépendances **absentes** sont retenues : une dépendance déjà
+   * installée, même ancienne, est laissée à son propriétaire. Chacune prend
+   * sa publication compatible la plus récente, et ses propres dépendances
+   * suivent, sur `DEPENDENCY_DEPTH` niveaux et `DEPENDENCY_MAX` projets au
+   * plus : au-delà, un catalogue mal renseigné ferait télécharger la moitié
+   * d'un modpack pour un plugin.
+   *
+   * Un projet que la publication déclare incompatible et qui est installé
+   * arrête tout : poser les deux côte à côte empêcherait le serveur de
+   * démarrer.
+   */
+  private async planDependencies(
+    runtime: DetectedRuntime,
+    projectId: string,
+    release: ProjectRelease,
+    installed: Map<string, InstalledAddon>,
+  ): Promise<{ project: MarketplaceProject; release: ProjectRelease }[]> {
+    const plan: { project: MarketplaceProject; release: ProjectRelease }[] = [];
+    // L'extension demandée compte comme vue : une dépendance croisée qui y
+    // ramène ne doit pas la poser deux fois.
+    const seen = new Set<string>([...installed.keys(), projectId]);
+
+    const visit = async (current: ProjectRelease, depth: number): Promise<void> => {
+      for (const dep of current.dependencies ?? []) {
+        if (dep.kind === "incompatible") {
+          if (installed.has(dep.projectId)) {
+            throw new ConflictException(
+              `Cette extension est déclarée incompatible avec une extension déjà installée (${dep.projectId}). Retirez-la d'abord.`,
+            );
+          }
+          continue;
+        }
+        if (seen.has(dep.projectId)) continue;
+        seen.add(dep.projectId);
+
+        if (depth >= DEPENDENCY_DEPTH || plan.length >= DEPENDENCY_MAX) {
+          throw new ConflictException(
+            "Cette extension demande trop de dépendances pour une installation automatique. Installez-les manuellement.",
+          );
+        }
+
+        const project = await this.projectById(dep.projectId);
+        const chosen = project ? latestCompatibleRelease(project, runtime) : null;
+        if (!project || !chosen || !isInstallable(chosen)) {
+          throw new ConflictException(
+            `Une dépendance obligatoire (${project?.name ?? dep.projectId}) n'a aucune version installable sur ce serveur.`,
+          );
+        }
+        this.assertDownloadable(project.id, chosen);
+
+        await visit(chosen, depth + 1);
+        plan.push({ project, release: chosen });
+      }
+    };
+
+    await visit(release, 0);
+    return plan;
+  }
+
+  /** Pose une publication dans le conteneur et en garde la trace. */
+  private async place(
+    serverId: string,
+    runtime: DetectedRuntime,
+    projectId: string,
+    found: MarketplaceProject,
+    release: ProjectRelease,
+    installed: Map<string, InstalledAddon>,
+    installedBy: string | undefined,
+  ): Promise<void> {
+    this.assertDownloadable(projectId, release);
     const previous = installed.get(projectId);
 
     await this.wings.pullFile(serverId, runtime.directory, release.downloadUrl, release.fileName);
@@ -195,6 +347,23 @@ export class MarketplaceService {
         .catch(() => undefined);
     }
 
+    /*
+     * La veille repart de ce qu'on vient de poser : après un retour en
+     * arrière, la publication plus récente est aussitôt connue comme mise à
+     * jour disponible, sans attendre son prochain passage.
+     */
+    const now = new Date().toISOString();
+    const latestVersion = newerRelease(found, runtime, release.version, release.fileName);
+    const tracked = {
+      versionId: release.version,
+      installedFiles: [release.fileName],
+      installedAt: now,
+      name: found.name.slice(0, 200),
+      latestVersion,
+      checkedAt: now,
+      ...(installedBy ? { installedBy } : {}),
+    };
+
     await this.db
       .insert(marketplaceInstalls)
       .values({
@@ -204,9 +373,7 @@ export class MarketplaceService {
         // rendait la colonne fausse pour la moitié des lignes.
         source: sourceOfProjectId(projectId),
         projectId,
-        versionId: release.version,
-        installedFiles: [release.fileName],
-        installedAt: new Date().toISOString(),
+        ...tracked,
       })
       .onConflictDoUpdate({
         target: [
@@ -214,15 +381,8 @@ export class MarketplaceService {
           marketplaceInstalls.source,
           marketplaceInstalls.projectId,
         ],
-        set: {
-          versionId: release.version,
-          installedFiles: [release.fileName],
-          installedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
+        set: { ...tracked, updatedAt: now },
       });
-
-    return { version: release.version, fileName: release.fileName };
   }
 
   /**
@@ -252,6 +412,96 @@ export class MarketplaceService {
     }
 
     await this.db.delete(marketplaceInstalls).where(eq(marketplaceInstalls.id, row.id));
+  }
+
+  /**
+   * Ce qui est installé sur un serveur, tel que la base le connaît.
+   *
+   * Indépendant de la recherche : une extension qui ne sort pas dans les
+   * résultats du moment reste visible, avec sa mise à jour éventuelle. Aucun
+   * catalogue n'est interrogé ; la fraîcheur vient de la veille.
+   */
+  async installed(serverId: string): Promise<InstalledExtension[]> {
+    const rows = await this.db
+      .select()
+      .from(marketplaceInstalls)
+      .where(eq(marketplaceInstalls.serverId, serverId))
+      .orderBy(marketplaceInstalls.name);
+
+    return rows.map((row) => ({
+      projectId: row.projectId,
+      source: row.source,
+      name: row.name === "" ? row.projectId : row.name,
+      version: row.versionId,
+      latestVersion: row.latestVersion,
+      installedAt: row.installedAt,
+      checkedAt: row.checkedAt,
+    }));
+  }
+
+  /**
+   * Un passage de la veille des mises à jour.
+   *
+   * Reprend les installations les moins récemment vérifiées, au plus `limit`,
+   * et relit chacune dans son catalogue. Une source en panne laisse ses lignes
+   * telles quelles : elles repasseront en tête au tour suivant, et une panne
+   * n'efface jamais une mise à jour déjà connue.
+   *
+   * Rend les mises à jour **nouvellement** apparues, par serveur : c'est ce
+   * qui mérite une notification. Une mise à jour déjà signalée ne l'est pas
+   * une seconde fois.
+   */
+  async checkUpdates(limit: number, olderThan: string): Promise<Map<string, UpdateFound[]>> {
+    const due = await this.db
+      .select()
+      .from(marketplaceInstalls)
+      .where(
+        sql`${marketplaceInstalls.checkedAt} is null or ${marketplaceInstalls.checkedAt} < now() - ${olderThan}::interval`,
+      )
+      .orderBy(sql`${marketplaceInstalls.checkedAt} asc nulls first`)
+      .limit(limit);
+
+    const found = new Map<string, UpdateFound[]>();
+    const runtimes = new Map<string, DetectedRuntime | null>();
+    const projects = new Map<string, Promise<MarketplaceProject | null>>();
+
+    for (const row of due) {
+      if (!runtimes.has(row.serverId))
+        runtimes.set(row.serverId, await this.runtimeOf(row.serverId));
+      const runtime = runtimes.get(row.serverId) ?? null;
+      if (!runtime) continue;
+
+      // Un même projet sur dix serveurs : un seul appel au catalogue.
+      let pending = projects.get(row.projectId);
+      if (!pending) {
+        pending = this.projectById(row.projectId).catch((error: unknown) => {
+          this.logger.warn(`Veille : ${row.projectId} illisible (${describe(error)})`);
+          return null;
+        });
+        projects.set(row.projectId, pending);
+      }
+      const project = await pending;
+      if (!project) continue;
+
+      const latestVersion = newerRelease(
+        project,
+        runtime,
+        row.versionId,
+        row.installedFiles[0] ?? "",
+      );
+      await this.db
+        .update(marketplaceInstalls)
+        .set({ latestVersion, checkedAt: new Date().toISOString() })
+        .where(eq(marketplaceInstalls.id, row.id));
+
+      if (latestVersion !== null && latestVersion !== row.latestVersion) {
+        const list = found.get(row.serverId) ?? [];
+        list.push({ name: row.name === "" ? project.name : row.name, version: latestVersion });
+        found.set(row.serverId, list);
+      }
+    }
+
+    return found;
   }
 
   /** Extensions installées, indexées par projet. */
@@ -464,6 +714,41 @@ function sourceOfProjectId(projectId: string): "modrinth" | "curseforge" | "spig
   if (prefix === "modrinth" || prefix === "curseforge" || prefix === "spigot") return prefix;
   return "custom";
 }
+
+/**
+ * Version compatible plus récente que celle installée, ou `null`.
+ *
+ * Même règle que l'écran (`addonState`) : jamais de rétrogradation proposée.
+ */
+function newerRelease(
+  project: MarketplaceProject,
+  runtime: DetectedRuntime,
+  version: string,
+  fileName: string,
+): string | null {
+  const state = addonState(project, runtime, {
+    projectId: project.id,
+    version,
+    installedAt: new Date(0).toISOString(),
+    fileName,
+  });
+  return state.kind === "update-available" ? state.release.version : null;
+}
+
+/** Profondeur de dépendances suivie : une dépendance de dépendance de dépendance. */
+const DEPENDENCY_DEPTH = 3;
+
+/** Dépendances posées au plus par une installation. */
+const DEPENDENCY_MAX = 10;
+
+/** Message rendu pour chaque refus de `chooseRelease`. */
+const REFUS: Record<Extract<ReleaseChoice, { kind: "refused" }>["reason"], string> = {
+  "download-blocked":
+    "L'auteur de cette extension interdit son téléchargement par un tiers. Installez-la manuellement.",
+  "up-to-date": "Cette version est déjà installée.",
+  incompatible: "Cette extension n'est pas compatible avec ce serveur.",
+  "unknown-version": "Cette version n'existe pas ou ne convient pas à ce serveur.",
+};
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

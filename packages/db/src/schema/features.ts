@@ -216,6 +216,18 @@ export const marketplaceInstalls = pgTable(
     installedFiles: text("installed_files").array().notNull().default([]),
     installedBy: uuid("installed_by").references(() => users.id, { onDelete: "set null" }),
     installedAt: moment("installed_at").notNull(),
+    /**
+     * Nom du projet au moment de l'installation, pour lister ce qui est
+     * installé sans interroger les catalogues à chaque affichage.
+     */
+    name: varchar("name", { length: 200 }).notNull().default(""),
+    /**
+     * Publication compatible plus récente que celle installée, relevée par la
+     * veille des mises à jour. `null` : à jour, ou pas encore vérifié.
+     */
+    latestVersion: varchar("latest_version", { length: 120 }),
+    /** Dernière vérification aboutie auprès du catalogue. */
+    checkedAt: moment("checked_at"),
     ...timestamps,
   },
   (table) => [

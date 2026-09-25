@@ -3,12 +3,14 @@ import { databaseProvider } from "../../common/database.provider";
 import { ActivityModule } from "../activity/activity.module";
 import { BillingModule } from "../billing/billing.module";
 import { ClientModule } from "../client/client.module";
+import { MarketplaceModule } from "../marketplace/marketplace.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { ResellerModule } from "../reseller/reseller.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { WingsModule } from "../wings/wings.module";
 import { BillingWatcherService } from "./billing-watcher.service";
 import { GameProbeService } from "./game-probe.service";
+import { MarketplaceUpdateWatcherService } from "./marketplace-update-watcher.service";
 import { MetricsCollectorService } from "./metrics-collector.service";
 import { NodeHealthWatcherService } from "./node-health-watcher.service";
 import { NodeProbeService } from "./node-probe.service";
@@ -39,6 +41,7 @@ import { ScheduleRunnerService } from "./schedule-runner.service";
     NotificationsModule,
     ActivityModule,
     ClientModule,
+    MarketplaceModule,
     // La veille des échéances lit le facturier relié.
     BillingModule,
   ],
@@ -55,6 +58,8 @@ import { ScheduleRunnerService } from "./schedule-runner.service";
     GameProbeService,
     // Une échéance ne se voit que si on vient la voir : celle-ci vient à nous.
     BillingWatcherService,
+    // Une extension prend du retard sans bruit : la veille le remarque.
+    MarketplaceUpdateWatcherService,
     // La contrepartie du surprovisionnement : vendre plus qu'on ne détient
     // suppose que quelqu'un rende la mémoire quand elle vient à manquer.
     QuotaEnforcerService,
