@@ -484,7 +484,7 @@ describe("sauvegarde d'exploitation (app.sh backup)", () => {
  */
 describe("actions GitHub des workflows", () => {
   const dossier = join(RACINE, ".github", "workflows");
-  const workflows = ["ci.yml", "release.yml", "captures.yml"].map((nom) =>
+  const workflows = ["ci.yml", "release.yml", "captures.yml", "codeql.yml"].map((nom) =>
     readFileSync(join(dossier, nom), "utf8"),
   );
   const actions = workflows.flatMap((texte) =>
@@ -503,7 +503,7 @@ describe("actions GitHub des workflows", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(cibles.length).toBe(5);
+    expect(cibles.length).toBe(6);
     for (const cible of cibles) {
       expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}`);
     }
@@ -524,7 +524,7 @@ describe("actions GitHub des workflows", () => {
         .map(([bloc]) => bloc)
         .filter((bloc) => bloc.includes("runs-on:")),
     );
-    expect(jobs.length).toBe(5);
+    expect(jobs.length).toBe(6);
     for (const bloc of jobs) {
       // Régression : le service du runner ne trouvait pas bash (« bash:
       // command not found » dès la première étape). Le bash de Git est posé
@@ -597,7 +597,7 @@ describe("actions GitHub des workflows", () => {
    * en tête ; un job qui a besoin de plus le déclare lui-même, avec sa raison.
    */
   it("ne donnent au jeton que la lecture du dépôt, en tête de chaque workflow", () => {
-    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml"].map(
+    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml", "codeql.yml"].map(
       (fichier, rang) => [fichier, workflows[rang] ?? ""] as const,
     )) {
       expect(texte, nom).toMatch(/^permissions:\n {2}contents: read\n\n/m);
@@ -637,6 +637,44 @@ describe("actions GitHub des workflows", () => {
     for (const script of scripts) {
       expect(script).not.toMatch(/\$\{\{\s*github\.(ref|head_ref|ref_name|event)\b/);
     }
+  });
+
+  /*
+   * Régression : la « configuration par défaut » de CodeQL réclamait un
+   * runner hébergé (`ubuntu-latest`) et n'a jamais tourné ; aucun scanner ne
+   * lisait le TypeScript. codeql.yml l'analyse sur notre runner, dans le
+   * conteneur du job, avec un CLI épinglé par empreinte.
+   */
+  it("analysent le TypeScript et les workflows avec CodeQL, sur notre runner", () => {
+    const codeql = workflows[3] as string;
+    expect(codeql).toContain(
+      "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
+    );
+    expect(codeql).toMatch(/^ {6}security-events: write$/m);
+    expect(codeql).toContain(
+      "run: bash infra/ci/linux.sh lancer 'bash infra/ci/codeql.sh codeql-resultats'",
+    );
+    // Un envoi par langage : deux analyses de même catégorie dans un envoi
+    // sont refusées.
+    for (const langage of ["javascript", "actions"]) {
+      expect(codeql).toContain(`sarif_file: codeql-resultats/${langage}.sarif`);
+      expect(codeql).toContain(`category: /language:${langage}`);
+    }
+    // Jamais `init`/`analyze`, qui tourneraient directement sur Windows.
+    expect(codeql).not.toMatch(/codeql-action\/(init|analyze|autobuild)@/);
+
+    const outils = readFileSync(join(RACINE, "infra", "ci", "outils.env"), "utf8");
+    expect(outils).toMatch(/^CODEQL_VERSION=\d+\.\d+\.\d+$/m);
+    expect(outils).toMatch(/^CODEQL_SHA256=[0-9a-f]{64} # codeql-bundle-linux64\.tar\.gz$/m);
+    const script = readFileSync(join(RACINE, "infra", "ci", "codeql.sh"), "utf8");
+    // L'archive est vérifiée avant d'être extraite.
+    expect(script.indexOf("sha256sum -c")).toBeGreaterThan(0);
+    expect(script.indexOf("tar -xzf")).toBeGreaterThan(script.indexOf("sha256sum -c"));
+    expect(script).toContain("--build-mode=none");
+    expect(script).toContain("langages=(javascript-typescript actions)");
+    // Le CLI (2 Go extrait) reste d'un job à l'autre.
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toContain("-v gd-ci-codeql:/codeql");
   });
 
   // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.

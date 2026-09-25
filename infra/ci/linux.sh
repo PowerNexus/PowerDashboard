@@ -74,6 +74,8 @@ ouvrir() {
     # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
     -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
+    # Le CLI de CodeQL (près de 2 Go une fois extrait), pour codeql.yml.
+    -v gd-ci-codeql:/codeql
     # Cache de build de Next (« No build cache found » sinon, et tout est
     # recompilé) : `next build` vide son dossier de sortie sauf `cache`, et
     # assembler.sh l'exclut de l'archive. Un volume pour chaque sortie, la
