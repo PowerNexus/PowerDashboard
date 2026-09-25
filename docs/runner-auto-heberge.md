@@ -5,16 +5,16 @@ La CI (`ci.yml`), les releases (`release.yml`) et les captures de référence
 c'est-à-dire sur une machine à nous. GitHub ne facture pas de minutes pour
 ces runners.
 
-Cette machine est un **Windows x64 avec Docker**. Les jobs demandent les
-étiquettes `self-hosted`, `windows` et `x64`, que tout runner Windows x64
-porte d'office. Pour viser une autre cible sans toucher aux workflows, créez
-la variable de dépôt `CI_RUNNER` (Settings → Secrets and variables → Actions
-→ Variables). Sa valeur est du JSON :
+Les jobs prennent **n'importe quel runner auto-hébergé** (étiquette
+`self-hosted`), Windows ou Linux, pourvu qu'il ait Docker ; la machine
+actuelle est un Windows x64. Pour viser une autre cible sans toucher aux
+workflows, créez la variable de dépôt `CI_RUNNER` (Settings → Secrets and
+variables → Actions → Variables). Sa valeur est du JSON :
 
 | Valeur de `CI_RUNNER` | Effet |
 |---|---|
-| *(absente)* | `["self-hosted","windows","x64"]` |
-| `["self-hosted","linux","x64"]` | un runner Linux auto-hébergé, avec Docker |
+| *(absente)* | `"self-hosted"` : le premier runner auto-hébergé libre |
+| `["self-hosted","windows"]` | seulement les runners Windows |
 | `"ubuntu-latest"` | retour aux runners hébergés par GitHub |
 
 Les trois cibles marchent sans autre changement : le runner ne fait que

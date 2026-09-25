@@ -55,7 +55,7 @@ jobs:
     name: Compiler, assembler, publier
     needs: verifier
     # Même runner que la CI (docs/runner-auto-heberge.md).
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
     timeout-minutes: 20
     permissions:
       # Créer la release et y téléverser l'archive.

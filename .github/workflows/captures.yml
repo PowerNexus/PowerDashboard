@@ -40,7 +40,7 @@ env:
 jobs:
   captures:
     name: Prendre et commiter les captures
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
     timeout-minutes: 30
     permissions:
       # Pousser le commit des captures sur la branche choisie.

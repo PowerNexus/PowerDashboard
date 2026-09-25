@@ -22,10 +22,10 @@ concurrency:
 permissions:
   contents: read
 
-# Les jobs tournent sur un runner auto-hébergé **Windows** avec Docker
-# (docs/runner-auto-heberge.md). La variable de dépôt CI_RUNNER, en JSON,
-# choisit une autre cible sans toucher aux workflows : '"ubuntu-latest"' pour
-# revenir aux runners de GitHub.
+# Les jobs prennent n'importe quel runner auto-hébergé, Windows ou Linux,
+# pourvu qu'il ait Docker (docs/runner-auto-heberge.md). La variable de dépôt
+# CI_RUNNER, en JSON, choisit une autre cible sans toucher aux workflows :
+# '"ubuntu-latest"' pour revenir aux runners de GitHub.
 #
 # Chaque job lance ses commandes dans un conteneur Linux (infra/ci/linux.sh) :
 # GitHub Actions ne lance ni `services:` ni action conteneur sur un runner
@@ -48,7 +48,7 @@ jobs:
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
     # Plus large qu'avant : l'installation et les tests passent par Docker.
     timeout-minutes: 30
 
@@ -137,7 +137,7 @@ jobs:
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
     timeout-minutes: 20
 
     steps:
@@ -223,7 +223,7 @@ jobs:
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
     # Cinq minutes de plus pour le scan ZAP, dont le premier passage télécharge
     # l'image (1,5 Go) sur la machine du runner.
     timeout-minutes: 30

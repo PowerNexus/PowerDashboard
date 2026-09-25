@@ -498,13 +498,13 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
-  it("tournent sur le runner auto-hébergé Windows, sauf choix contraire dans CI_RUNNER", () => {
+  it("prennent n'importe quel runner auto-hébergé, sauf choix contraire dans CI_RUNNER", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
     expect(cibles.length).toBe(5);
     for (const cible of cibles) {
-      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}`);
+      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}`);
     }
     // Git Bash, et non PowerShell, le shell par défaut de Windows.
     for (const texte of workflows) {
