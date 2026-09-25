@@ -243,6 +243,13 @@ export class BrandingService {
       domainVerifiedAt: null,
       domainCheckedAt: null,
       domainFailure: null,
+      // Le certificat suit le nom, pas la ligne : celui de l'ancien domaine
+      // laissé en place faisait croire le nouveau déjà servi, et l'agent ne
+      // lui demandait jamais de certificat.
+      certificateIssuedAt: null,
+      certificateExpiresAt: null,
+      certificateAttemptedAt: null,
+      certificateFailure: null,
       updatedAt: new Date().toISOString(),
     };
 

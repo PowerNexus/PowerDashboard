@@ -44,6 +44,19 @@ export interface Mail {
   replyTo?: string | null;
 }
 
+/**
+ * L'adresse seule d'un expéditeur SMTP, qu'il soit réglé nu
+ * (`no-reply@hebergeur.fr`) ou avec son nom (`Hébergeur <no-reply@hebergeur.fr>`).
+ *
+ * Le nom de la marque remplace celui des réglages ; garder la forme complète
+ * comme adresse donnait une adresse mal formée, et plus aucun courrier marqué
+ * ne partait.
+ */
+export function adresseExpediteur(from: string): string {
+  const chevrons = /<([^<>]+)>\s*$/.exec(from);
+  return (chevrons?.[1] ?? from).trim();
+}
+
 @Injectable()
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);
@@ -102,7 +115,9 @@ export class MailerService {
         // Objet plutôt que chaîne composée : nodemailer encode et met entre
         // guillemets le nom lui-même, et une virgule ou un accent dans le nom
         // d'un revendeur ne peut pas fabriquer un second expéditeur.
-        from: mail.fromName ? { name: mail.fromName, address: config.from } : config.from,
+        from: mail.fromName
+          ? { name: mail.fromName, address: adresseExpediteur(config.from) }
+          : config.from,
         ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
         to: mail.to,
         subject: mail.subject,

@@ -958,6 +958,8 @@ describe("domaine de revendeur déclaré, pas encore vérifié", () => {
               "server {",
               "    server_name www.autre.fr *.joker.fr;",
               "}",
+              "# configuration file /etc/nginx/sites-enabled/regex.conf:",
+              '    server_name "~^(?<sous>.+)\\.regex\\.fr$";',
               "# configuration file /etc/nginx/sites-enabled/gd-reseller-a.revendeur.fr.conf:",
               "    server_name a.revendeur.fr;",
             ].join("\n"),
@@ -972,6 +974,9 @@ describe("domaine de revendeur déclaré, pas encore vérifié", () => {
     };
     expect(servi("www.autre.fr")).toBe(true);
     expect(servi("x.joker.fr")).toBe(true);
+    // Défaut : un `server_name` en expression régulière n'était pas lu, et un
+    // nom déclaré non vérifié pouvait prendre le port 80 de ce site.
+    expect(servi("jeu.regex.fr")).toBe(true);
     // Nos propres blocs ne comptent pas : ce sont eux qu'on réécrit.
     expect(servi("a.revendeur.fr")).toBe(false);
     expect(servi("libre.revendeur.fr")).toBe(false);

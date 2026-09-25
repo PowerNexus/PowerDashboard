@@ -115,11 +115,44 @@ describe.skipIf(!HAS_DATABASE)("File des certificats (intégration)", () => {
     }
     const enAttente = (await service.certificateQueue()).filter((l) => !l.verified);
     expect(enAttente).toHaveLength(MAX_DOMAINES_EN_ATTENTE);
-    // Le plus récent (vérifié il y a une minute) reste ; le plus ancien du lot sort.
-    expect(enAttente[0]?.domain).toBe("retente.revendeur.fr");
+    // Sans dépendre des tests précédents : le plus récent du lot reste, le
+    // plus ancien sort, et l'ordre va du plus récent au plus ancien.
+    expect(enAttente.some((l) => l.domain === "lot-0.revendeur.fr")).toBe(true);
+    const lots = enAttente.flatMap((l) => /^lot-(\d+)\./.exec(l.domain)?.[1] ?? []).map(Number);
+    expect(lots).toEqual([...lots].sort((a, b) => a - b));
     expect(enAttente.some((l) => l.domain === `lot-${MAX_DOMAINES_EN_ATTENTE}.revendeur.fr`)).toBe(
       false,
     );
+  });
+
+  it("oublie le certificat de l'ancien domaine quand le revendeur en change", async () => {
+    // Défaut : `setDomain` gardait les dates du certificat précédent, et le
+    // nouveau domaine, une fois vérifié, passait pour déjà servi.
+    const userId = await declarer("ancien.revendeur.fr", {
+      domainVerifiedAt: new Date().toISOString(),
+      certificateIssuedAt: new Date().toISOString(),
+      certificateExpiresAt: new Date(Date.now() + 80 * 86_400_000).toISOString(),
+      certificateAttemptedAt: new Date().toISOString(),
+      certificateFailure: "ancien motif",
+    });
+
+    await service.setDomain(userId, "nouveau.revendeur.fr");
+    await db
+      .update(resellerBrandings)
+      .set({ domainVerifiedAt: new Date().toISOString() })
+      .where(eq(resellerBrandings.userId, userId));
+
+    const ligne = (await service.certificateQueue()).find(
+      (l) => l.domain === "nouveau.revendeur.fr",
+    );
+    expect(ligne).toMatchObject({
+      verified: true,
+      pending: true,
+      issuedAt: null,
+      expiresAt: null,
+      attemptedAt: null,
+      failure: null,
+    });
   });
 });
 

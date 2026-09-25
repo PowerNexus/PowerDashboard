@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
-import { MailerService } from "./mailer.service";
+import { adresseExpediteur, MailerService } from "./mailer.service";
 
 /**
  * L'expéditeur affiché suit la marque ; l'adresse d'envoi, jamais.
@@ -9,14 +9,14 @@ import { MailerService } from "./mailer.service";
  * client d'un revendeur recevait « no-reply@plateforme » sans nom, et ses
  * réponses repartaient vers la plateforme plutôt que vers son hébergeur.
  */
-function monter() {
+function monter(from = "no-reply@plateforme.fr") {
   const settings = {
     smtpConfiguration: async () => ({
       host: "smtp.test",
       port: 587,
       username: null,
       password: null,
-      from: "no-reply@plateforme.fr",
+      from,
     }),
   } as unknown as PlatformSettingsService;
   const service = new MailerService(settings);
@@ -51,5 +51,22 @@ describe("MailerService : expéditeur", () => {
     const message = sendMail.mock.calls[0]?.[0] ?? {};
     expect(message.from).toBe("no-reply@plateforme.fr");
     expect(message).not.toHaveProperty("replyTo");
+  });
+
+  it("n'envoie que l'adresse quand les réglages SMTP portent déjà un nom", async () => {
+    // Défaut : « Hébergeur <no-reply@…> » devenait l'adresse elle-même, et
+    // plus aucun courrier à la marque d'un revendeur ne partait.
+    const { service, sendMail } = monter("Hébergeur <no-reply@plateforme.fr>");
+
+    await service.send({ to: "c@exemple.fr", subject: "S", text: "C", fromName: "Revendeur" });
+
+    expect(sendMail.mock.calls[0]?.[0]).toMatchObject({
+      from: { name: "Revendeur", address: "no-reply@plateforme.fr" },
+    });
+  });
+
+  it("lit l'adresse d'un expéditeur nu ou nommé", () => {
+    expect(adresseExpediteur(" no-reply@plateforme.fr ")).toBe("no-reply@plateforme.fr");
+    expect(adresseExpediteur('"Nom, <drôle>" <a@b.fr>')).toBe("a@b.fr");
   });
 });

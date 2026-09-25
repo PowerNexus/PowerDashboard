@@ -9,6 +9,7 @@ const serveur = (partiel: Partial<ProbePlanInput>): ProbePlanInput => ({
   declared: null,
   variables: {},
   port: 27_015,
+  ports: [27_015, 27_016, 27_020, 27_100, 28_015, 28_017, 2456, 2460, 7777, 30_120, 40_000],
   ...partiel,
 });
 
@@ -87,6 +88,27 @@ describe("probePlan : jeux reconnus", () => {
         serveur({ eggName: "Valheim", variables: { STEAM_QUERY_PORT: " 2460 " }, port: 2456 }),
       ),
     ).toEqual({ protocol: "a2s", port: 2460 });
+  });
+
+  it("n'emploie qu'un port de variable alloué au serveur", () => {
+    // Défaut : le client règle `QUERY_PORT` et le panel sondait n'importe quel
+    // port de la machine à sa demande.
+    expect(
+      probePlan(serveur({ eggName: "Rust", variables: { QUERY_PORT: "22" }, port: 28_015 })),
+    ).toEqual({ protocol: "a2s", port: 28_015 });
+    expect(
+      probePlan(serveur({ eggName: "ARK", variables: { QUERY_PORT: "5432" }, port: 7777 })),
+    ).toBeNull();
+    expect(
+      probePlan(
+        serveur({
+          eggName: "Paper",
+          declared: { protocol: "a2s", port_variable: "QP" },
+          variables: { QP: "3306" },
+          port: 27_015,
+        }),
+      ),
+    ).toEqual({ protocol: "a2s", port: 27_015 });
   });
 
   it("ne devine pas le port de requête d'ARK", () => {
