@@ -510,6 +510,15 @@ describe("actions GitHub des workflows", () => {
     );
     expect(jobs.length).toBe(5);
     for (const bloc of jobs) {
+      // Régression : le service du runner ne trouvait pas bash (« bash:
+      // command not found » dès la première étape). Le bash de Git est posé
+      // dans le PATH, en PowerShell, avant toute étape en bash.
+      const premiere = bloc.indexOf("    steps:\n") + "    steps:\n".length;
+      const chemin = bloc.indexOf("- name: Bash de Git et Docker");
+      expect(chemin).toBeGreaterThan(0);
+      expect(bloc.slice(premiere, chemin)).not.toMatch(/^ {6}- /m);
+      expect(bloc.slice(chemin)).toMatch(/^ {8}shell: powershell$/m);
+      expect(bloc).toContain("$env:GITHUB_PATH");
       expect(bloc).toContain("run: git config --global core.autocrlf false");
       expect(bloc).toMatch(/run: bash infra\/ci\/linux\.sh ouvrir/);
       expect(bloc).toMatch(

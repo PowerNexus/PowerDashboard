@@ -52,17 +52,19 @@ runner ne contient que le checkout et ce qu'on y rapatrie.
 |---|---|
 | Windows 10/11 ou Server 2022+, x64, 8 Go de RAM, 30 Go libres | Docker, le build Next.js et Storybook dans le conteneur |
 | **Docker Desktop** (moteur WSL 2, conteneurs Linux), démarré avec la session | tous les jobs ; l'image de ZAP pèse 1,5 Go |
-| **Git for Windows**, avec son `bash.exe` **avant** celui de WSL dans le `PATH` | `shell: bash` des workflows |
+| **Git for Windows**, à son emplacement par défaut | `shell: bash` des workflows |
 | **GitHub CLI** (`gh`) | publication des releases, commit des captures |
 
 Node.js, pnpm, Trivy, Semgrep et Chromium n'ont pas à être installés : ils
 vivent dans les conteneurs, aux versions du dépôt.
 
-Le `bash` de WSL (`C:\Windows\System32\bash.exe`) ne voit pas `docker.exe`
-sous le même nom ni les chemins du runner : si `where bash` le donne en
-premier, placez `C:\Program Files\Git\bin` devant `C:\Windows\System32` dans
-le `PATH` **système** (le service du runner ne lit pas celui de
-l'utilisateur), puis redémarrez le service.
+Le service du runner ne lit pas le `PATH` de la session, et le `bash` de WSL
+(`C:\Windows\System32\bash.exe`) ne voit ni `docker.exe` ni les chemins du
+runner. La première étape de chaque job, en PowerShell, cherche donc le bash
+de Git for Windows (`C:\Program Files\Git\bin`, puis l'installation par
+utilisateur) et `docker.exe` (`C:\Program Files\Docker\Docker\resources\bin`),
+et les place en tête du `PATH` des étapes suivantes. Si l'un manque, le job
+s'arrête là et le dit.
 
 Les workflows posent `core.autocrlf false` avant le checkout, et
 `.gitattributes` impose LF : un script bash en CRLF casserait dans le

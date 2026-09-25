@@ -54,6 +54,23 @@ jobs:
       E2E_PASSWORD: Essai-E2E-2026!motdepasse
 
     steps:
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
       - name: Fins de ligne du dépôt
         run: git config --global core.autocrlf false
 
