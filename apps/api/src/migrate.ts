@@ -1,5 +1,5 @@
 import { createClient } from "@gamedashboard/db";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { migrateDatabase } from "@gamedashboard/db/migrate";
 
 /**
  * Migrateur de l'archive autonome (`api/migrer.cjs`).
@@ -9,9 +9,10 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
  * Sur un hébergement sans outils, drizzle-kit n'est pas là : c'est ce
  * migrateur, compilé dans chaque version, que la mise à jour automatique
  * lance avant de basculer. Il joue les migrations **de la version qui
- * arrive**, avec le migrateur de drizzle-orm qu'elle embarque — le même que
- * celui des tests d'intégration (`test/throwaway-database.ts`), et la même
- * table de suivi que drizzle-kit (`drizzle.__drizzle_migrations`).
+ * arrive**, avec le migrateur qu'elle embarque (`@gamedashboard/db/migrate`) —
+ * le même que celui des tests d'intégration (`test/throwaway-database.ts`),
+ * qui tient la table de suivi de drizzle-kit (`drizzle.__drizzle_migrations`)
+ * et accepte les PostgreSQL anciens des hébergements mutualisés (9.6).
  *
  * Seule `DATABASE_URL` lui est transmise, jamais la clé de chiffrement.
  */
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
 
   const db = createClient();
   try {
-    await migrate(db, { migrationsFolder: dossier });
+    await migrateDatabase(db, dossier);
   } finally {
     await db.$client.end();
   }
