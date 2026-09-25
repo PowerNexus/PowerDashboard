@@ -1,4 +1,5 @@
 import { Socket } from "node:net";
+import type { GameQueryProtocol } from "@gamedashboard/contracts";
 import {
   MISSES_BEFORE_ALERT,
   outageDuration,
@@ -8,10 +9,12 @@ import {
   allocations,
   type Database,
   eggs,
+  eggVariables,
   nests,
   nodes,
   serverHealth,
   servers,
+  serverVariables,
 } from "@gamedashboard/db";
 import {
   Inject,
@@ -23,9 +26,11 @@ import {
 import { and, desc, eq, gte, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
-import { detectRuntime } from "../marketplace/server-runtime";
 import { NotificationsService } from "../notifications/notifications.service";
+import { queryA2s, queryCfx } from "./game-query.transport";
+import type { GameStatus } from "./game-status";
 import { buildStatusRequest, type MinecraftStatus, readStatusResponse } from "./minecraft-ping";
+import { probePlan } from "./probe-plan";
 
 /**
  * La sonde de jeu : le serveur répond-il aux joueurs ?
@@ -93,7 +98,11 @@ interface ProbeTarget {
   id: string;
   name: string;
   host: string;
+  /** Port de jeu, celui que les joueurs connaissent : c'est lui que cite l'alerte. */
   port: number;
+  protocol: GameQueryProtocol;
+  /** Port interrogé : le port de jeu ou le port de requête (A2S). */
+  queryPort: number;
 }
 
 @Injectable()
@@ -234,11 +243,10 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
   /**
    * Les serveurs à sonder.
    *
-   * Le jeu est déduit de l'egg, comme partout ailleurs dans le panel : les eggs
-   * de Pterodactyl ne déclarent pas le leur, et inventer une colonne ici en
-   * ferait une seconde vérité à tenir à jour. Ce qui n'est pas reconnu comme
-   * Minecraft n'est pas sondé — parler le protocole de Minecraft à un serveur
-   * de Rust ne dirait rien de sa santé.
+   * Le protocole et le port viennent de `probePlan` : ce que l'egg déclare
+   * (`game_query`), sinon le jeu reconnu à son nom — Minecraft, jeux Steam
+   * (A2S), FiveM et RedM. Ce qui n'est pas reconnu n'est pas sondé : parler le
+   * protocole de Minecraft à un serveur de Rust ne dirait rien de sa santé.
    *
    * L'adresse sondée est celle que les joueurs emploient, alias compris. C'est
    * le seul sens utile de « joignable » : un serveur qui répond sur la boucle
@@ -250,7 +258,10 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
       .select({
         id: servers.id,
         name: servers.name,
+        image: servers.dockerImage,
+        startup: servers.startup,
         eggName: eggs.name,
+        declared: eggs.gameQuery,
         nestName: nests.name,
         ip: allocations.ip,
         ipAlias: allocations.ipAlias,
@@ -282,12 +293,54 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
           )`,
         ),
       );
+    if (rows.length === 0) return [];
 
-    return rows.flatMap((row) =>
-      detectRuntime(row.eggName, row.nestName, {})?.game === "minecraft"
-        ? [{ id: row.id, name: row.name, host: probeHost(row), port: row.port }]
-        : [],
-    );
+    // Les variables portent le port de requête (`QUERY_PORT`…) : lues en une
+    // fois pour tous les serveurs du tour.
+    const values = await this.db
+      .select({
+        serverId: serverVariables.serverId,
+        name: eggVariables.envVariable,
+        value: serverVariables.value,
+      })
+      .from(serverVariables)
+      .innerJoin(eggVariables, eq(serverVariables.eggVariableId, eggVariables.id))
+      .where(
+        inArray(
+          serverVariables.serverId,
+          rows.map((row) => row.id),
+        ),
+      );
+    const variables = new Map<string, Record<string, string>>();
+    for (const entry of values) {
+      const own = variables.get(entry.serverId) ?? {};
+      own[entry.name] = entry.value;
+      variables.set(entry.serverId, own);
+    }
+
+    return rows.flatMap((row) => {
+      const plan = probePlan({
+        eggName: row.eggName,
+        nestName: row.nestName,
+        image: row.image,
+        startup: row.startup,
+        declared: row.declared,
+        variables: variables.get(row.id) ?? {},
+        port: row.port,
+      });
+      return plan
+        ? [
+            {
+              id: row.id,
+              name: row.name,
+              host: probeHost(row),
+              port: row.port,
+              protocol: plan.protocol,
+              queryPort: plan.port,
+            },
+          ]
+        : [];
+    });
   }
 
   /**
@@ -298,8 +351,8 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
    * répond pas à ses joueurs est exactement ce qu'on cherche à rendre visible,
    * et le passer sous silence reviendrait à ne rien sonder du tout.
    */
-  private async probe(target: ProbeTarget, now: Date): Promise<MinecraftStatus | null> {
-    const status = await ping(target.host, target.port).catch(() => null);
+  private async probe(target: ProbeTarget, now: Date): Promise<GameStatus | null> {
+    const status = await query(target).catch(() => null);
 
     await this.db.insert(serverHealth).values({
       serverId: target.id,
@@ -311,6 +364,18 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
     });
 
     return status;
+  }
+}
+
+/** Le protocole du jeu, sur le port qu'il écoute. */
+function query(target: ProbeTarget): Promise<GameStatus | null> {
+  switch (target.protocol) {
+    case "a2s":
+      return queryA2s(target.host, target.queryPort);
+    case "cfx":
+      return queryCfx(target.host, target.queryPort);
+    default:
+      return ping(target.host, target.queryPort);
   }
 }
 

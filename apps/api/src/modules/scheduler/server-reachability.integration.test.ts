@@ -1,7 +1,15 @@
-import { type Database, serverHealth, servers } from "@gamedashboard/db";
+import {
+  allocations,
+  type Database,
+  eggs,
+  serverHealth,
+  serverMetrics,
+  servers,
+} from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { serveurA2s } from "../../test/a2s-frames";
 import { seedLocation, seedNode, seedServer, seedUser } from "../../test/fixtures";
 import {
   createThrowawayDatabase,
@@ -143,4 +151,98 @@ describe.skipIf(!HAS_DATABASE)("sonde de jeu : pannes et retours (intégration)"
     await oublier([serverId]);
     expect(await depuis()).not.toBeNull();
   });
+});
+
+/**
+ * Les mêmes alertes pour un jeu Steam : la sonde A2S passe par le même tour,
+ * la même table et les mêmes transitions que Minecraft.
+ */
+describe.skipIf(!HAS_DATABASE)("sonde de jeu : serveur A2S (intégration)", () => {
+  let throwaway: ThrowawayDatabase;
+  let db: Database;
+  let serverId: string;
+  let sonde: GameProbeService;
+  const notifyServerOwner = vi.fn(async () => {});
+
+  beforeAll(async () => {
+    Logger.overrideLogger(false);
+    throwaway = await createThrowawayDatabase();
+    db = throwaway.db;
+  }, 60_000);
+
+  afterAll(async () => {
+    await throwaway?.drop();
+  });
+
+  beforeEach(async () => {
+    await db.execute(
+      sql.raw(
+        "truncate table server_health, server_metrics, servers, allocations, eggs, nests, nodes, locations, users cascade",
+      ),
+    );
+    notifyServerOwner.mockClear();
+    const nodeId = await seedNode(db, { locationId: await seedLocation(db) });
+    serverId = await seedServer(db, { nodeId, ownerId: await seedUser(db) });
+    sonde = new GameProbeService(db, { notifyServerOwner } as unknown as NotificationsService);
+  });
+
+  /** Le serveur devient un serveur Rust qui tourne, sur le port du faux serveur A2S. */
+  async function rust(port: number): Promise<void> {
+    const [row] = await db
+      .select({ eggId: servers.eggId, allocationId: servers.allocationId })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    if (!row) throw new Error("serveur introuvable");
+    await db.update(eggs).set({ name: "Rust" }).where(eq(eggs.id, row.eggId));
+    await db.update(allocations).set({ port }).where(eq(allocations.id, row.allocationId));
+    await db.insert(serverMetrics).values({
+      serverId,
+      at: new Date().toISOString(),
+      state: "running",
+      cpuPct: 0,
+      memBytes: 0,
+      diskBytes: 0,
+      netRx: 0,
+      netTx: 0,
+    });
+  }
+
+  it("écrit l'état lu par A2S, puis prévient quand le serveur se tait", async () => {
+    const serveur = await serveurA2s({ joueurs: ["Alice", "Jean Dupont"] });
+    await rust(serveur.port);
+    const debut = Date.now();
+    const tour = (n: number) => sonde.tick(new Date(debut + n * 60_000));
+
+    await tour(0);
+    const [premiere] = await db
+      .select({ reachable: serverHealth.reachable, payload: serverHealth.queryPayload })
+      .from(serverHealth)
+      .where(eq(serverHealth.serverId, serverId));
+    expect(premiere).toEqual({
+      reachable: true,
+      payload: {
+        playersOnline: 3,
+        playersMax: 100,
+        version: "2590",
+        sample: ["Alice", "Jean Dupont"],
+        name: "Rust FR #1",
+        map: "Procedural Map",
+      },
+    });
+
+    // Le serveur se tait : trois tours manqués font une alerte, une seule.
+    await serveur.fermer();
+    for (const n of [1, 2, 3, 4]) await tour(n);
+
+    expect(notifyServerOwner).toHaveBeenCalledTimes(1);
+    expect(notifyServerOwner).toHaveBeenCalledWith(
+      serverId,
+      expect.objectContaining({ type: "server.unreachable", level: "danger" }),
+    );
+    const [etat] = await db
+      .select({ since: servers.unreachableSince })
+      .from(servers)
+      .where(eq(servers.id, serverId));
+    expect(etat?.since).not.toBeNull();
+  }, 30_000);
 });

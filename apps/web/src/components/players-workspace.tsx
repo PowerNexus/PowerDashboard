@@ -1,6 +1,6 @@
 "use client";
 
-import type { PlayerAction } from "@gamedashboard/contracts";
+import { isPlayerName, type PlayerAction } from "@gamedashboard/contracts";
 import {
   AlertBanner,
   Button,
@@ -132,7 +132,9 @@ export function PlayersWorkspace({ serverId, view }: { serverId: string; view: P
               <div key={player} className="flex items-center gap-3 px-5 py-3">
                 <UserRound className="size-4 text-muted" aria-hidden />
                 <span className="gd-mono min-w-0 flex-1 truncate text-sm text-fg">{player}</span>
-                {view.actions.length > 0 && bloc === null ? (
+                {/* Un nom qu'aucune commande n'accepterait (espace, accent : jeux
+                    Steam, FiveM) s'affiche sans actions plutôt qu'avec un refus. */}
+                {view.actions.length > 0 && bloc === null && isPlayerName(player) ? (
                   <RowActions>
                     {view.actions.map((action) => (
                       <DropdownItem

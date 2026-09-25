@@ -5,9 +5,11 @@ import {
   eggProblemMessage,
   eggRefusalMessage,
   exportPterodactylEgg,
+  type GameQuery,
   type ParsedEgg,
   type PlayerCommands,
   type PterodactylEggExport,
+  readGameQuery,
   readPlayerCommands,
 } from "@gamedashboard/contracts";
 import {
@@ -64,6 +66,8 @@ export interface EggDetail {
   consoleCommands: string[];
   /** Commandes de la vue joueurs, reprises telles quelles à l'export. */
   playerCommands: PlayerCommands;
+  /** Sonde de jeu déclarée (`game_query`), reprise telle quelle à l'export. */
+  gameQuery: GameQuery | null;
   enabled: boolean;
   locallyModified: boolean;
   sourceRef: string | null;
@@ -146,6 +150,7 @@ export class EggEditorService {
       fileDenylist: egg.fileDenylist,
       consoleCommands: egg.consoleCommands,
       playerCommands: readPlayerCommands(egg.playerCommands),
+      gameQuery: readGameQuery(egg.gameQuery),
       enabled: egg.enabled,
       locallyModified: egg.locallyModified,
       sourceRef: egg.sourceRef,
@@ -180,6 +185,7 @@ export class EggEditorService {
       fileDenylist: detail.fileDenylist,
       consoleCommands: detail.consoleCommands,
       playerCommands: detail.playerCommands,
+      gameQuery: detail.gameQuery,
       variables: detail.variables.map((variable) => ({
         name: variable.name,
         envVariable: variable.envVariable,
