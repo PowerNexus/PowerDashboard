@@ -265,4 +265,24 @@ export class ClientController {
     if (!server) throw new NotFoundException("Serveur introuvable.");
     return { data: server };
   }
+
+  /**
+   * Commandes du jeu, pour l'autocomplétion de la console (PLAN §10.2).
+   *
+   * `console.read` et non `console.send` : la liste ne donne aucun pouvoir, et
+   * celui qui lit la console sans pouvoir y écrire doit pouvoir savoir ce que
+   * les commandes qu'il y voit passer veulent dire.
+   */
+  @Get("servers/:id/commands")
+  async consoleCommands(
+    @Req() request: ClientRequest,
+    @Param("id") id: string,
+  ): Promise<{ data: { commands: string[] } }> {
+    await this.access.require(
+      { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) },
+      id,
+      "console.read",
+    );
+    return { data: { commands: await this.servers.consoleCommands(id) } };
+  }
 }

@@ -25,6 +25,7 @@ function brouillon(overrides: Partial<EggDraft> = {}): EggDraft {
     installScript: "#!/bin/bash",
     features: [],
     fileDenylist: [],
+    consoleCommands: [],
     variables: [
       {
         id: null,

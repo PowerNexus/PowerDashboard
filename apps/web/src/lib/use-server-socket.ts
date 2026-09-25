@@ -1,9 +1,9 @@
 "use client";
 
 import type { ConsoleLine } from "@gamedashboard/ui";
-import { stripAnsi } from "@gamedashboard/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sendConsoleCommand, sendPowerSignal } from "@/server/api/console";
+import { toConsoleLine } from "./console-line";
 
 /**
  * Connexion au websocket de console de Wings.
@@ -36,21 +36,6 @@ interface Grant {
 
 /** Nombre de lignes conservées. Au-delà, le navigateur commence à ramer. */
 const MAX_LINES = 2000;
-
-/**
- * Le préfixe que Wings colle à ses propres messages.
- *
- * Il est **renommé à l'affichage**, jamais dans le daemon : Wings reste
- * intact, c'est la règle du projet. La console est de toute façon le bon
- * endroit pour le faire — c'est là que le nom compte, et le remplacer à la
- * source obligerait à maintenir une version modifiée du daemon pour un
- * libellé.
- *
- * Le nom de la machine remplace « Pterodactyl » : sur un compte qui tient
- * plusieurs serveurs, savoir **quel node** parle vaut mieux que de lire le nom
- * d'un logiciel que le client n'a pas à connaître.
- */
-const DAEMON_PREFIX = /^\[Pterodactyl Daemon\]:?\s*/;
 
 /**
  * Ordre d'alimentation en attente de confirmation.
@@ -134,31 +119,8 @@ export function useServerSocket(serverId: string, nodeName?: string) {
 
   const append = useCallback(
     (text: string, source?: ConsoleLine["source"]) => {
-      // Le flux du daemon est destiné à un terminal, pas à une page : sans ce
-      // nettoyage, les séquences de contrôle s'affichent en clair au milieu des
-      // lignes — c'est ainsi qu'un `ESC[6n` se lit « [6n » devant la commande.
-      const clean = stripAnsi(text);
-
-      /*
-       * Une ligne du daemon devient une ligne du panel.
-       *
-       * Le préfixe quitte le texte pour devenir une étiquette : c'est ce qui
-       * permet de la surligner d'un bloc, là où un préfixe collé au texte se
-       * confondrait avec la sortie du jeu. Et comme ces messages sont ceux qui
-       * disent pourquoi un serveur refuse de démarrer, ils doivent se voir.
-       */
-      const isDaemon = DAEMON_PREFIX.test(clean);
-
       setLines((current) => {
-        const next = [
-          ...current,
-          {
-            id: `${Date.now()}-${Math.random()}`,
-            text: isDaemon ? clean.replace(DAEMON_PREFIX, "") : clean,
-            source: isDaemon ? ("system" as const) : source,
-            label: isDaemon || source === "system" ? label : undefined,
-          },
-        ];
+        const next = [...current, toConsoleLine(text, source, label)];
         // Fenêtre glissante plutôt qu'accumulation : une console laissée
         // ouverte une nuit finirait par occuper toute la mémoire de l'onglet.
         return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;

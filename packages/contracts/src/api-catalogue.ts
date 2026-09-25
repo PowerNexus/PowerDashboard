@@ -69,6 +69,14 @@ export const CLIENT_ROUTES: ApiRoute[] = [
     group: "Serveurs",
   },
   {
+    method: "GET",
+    path: "/servers/{server}/commands",
+    summary:
+      "Commandes du jeu déclarées par l'egg, pour l'autocomplétion de la console (arguments entre chevrons).",
+    scope: "console.read",
+    group: "Serveurs",
+  },
+  {
     method: "POST",
     path: "/servers/{server}/websocket",
     summary: "Obtenir un jeton websocket de dix minutes pour la console.",

@@ -42,6 +42,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { AnnouncementBanners } from "@/components/announcement-banners";
 import { useBranding } from "@/components/branding-provider";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
+import { clearCommandHistories } from "@/lib/command-history";
 import type { Announcement } from "@/server/api/announcements";
 import type { Notification } from "@/server/api/notifications";
 import { markNotificationsRead } from "@/server/api/notifications-actions";
@@ -398,7 +399,20 @@ export function PanelShell({
                     <DropdownSeparator />
                     {/* Une action serveur, pas un lien : la session doit être
                         révoquée en base, pas seulement oubliée par l'onglet. */}
-                    <DropdownItem icon={<LogOut />} destructive onSelect={() => void signOut()}>
+                    <DropdownItem
+                      icon={<LogOut />}
+                      destructive
+                      onSelect={() => {
+                        // Les commandes tapées restent sur l'appareil tant que
+                        // la session dure, pas au-delà (`command-history.ts`).
+                        try {
+                          clearCommandHistories(window.localStorage);
+                        } catch {
+                          // Stockage refusé : il n'y a rien à effacer.
+                        }
+                        void signOut();
+                      }}
+                    >
                       {t("signOut")}
                     </DropdownItem>
                   </DropdownContent>

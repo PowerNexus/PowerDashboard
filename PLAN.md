@@ -707,7 +707,7 @@ Marque blanche : un revendeur peut surcharger `--gd-accent-*`, logo, nom, favico
 ### 10.2 v1.5
 - Marketplace (Modrinth, CurseForge, SpigotMC) avec gestion de versions et mises à jour.
 - Health checks par jeu + page status + alertes Discord/email.
-- Console avancée : recherche, filtres, liens, autocomplete, historique persistant.
+- Console avancée : recherche, filtres, liens, autocomplete, historique persistant — **livré** (`packages/ui/src/components/console*.tsx`, `lib/console-text.ts`). Rendu HTML gardé plutôt que xterm (décision de Matheo : filtrer et chercher reviennent à choisir les lignes rendues, CSP à nonce intacte). Couleurs ANSI en seize classes closes, filtres Tout / Serveur / Système et Erreurs / Avertissements / Infos, recherche littérale surlignée, liens `http(s)` seulement. Autocomplétion tirée des commandes déclarées par l'egg (`eggs.console_commands`, clé `console_commands` ignorée par Pterodactyl, `GET /servers/{server}/commands`) et de l'historique. Historique des commandes **dans le navigateur**, effacé à la déconnexion : l'API ne garde pas les arguments (ASVS NC-13). L'historique de sortie reste celui de Wings (`send logs`).
 - Vue joueurs (liste, kick/ban via commandes d'egg déclaratives).
 - Marque blanche revendeurs (domaine custom, logo, couleurs, emails).
 - **Facturation WHMCS et ClientXCms**, à côté de HostBill — **livré** (`apps/api/src/modules/billing` : façade `BillingService`, un `BillingProvider` par système, choisi par `billing.provider`). Même contrat pour

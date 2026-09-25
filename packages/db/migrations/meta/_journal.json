@@ -337,6 +337,13 @@
       "when": 1790348507137,
       "tag": "0047_node_outages",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790349603368,
+      "tag": "0048_egg_console_commands",
+      "breakpoints": true
     }
   ]
 }

@@ -242,6 +242,23 @@ export class ClientServersService {
     const rows = await this.rows(eq(servers.id, serverId), viewerId);
     return rows[0] ?? null;
   }
+
+  /**
+   * Les commandes que l'egg du serveur propose à la console.
+   *
+   * Même règle que `byId` : l'accès est vérifié par l'appelant. Une liste vide
+   * pour un serveur inconnu plutôt qu'une erreur — l'appelant a déjà répondu
+   * 404 s'il le fallait.
+   */
+  async consoleCommands(serverId: string): Promise<string[]> {
+    const [row] = await this.db
+      .select({ commands: eggs.consoleCommands })
+      .from(servers)
+      .innerJoin(eggs, eq(servers.eggId, eggs.id))
+      .where(eq(servers.id, serverId))
+      .limit(1);
+    return row?.commands ?? [];
+  }
 }
 
 /**

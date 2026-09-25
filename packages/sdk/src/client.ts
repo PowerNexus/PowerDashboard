@@ -107,6 +107,11 @@ export class GameDashboardClient {
     });
   }
 
+  /** Commandes du jeu déclarées par l'egg (`whitelist add <joueur>`), pour l'autocomplétion. */
+  consoleCommands(serverId: string): Promise<unknown> {
+    return this.call("GET", `/api/v1/client/servers/${encodeURIComponent(serverId)}/commands`);
+  }
+
   /* --- Espace applicatif, pour un système tiers ---------------------------- */
 
   createServer(input: Record<string, unknown>): Promise<unknown> {

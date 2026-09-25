@@ -151,6 +151,7 @@ describe.skipIf(!HAS_DATABASE)("EggEditorService (intégration)", () => {
       installScript: egg.installScript,
       features: egg.features,
       fileDenylist: egg.fileDenylist,
+      consoleCommands: egg.consoleCommands,
       variables: egg.variables.map((v) => ({
         id: v.id,
         name: v.name,

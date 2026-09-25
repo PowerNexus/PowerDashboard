@@ -285,6 +285,8 @@ export interface AdminEggDetail {
   installEntrypoint: string;
   features: string[];
   fileDenylist: string[];
+  /** Commandes du jeu proposées à la console (`say <message>`). */
+  consoleCommands: string[];
   enabled: boolean;
   locallyModified: boolean;
   sourceRef: string | null;

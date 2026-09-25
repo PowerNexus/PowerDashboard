@@ -80,6 +80,31 @@
   /* Console */
   --gd-console-bg: #0b0d13;
   --gd-console-fg: #d1d5db;
+  /*
+   * Les seize couleurs du terminal, pour la sortie des jeux (`parseAnsi`). Le
+   * fond de la console est sombre dans les deux thèmes : une seule palette
+   * suffit, réglée pour rester lisible dessus (le noir y est relevé en gris,
+   * sans quoi un texte « noir » disparaîtrait).
+   */
+  --gd-ansi-black: #6b7280;
+  --gd-ansi-red: #f87171;
+  --gd-ansi-green: #4ade80;
+  --gd-ansi-yellow: #facc15;
+  --gd-ansi-blue: #60a5fa;
+  --gd-ansi-magenta: #e879f9;
+  --gd-ansi-cyan: #22d3ee;
+  --gd-ansi-white: #e5e7eb;
+  --gd-ansi-bright-black: #9ca3af;
+  --gd-ansi-bright-red: #fca5a5;
+  --gd-ansi-bright-green: #86efac;
+  --gd-ansi-bright-yellow: #fde68a;
+  --gd-ansi-bright-blue: #93c5fd;
+  --gd-ansi-bright-magenta: #f0abfc;
+  --gd-ansi-bright-cyan: #67e8f9;
+  --gd-ansi-bright-white: #ffffff;
+  /* Occurrence de la recherche dans la console. */
+  --gd-console-match: #facc15;
+  --gd-console-match-fg: #0b0d13;
 
   /*
    * Logo Google, sur le bouton « Se connecter avec Google » (PLAN §12.4,

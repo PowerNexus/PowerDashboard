@@ -137,6 +137,9 @@ export const EggDraft = z
     fileDenylist: z
       .array(z.string().trim().min(1, "required").max(255, "tooLong"))
       .max(200, "tooMany"),
+    consoleCommands: z
+      .array(z.string().trim().min(1, "required").max(255, "tooLong"))
+      .max(300, "tooMany"),
     variables: z.array(EggVariableDraft).max(100, "tooMany"),
   })
   .superRefine((draft, ctx) => {

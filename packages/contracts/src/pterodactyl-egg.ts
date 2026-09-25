@@ -41,6 +41,8 @@ export interface ParsedEgg {
   installEntrypoint: string;
   features: string[];
   fileDenylist: string[];
+  /** Commandes du jeu proposées à la console (`say <message>`). */
+  consoleCommands: string[];
   variables: ParsedEggVariable[];
 }
 
@@ -175,6 +177,9 @@ export function parsePterodactylEgg(input: unknown): ParsedEgg {
     installEntrypoint: asString(installation?.entrypoint)?.trim() || "bash",
     features: readStringArray(raw.features),
     fileDenylist: readStringArray(raw.file_denylist),
+    // Extension de GameDashboard : Pterodactyl ignore la clé à l'import, et
+    // un egg venu de chez lui arrive donc sans commande proposée.
+    consoleCommands: readStringArray(raw.console_commands),
     variables: readVariables(raw.variables),
   };
 }
@@ -227,6 +232,8 @@ export interface PterodactylEggExport {
   features: string[];
   docker_images: Record<string, string>;
   file_denylist: string[];
+  /** Extension de GameDashboard, ignorée par Pterodactyl (voir `parsePterodactylEgg`). */
+  console_commands: string[];
   startup: string;
   config: { files: string; startup: string; logs: string; stop: string | null };
   scripts: { installation: { script: string; container: string; entrypoint: string } };
@@ -265,6 +272,7 @@ export function exportPterodactylEgg(
     features: [...egg.features],
     docker_images: { ...egg.dockerImages },
     file_denylist: [...egg.fileDenylist],
+    console_commands: [...egg.consoleCommands],
     startup: egg.startup,
     config: {
       files: configBlock(egg.configFiles),

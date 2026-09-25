@@ -58,6 +58,8 @@ export interface EggDetail {
   installEntrypoint: string;
   features: string[];
   fileDenylist: string[];
+  /** Commandes du jeu proposées à la console (`say <message>`). */
+  consoleCommands: string[];
   enabled: boolean;
   locallyModified: boolean;
   sourceRef: string | null;
@@ -138,6 +140,7 @@ export class EggEditorService {
       installEntrypoint: egg.installEntrypoint,
       features: egg.features,
       fileDenylist: egg.fileDenylist,
+      consoleCommands: egg.consoleCommands,
       enabled: egg.enabled,
       locallyModified: egg.locallyModified,
       sourceRef: egg.sourceRef,
@@ -170,6 +173,7 @@ export class EggEditorService {
       installEntrypoint: detail.installEntrypoint,
       features: detail.features,
       fileDenylist: detail.fileDenylist,
+      consoleCommands: detail.consoleCommands,
       variables: detail.variables.map((variable) => ({
         name: variable.name,
         envVariable: variable.envVariable,
@@ -278,6 +282,7 @@ export class EggEditorService {
           installScript: draft.installScript,
           features: draft.features,
           fileDenylist: draft.fileDenylist,
+          consoleCommands: draft.consoleCommands,
           locallyModified: true,
           updatedAt: new Date().toISOString(),
         })
