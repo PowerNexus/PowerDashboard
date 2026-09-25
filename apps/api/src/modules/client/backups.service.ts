@@ -12,6 +12,9 @@ import { S3Service } from "../storage/s3.service";
 import { WingsClientService, WingsUnavailableError } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
 
+/** Intervalle de relecture d'une sauvegarde attendue. */
+const BACKUP_POLL_MS = 3000;
+
 export interface ClientBackup {
   id: string;
   name: string;
@@ -162,6 +165,45 @@ export class BackupsService {
     }
 
     return project(row);
+  }
+
+  /**
+   * Attend qu'une sauvegarde soit close, et refuse si elle a échoué.
+   *
+   * Pour une sauvegarde **préalable** (avant un changement de moteur) : ce
+   * qui suit écrase des fichiers, et le faire pendant que le daemon archive
+   * donnerait une archive à moitié de l'ancien état, à moitié du nouveau. Le
+   * compte rendu du daemon (`/api/remote/backups/:id`) remplit
+   * `is_successful` ; on le relit jusqu'à ce qu'il le soit.
+   *
+   * `pause` est injectable pour les tests, qui n'attendent pas.
+   */
+  async awaitCompletion(
+    serverId: string,
+    backupId: string,
+    timeoutMs: number,
+    pause: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const [row] = await this.db
+        .select({ isSuccessful: backups.isSuccessful })
+        .from(backups)
+        .where(and(eq(backups.id, backupId), eq(backups.serverId, serverId)))
+        .limit(1);
+      if (!row)
+        throw new ConflictException("La sauvegarde préalable a disparu : rien n'a été modifié.");
+      if (row.isSuccessful === true) return;
+      if (row.isSuccessful === false) {
+        throw new ConflictException("La sauvegarde préalable a échoué : rien n'a été modifié.");
+      }
+      if (Date.now() >= deadline) {
+        throw new ConflictException(
+          "La sauvegarde préalable n'est pas terminée dans le délai : rien n'a été modifié. Réessayez une fois la sauvegarde close.",
+        );
+      }
+      await pause(BACKUP_POLL_MS);
+    }
   }
 
   /**

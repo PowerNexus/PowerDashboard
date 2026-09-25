@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { javaMajorFor, overwritesServerFiles, pickDockerImage } from "./engine";
+import {
+  javaMajorFor,
+  overwritesServerFiles,
+  packFitsServer,
+  packLoaderOf,
+  pickDockerImage,
+} from "./engine";
 
 /**
  * Relevé sur un vrai serveur : un jar Paper 1.21 posé sur un egg réglé en
@@ -73,5 +79,28 @@ describe("overwritesServerFiles", () => {
     // différence doit être dite avant de cliquer, pas découverte après.
     expect(overwritesServerFiles("jar")).toBe(false);
     expect(overwritesServerFiles("pack")).toBe(true);
+  });
+});
+
+describe("chargeur d'un modpack", () => {
+  it("lit le vocabulaire des deux catalogues", () => {
+    expect(packLoaderOf("forge-47.2.0")).toEqual({ loader: "forge", version: "47.2.0" });
+    expect(packLoaderOf("neoforge-21.1.77")).toEqual({ loader: "neoforge", version: "21.1.77" });
+    // Régression : « fabric » était reconnu avant « fabric-loader », et la
+    // version lue valait « loader-0.16.10 », introuvable chez Fabric.
+    expect(packLoaderOf("fabric-loader-0.16.10")).toEqual({ loader: "fabric", version: "0.16.10" });
+    expect(packLoaderOf("fabric-0.15.11")).toEqual({ loader: "fabric", version: "0.15.11" });
+    expect(packLoaderOf("NeoForge")).toEqual({ loader: "neoforge", version: "" });
+    expect(packLoaderOf("1.20.1")).toBeNull();
+    expect(packLoaderOf("liteloader")).toBeNull();
+  });
+
+  it("ne pose un pack que sur un serveur du même chargeur", () => {
+    expect(packFitsServer("fabric", "fabric")).toBe(true);
+    expect(packFitsServer("neoforge", "forge")).toBe(true);
+    expect(packFitsServer("forge", "fabric")).toBe(false);
+    expect(packFitsServer("fabric", "forge")).toBe(false);
+    expect(packFitsServer("quilt", "fabric")).toBe(false);
+    expect(packFitsServer("fabric", "paper")).toBe(false);
   });
 });

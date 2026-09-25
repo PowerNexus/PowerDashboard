@@ -1,5 +1,11 @@
-import type { EngineOption, EngineVersion } from "@gamedashboard/contracts";
+import {
+  type EngineOption,
+  type EngineVersion,
+  type PackLoader,
+  packLoaderOf,
+} from "@gamedashboard/contracts";
 import { Injectable, Logger } from "@nestjs/common";
+import { cheminSur } from "./pack-files";
 
 /**
  * Modpacks Modrinth.
@@ -10,7 +16,8 @@ import { Injectable, Logger } from "@nestjs/common";
  * `overrides/` de fichiers de configuration à déverser à la racine.
  *
  * L'installer demande donc trois temps, et non un : ouvrir l'archive, aller
- * chercher chaque mod qu'elle désigne, puis déplacer les surcharges. Croire
+ * chercher chaque mod qu'elle désigne, puis déplacer les surcharges
+ * (`overrides/`, puis `server-overrides/`, qui l'emporte). Croire
  * qu'un `.mrpack` déballé suffit donne un serveur sans aucun mod — qui
  * démarre, ce qui est le pire des cas, puisque rien ne signale l'erreur.
  *
@@ -72,6 +79,21 @@ export interface PackIndex {
   name: string;
   versionId: string;
   files: PackFile[];
+  /** Version de Minecraft, lue dans `dependencies.minecraft`. */
+  gameVersion: string;
+  /** Chargeur demandé (`fabric-loader`, `forge`, `neoforge`, `quilt-loader`), s'il est dit. */
+  loader: { loader: PackLoader; version: string } | null;
+}
+
+/** Une version de pack, telle que l'installation et la veille en ont besoin. */
+export interface PackVersion {
+  id: string;
+  projectId: string;
+  label: string;
+  gameVersion: string;
+  loaders: string[];
+  publishedAt: string;
+  archive: { url: string; fileName: string } | null;
 }
 
 interface ModrinthHit {
@@ -82,11 +104,26 @@ interface ModrinthHit {
 
 interface ModrinthVersion {
   id: string;
+  project_id: string;
   name: string;
   version_number: string;
   game_versions: string[];
+  loaders?: string[];
+  version_type?: "release" | "beta" | "alpha";
   date_published: string;
-  files: { url: string; filename: string; primary: boolean }[];
+  files: { url: string; filename: string; primary: boolean; size?: number }[];
+}
+
+/**
+ * Catégories Modrinth à demander pour un chargeur de serveur.
+ *
+ * Sans ce filtre, un serveur Fabric se voyait proposer des packs Forge, que
+ * l'installation refuse ensuite : autant ne pas les montrer.
+ */
+function loaderFacet(serverLoader: string): string[] | null {
+  if (serverLoader === "fabric") return ["categories:fabric"];
+  if (serverLoader === "forge") return ["categories:forge", "categories:neoforge"];
+  return null;
 }
 
 @Injectable()
@@ -99,11 +136,14 @@ export class ModpackSourceService {
    * Filtrée sur `project_type:modpack` : sans ce facette, la recherche rendrait
    * des mods isolés, qui s'installent par le catalogue d'extensions et non ici.
    */
-  async search(query: string): Promise<EngineOption[]> {
+  async search(query: string, serverLoader = ""): Promise<EngineOption[]> {
+    const facets = [["project_type:modpack"]];
+    const loader = loaderFacet(serverLoader);
+    if (loader) facets.push(loader);
     const params = new URLSearchParams({
       limit: String(SEARCH_LIMIT),
       index: "downloads",
-      facets: JSON.stringify([["project_type:modpack"]]),
+      facets: JSON.stringify(facets),
     });
     if (query.trim() !== "") params.set("query", query.trim());
 
@@ -122,6 +162,7 @@ export class ModpackSourceService {
           label: hit.title,
           summary: hit.description,
           versions,
+          source: "modrinth",
         };
       }),
     );
@@ -156,15 +197,57 @@ export class ModpackSourceService {
    * un journal des changements, que le daemon n'a rien à faire de télécharger.
    */
   async archiveOf(versionId: string): Promise<{ url: string; fileName: string } | null> {
+    return (await this.version(versionId))?.archive ?? null;
+  }
+
+  /** Une version précise, `null` si Modrinth ne la connaît pas. */
+  async version(versionId: string): Promise<PackVersion | null> {
     const version = await this.get<ModrinthVersion>(
       `/version/${encodeURIComponent(versionId)}`,
     ).catch(() => null);
-    if (!version) return null;
+    return version ? toPackVersion(version) : null;
+  }
 
-    const file = version.files.find((f) => f.filename.endsWith(".mrpack"));
-    if (!file) return null;
+  /**
+   * Version plus récente et compatible que celle installée, ou `null`.
+   *
+   * « Compatible » veut dire : même version de Minecraft, même chargeur, et
+   * publiée comme stable. Changer de version de jeu n'est pas une mise à jour
+   * d'un pack, c'est une migration du monde — elle ne se propose pas d'un
+   * bouton. Jamais une version plus ancienne, même mieux notée.
+   */
+  async newerVersion(
+    projectId: string,
+    installed: {
+      versionId: string;
+      publishedAt: string | null;
+      gameVersion: string;
+      loader: string;
+    },
+  ): Promise<PackVersion | null> {
+    const params = new URLSearchParams();
+    if (installed.gameVersion !== "") {
+      params.set("game_versions", JSON.stringify([installed.gameVersion]));
+    }
+    if (installed.loader !== "") params.set("loaders", JSON.stringify([installed.loader]));
 
-    return { url: file.url, fileName: file.filename };
+    const versions = await this.get<ModrinthVersion[]>(
+      `/project/${encodeURIComponent(projectId)}/version?${params}`,
+    );
+    const since = installed.publishedAt ? Date.parse(installed.publishedAt) : Number.NaN;
+
+    const candidates = versions
+      .filter((raw) => (raw.version_type ?? "release") === "release")
+      .filter((raw) => raw.id !== installed.versionId)
+      .filter(
+        (raw) => installed.gameVersion === "" || raw.game_versions.includes(installed.gameVersion),
+      )
+      .map(toPackVersion)
+      .filter((version) => version.archive !== null)
+      .filter((version) => Number.isNaN(since) || Date.parse(version.publishedAt) > since)
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+
+    return candidates[0] ?? null;
   }
 
   /**
@@ -184,13 +267,30 @@ export class ModpackSourceService {
       return null;
     }
 
-    const body = parsed as { name?: unknown; versionId?: unknown; files?: unknown };
+    const body = parsed as {
+      name?: unknown;
+      versionId?: unknown;
+      files?: unknown;
+      dependencies?: unknown;
+    };
     if (!Array.isArray(body.files)) return null;
 
     const files: PackFile[] = [];
     for (const entry of body.files) {
-      const file = entry as { path?: unknown; downloads?: unknown };
+      const file = entry as { path?: unknown; downloads?: unknown; env?: unknown };
       if (typeof file.path !== "string" || !Array.isArray(file.downloads)) continue;
+
+      /*
+       * Les mods du seul client ne vont pas sur un serveur.
+       *
+       * La spécification du format marque `env.server: "unsupported"` les mods
+       * purement graphiques ; certains refusent de démarrer hors d'un client,
+       * et le serveur tombait au lancement. La règle existait dans un client
+       * de modpacks resté inutilisé (`modpack.client.ts`, supprimé) : elle
+       * n'avait jamais servi.
+       */
+      const env = file.env as { server?: unknown } | undefined;
+      if (env?.server === "unsupported") continue;
 
       /*
        * Seules les adresses des dépôts connus sont gardées.
@@ -209,7 +309,7 @@ export class ModpackSourceService {
       }
 
       // Un chemin qui remonte ou qui part de la racine sortirait du serveur.
-      if (file.path.includes("..") || file.path.startsWith("/")) {
+      if (!cheminSur(file.path)) {
         this.logger.warn(`Chemin de modpack refusé : « ${file.path} ».`);
         continue;
       }
@@ -225,10 +325,20 @@ export class ModpackSourceService {
       files.push({ path: file.path, downloads });
     }
 
+    const dependencies =
+      body.dependencies && typeof body.dependencies === "object"
+        ? (body.dependencies as Record<string, unknown>)
+        : {};
+    const loaderKey = ["fabric-loader", "neoforge", "forge", "quilt-loader"].find(
+      (key) => typeof dependencies[key] === "string",
+    );
+
     return {
       name: typeof body.name === "string" ? body.name : "Modpack",
       versionId: typeof body.versionId === "string" ? body.versionId : "",
       files,
+      gameVersion: typeof dependencies.minecraft === "string" ? dependencies.minecraft : "",
+      loader: loaderKey ? packLoaderOf(`${loaderKey}-${String(dependencies[loaderKey])}`) : null,
     };
   }
 
@@ -246,4 +356,26 @@ export class ModpackSourceService {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Une version Modrinth ramenée à ce dont le panel se sert.
+ *
+ * Le fichier retenu est celui qui porte l'extension `.mrpack`, et pas le
+ * « primaire » seul : une version peut publier à côté un client ou un journal
+ * des changements, que le daemon n'a rien à faire de télécharger.
+ */
+function toPackVersion(version: ModrinthVersion): PackVersion {
+  const file =
+    version.files.find((f) => f.primary && f.filename.endsWith(".mrpack")) ??
+    version.files.find((f) => f.filename.endsWith(".mrpack"));
+  return {
+    id: version.id,
+    projectId: version.project_id,
+    label: `${version.version_number}${version.game_versions[0] ? ` · ${version.game_versions[0]}` : ""}`,
+    gameVersion: version.game_versions[0] ?? "",
+    loaders: version.loaders ?? [],
+    publishedAt: version.date_published,
+    archive: file ? { url: file.url, fileName: file.filename } : null,
+  };
 }

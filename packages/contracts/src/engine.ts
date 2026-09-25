@@ -46,17 +46,84 @@ export const EngineOption = z.object({
   summary: z.string(),
   /** Le plus récent en tête : c'est celui qu'on installe neuf fois sur dix. */
   versions: z.array(EngineVersion),
+  /**
+   * Catalogue d'origine d'un modpack (`modrinth`, `curseforge`), pour le dire
+   * à l'écran : deux packs du même nom peuvent venir de l'un et de l'autre.
+   */
+  source: z.string().optional(),
 });
 export type EngineOption = z.infer<typeof EngineOption>;
 
-/** Ce que le serveur exécute aujourd'hui, tel que le panel l'a posé. */
+/** Catalogues de modpacks pris en charge. */
+export const PackSource = z.enum(["modrinth", "curseforge"]);
+export type PackSource = z.infer<typeof PackSource>;
+
+/**
+ * Ce que le serveur exécute aujourd'hui, tel que le panel l'a posé.
+ *
+ * Retenu en base à chaque installation par le panel (`server_engines`), et
+ * oublié quand le daemon réinstalle le serveur depuis son egg : ce qui tourne
+ * alors est ce que le script de l'egg a posé, et le panel ne le sait pas.
+ * `null` veut donc dire « le panel ne l'a pas posé », jamais « rien ».
+ */
 export const InstalledEngine = z.object({
   optionId: z.string(),
+  kind: EngineKind,
   label: z.string(),
+  versionId: z.string(),
   versionLabel: z.string(),
-  installedAt: z.string().datetime(),
+  /** Version de Minecraft visée, vide quand elle n'est pas connue. */
+  gameVersion: z.string(),
+  /** Chargeur demandé par le pack (« fabric 0.16.10 », « forge 47.3.0 »), s'il le dit. */
+  loader: z.string().nullable(),
+  /** Catalogue et projet d'un modpack ; `null` pour une plateforme. */
+  pack: z.object({ source: PackSource, projectId: z.string() }).nullable(),
+  /** Nombre de fichiers posés par le pack et suivis pour ses mises à jour. */
+  trackedFiles: z.number().int().nonnegative(),
+  /**
+   * Version plus récente et compatible (même version de Minecraft, même
+   * chargeur), relevée par la veille ; `null` : à jour, ou pas encore vérifié.
+   */
+  update: z.object({ versionId: z.string(), label: z.string() }).nullable(),
+  checkedAt: z.string().datetime({ offset: true }).nullable(),
+  installedAt: z.string().datetime({ offset: true }),
 });
 export type InstalledEngine = z.infer<typeof InstalledEngine>;
+
+/**
+ * Chargeur d'un modpack, lu dans le vocabulaire de son catalogue.
+ *
+ * CurseForge l'écrit « forge-47.2.0 » dans `manifest.json` et « Forge » dans
+ * ses versions de jeu ; Modrinth « fabric-loader » dans les dépendances d'un
+ * `.mrpack`. Les quatre familles connues seulement : un mot inconnu rend
+ * `null`, et l'installation le refuse plutôt que de deviner.
+ */
+export type PackLoader = "fabric" | "quilt" | "forge" | "neoforge";
+
+export function packLoaderOf(value: string): { loader: PackLoader; version: string } | null {
+  const match = value
+    .trim()
+    .toLowerCase()
+    .match(/^(fabric-loader|quilt-loader|fabric|quilt|neoforge|forge)(?:-(.+))?$/);
+  if (!match?.[1]) return null;
+  const family = match[1].replace(/-loader$/, "") as PackLoader;
+  return { loader: family, version: match[2] ?? "" };
+}
+
+/**
+ * Le chargeur d'un pack convient-il au chargeur détecté du serveur ?
+ *
+ * Refuser plutôt que basculer : un egg Forge lance `@unix_args.txt`, un egg
+ * Fabric un jar. Poser un pack Fabric sur le premier donnerait un serveur qui
+ * ne démarre plus, avec à l'écran une installation réussie. NeoForge est reconnu
+ * par la détection comme un Forge (même famille d'eggs) ; Quilt n'est proposé
+ * nulle part (voir `ENGINE_EXCLUSIONS`).
+ */
+export function packFitsServer(packLoader: PackLoader, serverLoader: string): boolean {
+  if (packLoader === "fabric") return serverLoader === "fabric";
+  if (packLoader === "forge" || packLoader === "neoforge") return serverLoader === "forge";
+  return false;
+}
 
 /**
  * Ce qu'un serveur **est**, pour savoir quelles plateformes lui conviennent.
