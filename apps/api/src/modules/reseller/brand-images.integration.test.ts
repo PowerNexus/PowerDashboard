@@ -78,6 +78,29 @@ describe.skipIf(!HAS_DATABASE)("BrandImagesService (intégration)", () => {
     expect(await images.read(favicon.split("/").pop() ?? "")).not.toBeNull();
   });
 
+  it("garde le logo et le favicon envoyés en même temps", async () => {
+    // Non-régression : le nettoyage d'un envoi effaçait l'image de l'autre,
+    // rangée mais pas encore inscrite dans la marque (404 sur le favicon).
+    const revendeur = await seedUser(db);
+    for (let tour = 0; tour < 50; tour += 1) {
+      const [logo, favicon] = await Promise.all([
+        images.uploadForReseller(revendeur, "logo", PNG),
+        images.uploadForReseller(revendeur, "favicon", ICO),
+      ]);
+      expect(await images.read(logo.split("/").pop() ?? "")).not.toBeNull();
+      expect(await images.read(favicon.split("/").pop() ?? "")).not.toBeNull();
+    }
+
+    for (let tour = 0; tour < 50; tour += 1) {
+      const [logo, favicon] = await Promise.all([
+        images.uploadForPlatform("logo", PNG),
+        images.uploadForPlatform("favicon", ICO),
+      ]);
+      expect(await images.read(logo.split("/").pop() ?? "")).not.toBeNull();
+      expect(await images.read(favicon.split("/").pop() ?? "")).not.toBeNull();
+    }
+  });
+
   it("refuse un SVG, même annoncé comme image, et n'écrit rien", async () => {
     const revendeur = await seedUser(db);
     const svg = Buffer.from(
