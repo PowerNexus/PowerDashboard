@@ -50,6 +50,7 @@ describe("BrandingService — marque de la plateforme", () => {
       termsUrl: "https://hebergeur.fr/cgu",
       footerText: "© Hébergeur SAS",
       loginTagline: "Vos serveurs, sans attendre",
+      replyTo: null,
       resellerId: null,
     });
   });

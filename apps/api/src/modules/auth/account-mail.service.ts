@@ -1,3 +1,4 @@
+import { mailSender } from "@gamedashboard/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { MailerService } from "../mail/mailer.service";
@@ -55,6 +56,8 @@ export class AccountMailService {
       to: user.email,
       subject: "Réinitialisation de votre mot de passe",
       text: await this.resetMessage(issued.token, host),
+      // Nom d'expéditeur et réponse du domaine d'arrivée, comme le lien.
+      ...mailSender(await this.branding.forHost(host)),
     });
     return "sent";
   }
@@ -74,6 +77,8 @@ export class AccountMailService {
       to: user.email,
       subject: "Confirmez votre adresse e-mail",
       text: await this.verifyMessage(issued.token, host),
+      // Nom d'expéditeur et réponse du domaine d'arrivée, comme le lien.
+      ...mailSender(await this.branding.forHost(host)),
     });
     return "sent";
   }

@@ -4,8 +4,11 @@ import {
   DEFAULT_BRANDING,
   isSafeBrandUrl,
   isValidDomain,
+  isValidReplyTo,
+  mailSender,
   normalizeHex,
   ownershipRecordName,
+  SENDER_NAME_MAX_LENGTH,
 } from "./branding";
 
 const PLATFORM = {
@@ -116,5 +119,50 @@ describe("adresses de marque", () => {
     "https://",
   ])("refuse « %s »", (adresse) => {
     expect(isSafeBrandUrl(adresse)).toBe(false);
+  });
+});
+
+describe("adresse de réponse et expéditeur des courriels", () => {
+  it("accepte une adresse, refuse ce qui ajouterait un en-tête ou un destinataire", () => {
+    expect(isValidReplyTo("")).toBe(true);
+    expect(isValidReplyTo("support@revendeur.fr")).toBe(true);
+    for (const adresse of [
+      "support@revendeur.fr\r\nBcc: tous@exemple.fr",
+      "a@b.fr, c@d.fr",
+      "Support <support@revendeur.fr>",
+      "pas-une-adresse",
+      "a@b",
+      `${"a".repeat(250)}@b.fr`,
+      "a\u0000@b.fr",
+    ]) {
+      expect(isValidReplyTo(adresse), adresse).toBe(false);
+    }
+  });
+
+  it("retombe sur l'adresse de la plateforme, et écarte une valeur invalide déjà rangée", () => {
+    expect(composeBranding({ replyTo: "aide@hebergeur.fr" }, null).replyTo).toBe(
+      "aide@hebergeur.fr",
+    );
+    expect(
+      composeBranding({ replyTo: "aide@hebergeur.fr" }, { resellerId: "r1", replyTo: "r@rev.fr" })
+        .replyTo,
+    ).toBe("r@rev.fr");
+    expect(composeBranding({ replyTo: "x\ny@z.fr" }, null).replyTo).toBe(null);
+    expect(composeBranding({}, null).replyTo).toBe(null);
+  });
+
+  it("donne un nom d'expéditeur sans caractère d'en-tête", () => {
+    expect(mailSender({ name: 'Rev "Hébergement" <x>', replyTo: null })).toEqual({
+      fromName: "Rev Hébergement x",
+      replyTo: null,
+    });
+    expect(mailSender({ name: "A\r\nBcc: b@c.fr", replyTo: "r@rev.fr" })).toEqual({
+      fromName: "A Bcc: b@c.fr",
+      replyTo: "r@rev.fr",
+    });
+    expect(mailSender({ name: "   ", replyTo: null }).fromName).toBe(DEFAULT_BRANDING.name);
+    expect(mailSender({ name: "x".repeat(200), replyTo: null }).fromName).toHaveLength(
+      SENDER_NAME_MAX_LENGTH,
+    );
   });
 });

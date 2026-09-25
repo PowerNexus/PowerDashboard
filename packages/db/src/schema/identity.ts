@@ -681,6 +681,8 @@ export const resellerBrandings = pgTable(
     termsUrl: text("terms_url").notNull().default(""),
     footerText: varchar("footer_text", { length: 255 }).notNull().default(""),
     loginTagline: varchar("login_tagline", { length: 255 }).notNull().default(""),
+    /** Adresse de réponse des courriels (`Reply-To`) : voir `mailSender`. */
+    replyTo: varchar("reply_to", { length: 254 }).notNull().default(""),
     /** Domaine propre. Unique : deux revendeurs ne peuvent pas le revendiquer. */
     domain: varchar("domain", { length: 255 }).unique(),
     /** Preuve de possession, publiée en TXT sur `_gamedashboard.<domaine>`. */
