@@ -9,6 +9,7 @@ import {
   eggs,
   eggVariables,
   mounts,
+  serverEngines,
   serverMounts,
   servers,
   serverVariables,
@@ -162,6 +163,19 @@ export class RemoteServerService {
     // Sans cette garde, un node pouvait faire sonner « installation échouée »
     // chez n'importe quel client et prévenir la facturation pour lui.
     if (touched.length === 0) return;
+
+    /*
+     * Le moteur retenu par le panel n'est plus vrai.
+     *
+     * Le script de l'egg vient de reposer le serveur : ce qu'il exécute est ce
+     * que ce script a installé, que le panel ne connaît pas. Garder la ligne
+     * ferait afficher « Paper 1.21.1 » sur un serveur revenu à l'egg, et
+     * proposer la mise à jour d'un pack que le script vient peut-être
+     * d'écraser. Seulement sur une réussite : un échec n'a rien remplacé.
+     */
+    if (status.successful) {
+      await this.db.delete(serverEngines).where(eq(serverEngines.serverId, uuid));
+    }
 
     /**
      * Le propriétaire est prévenu.

@@ -2,6 +2,8 @@ import {
   type EngineOption,
   type InstalledEngine,
   javaMajorFor,
+  type PackLoader,
+  type PackSource,
   pickDockerImage,
 } from "@gamedashboard/contracts";
 import {
@@ -9,6 +11,7 @@ import {
   eggs,
   eggVariables,
   nests,
+  serverEngines,
   servers,
   serverVariables,
 } from "@gamedashboard/db";
@@ -20,12 +23,15 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { WingsClientService } from "../wings/wings-client.service";
+import { CurseForgePackService } from "./curseforge-pack";
 import { EngineSourcesService } from "./engine-sources";
 import { EulaService } from "./eula.service";
-import { isTrustedDownload, ModpackSourceService } from "./modpack-source";
+import type { UpdateFound } from "./marketplace.service";
+import { ModpackSourceService } from "./modpack-source";
+import { PackInstallerService, type PackOutcome } from "./pack-installer.service";
 import { type DetectedRuntime, detectRuntime } from "./server-runtime";
 
 /**
@@ -56,15 +62,6 @@ const DEFAULT_JAR = "server.jar";
 /** Variables d'egg où lire le nom du jar, par ordre de préférence. */
 const JAR_VARIABLES = ["SERVER_JARFILE", "SERVER_JAR", "JARFILE"];
 
-/**
- * Mods téléchargés de front lors de l'installation d'un modpack.
- *
- * Un pack moderne compte deux à trois cents fichiers. Les demander tous d'un
- * coup ouvrirait autant de connexions sortantes depuis le node et se ferait
- * limiter en débit ; les demander un par un prendrait un quart d'heure.
- */
-const PACK_CONCURRENCY = 6;
-
 export interface EngineState {
   runtime: DetectedRuntime | null;
   /** Raison lisible quand aucun moteur ne peut être proposé. */
@@ -75,6 +72,36 @@ export interface EngineState {
   platforms: EngineOption[];
   /** Modpacks, résultat de la recherche. */
   packs: EngineOption[];
+  /**
+   * Le sort de chaque catalogue de modpacks : sans lui, un CurseForge sans clé
+   * et un CurseForge sans résultat donneraient le même écran.
+   */
+  packSources: { source: PackSource; error: string | null }[];
+}
+
+/** Ce que rend une installation, pour l'écran et le journal. */
+export interface EngineInstallResult {
+  label: string;
+  /** Fichiers écrits. */
+  files: number;
+  eulaReset: boolean;
+  /** Fichiers que le pack demandait et qui n'ont pas pu être posés. */
+  missing: string[];
+  /** Fichiers gardés tels quels : modifiés depuis la version précédente, ou au serveur. */
+  kept: string[];
+  /** Fichiers de la version précédente du pack retirés. */
+  removed: number;
+  /** Ce qui reste à faire à la main, en clair. */
+  notice: string | null;
+}
+
+export interface EngineInstallOptions {
+  installedBy?: string;
+  /**
+   * Appelé serveur arrêté et verrouillé, **avant la première écriture** :
+   * c'est là que se place la sauvegarde préalable. Une erreur arrête tout.
+   */
+  beforeWrite?: () => Promise<void>;
 }
 
 @Injectable()
@@ -87,6 +114,8 @@ export class EngineService {
     @Inject(EngineSourcesService) private readonly sources: EngineSourcesService,
     @Inject(ModpackSourceService) private readonly packs: ModpackSourceService,
     @Inject(EulaService) private readonly eula: EulaService,
+    @Inject(PackInstallerService) private readonly installer: PackInstallerService,
+    @Inject(CurseForgePackService) private readonly curseforge: CurseForgePackService,
   ) {}
 
   /**
@@ -102,34 +131,137 @@ export class EngineService {
         runtime: null,
         unavailableReason:
           "Le moteur de ce serveur n'a pas pu être déterminé depuis son egg. Le panel ne propose pas de le remplacer à l'aveugle.",
-        current: null,
+        current: await this.current(serverId),
         platforms: [],
         packs: [],
+        packSources: [],
       };
     }
 
     const packsWanted = runtime.loader === "fabric" || runtime.loader === "forge";
 
-    const [platforms, packOptions] = await Promise.all([
+    const [platforms, modrinth, curseforge, current] = await Promise.all([
       this.sources.options(runtime.loader).catch((error) => {
         this.logger.warn(`Plateformes illisibles : ${describe(error)}`);
         return [] as EngineOption[];
       }),
+      packsWanted ? settle(this.packs.search(query, runtime.loader)) : settle(Promise.resolve([])),
       packsWanted
-        ? this.packs.search(query).catch((error) => {
-            this.logger.warn(`Modpacks illisibles : ${describe(error)}`);
-            return [] as EngineOption[];
-          })
-        : Promise.resolve([] as EngineOption[]),
+        ? settle(this.curseforge.search(query, runtime.loader))
+        : settle(Promise.resolve([])),
+      this.current(serverId),
     ]);
 
     return {
       runtime,
       unavailableReason: null,
-      current: null,
+      current,
       platforms,
-      packs: packOptions,
+      packs: [...modrinth.options, ...curseforge.options],
+      packSources: packsWanted
+        ? [
+            { source: "modrinth", error: modrinth.error },
+            { source: "curseforge", error: curseforge.error },
+          ]
+        : [],
     };
+  }
+
+  /**
+   * Ce que le panel a posé sur ce serveur, tel que la base le retient.
+   *
+   * `null` quand rien n'a été posé par le panel, ou depuis la dernière
+   * réinstallation par le daemon : le panel ne prétend pas savoir ce qu'un
+   * script d'egg a installé.
+   */
+  async current(serverId: string): Promise<InstalledEngine | null> {
+    const [row] = await this.db
+      .select()
+      .from(serverEngines)
+      .where(eq(serverEngines.serverId, serverId))
+      .limit(1);
+    if (!row) return null;
+
+    return {
+      optionId: row.optionId,
+      kind: row.kind === "pack" ? "pack" : "jar",
+      label: row.label,
+      versionId: row.versionId,
+      versionLabel: row.versionLabel,
+      gameVersion: row.gameVersion,
+      loader: row.loader,
+      pack:
+        row.packSource && row.packProjectId && isPackSource(row.packSource)
+          ? { source: row.packSource, projectId: row.packProjectId }
+          : null,
+      trackedFiles: Object.keys(row.files ?? {}).length,
+      update:
+        row.latestVersionId && row.latestVersionLabel
+          ? { versionId: row.latestVersionId, label: row.latestVersionLabel }
+          : null,
+      checkedAt: row.checkedAt,
+      installedAt: row.installedAt,
+    };
+  }
+
+  /**
+   * Un passage de la veille pour les modpacks installés.
+   *
+   * Même règles que pour les extensions (`MarketplaceService.checkUpdates`) :
+   * les lignes les moins récemment vérifiées d'abord, une source en panne ne
+   * efface rien, et seules les mises à jour **nouvellement** apparues sont
+   * rendues, pour ne prévenir qu'une fois.
+   */
+  async checkPackUpdates(limit: number, olderThan: string): Promise<Map<string, UpdateFound[]>> {
+    const due = await this.db
+      .select()
+      .from(serverEngines)
+      .where(
+        and(
+          eq(serverEngines.kind, "pack"),
+          sql`(${serverEngines.checkedAt} is null or ${serverEngines.checkedAt} < now() - ${olderThan}::interval)`,
+        ),
+      )
+      .orderBy(sql`${serverEngines.checkedAt} asc nulls first`)
+      .limit(limit);
+
+    const found = new Map<string, UpdateFound[]>();
+    for (const row of due) {
+      if (!row.packSource || !row.packProjectId) continue;
+      const installed = {
+        versionId: row.versionId,
+        publishedAt: row.versionPublishedAt,
+        gameVersion: row.gameVersion,
+        loader: (row.loader ?? "").split(" ")[0] ?? "",
+      };
+
+      let newer: { id: string; label: string } | null;
+      try {
+        newer =
+          row.packSource === "curseforge"
+            ? await this.curseforge.newerVersion(Number(row.packProjectId), installed)
+            : await this.packs.newerVersion(row.packProjectId, installed);
+      } catch (error) {
+        this.logger.warn(`Veille : modpack ${row.packProjectId} illisible (${describe(error)})`);
+        continue;
+      }
+
+      await this.db
+        .update(serverEngines)
+        .set({
+          latestVersionId: newer?.id ?? null,
+          latestVersionLabel: newer?.label ?? null,
+          checkedAt: new Date().toISOString(),
+        })
+        .where(eq(serverEngines.serverId, row.serverId));
+
+      if (newer && newer.id !== row.latestVersionId) {
+        const list = found.get(row.serverId) ?? [];
+        list.push({ name: row.label, version: newer.label });
+        found.set(row.serverId, list);
+      }
+    }
+    return found;
   }
 
   /**
@@ -143,11 +275,22 @@ export class EngineService {
     serverId: string,
     optionId: string,
     versionId: string,
-  ): Promise<{ label: string; files: number; eulaReset: boolean }> {
+    options: EngineInstallOptions = {},
+  ): Promise<EngineInstallResult> {
     const runtime = await this.runtimeOf(serverId);
     if (!runtime) {
       throw new BadRequestException("Le moteur de ce serveur n'a pas pu être déterminé.");
     }
+
+    /*
+     * Tout ce qui peut être refusé l'est **avant** d'arrêter le serveur : une
+     * version introuvable, un chargeur qui ne convient pas, une archive hors
+     * des dépôts connus, un runtime Java absent de l'egg. Un refus à ce stade
+     * laisse le serveur tel qu'on l'a trouvé — en marche compris.
+     */
+    const isPack = optionId.startsWith("modpack:") || optionId.startsWith("curseforge-pack:");
+    const prepared = isPack ? await this.installer.prepare(optionId, versionId, runtime) : null;
+    const image = await this.runtimeImageFor(serverId, prepared?.gameVersion ?? versionId);
 
     /*
      * Arrêt avant écriture, et non « si possible ».
@@ -172,11 +315,40 @@ export class EngineService {
      */
     await this.setState(serverId, "installing");
 
-    let installed: { label: string; files: number };
+    let installed: Omit<EngineInstallResult, "eulaReset">;
     try {
-      installed = optionId.startsWith("modpack:")
-        ? await this.installPack(serverId, versionId)
-        : await this.installJar(serverId, optionId, versionId, runtime);
+      // La sauvegarde préalable voit un serveur arrêté, que personne ne peut
+      // redémarrer pendant qu'elle se fait.
+      if (options.beforeWrite) await options.beforeWrite();
+
+      if (prepared) {
+        const previous = await this.trackedPackFiles(serverId);
+        const outcome = await this.installer.run(
+          serverId,
+          prepared,
+          runtime,
+          previous,
+          (loader, gameVersion) => this.installLoader(serverId, loader, gameVersion),
+        );
+        if (image) await this.applyRuntimeImage(serverId, image);
+        await this.recordPack(serverId, optionId, outcome, options.installedBy);
+        installed = {
+          label: outcome.record.label,
+          files: outcome.written,
+          missing: outcome.missing,
+          kept: outcome.kept,
+          removed: outcome.removed,
+          notice: outcome.notice,
+        };
+      } else {
+        installed = await this.installJar(
+          serverId,
+          optionId,
+          versionId,
+          image,
+          options.installedBy,
+        );
+      }
     } finally {
       await this.setState(serverId, null);
     }
@@ -195,6 +367,94 @@ export class EngineService {
     const eulaReset = await this.eula.reset(serverId, `moteur remplacé par ${installed.label}`);
 
     return { ...installed, eulaReset };
+  }
+
+  /** Fichiers suivis du pack en place, vides si le moteur actuel n'en est pas un. */
+  private async trackedPackFiles(serverId: string): Promise<Record<string, string>> {
+    const [row] = await this.db
+      .select({ kind: serverEngines.kind, files: serverEngines.files })
+      .from(serverEngines)
+      .where(eq(serverEngines.serverId, serverId))
+      .limit(1);
+    return row?.kind === "pack" ? (row.files ?? {}) : {};
+  }
+
+  /**
+   * Retient ce qui vient d'être installé.
+   *
+   * La veille repart de zéro (`checked_at` nul) : la ligne est vérifiée à son
+   * prochain passage, sans garder la « mise à jour disponible » d'une version
+   * qu'on vient peut-être justement d'installer.
+   */
+  private async record(
+    serverId: string,
+    values: Omit<typeof serverEngines.$inferInsert, "serverId" | "installedAt">,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const row = {
+      ...values,
+      latestVersionId: null,
+      latestVersionLabel: null,
+      checkedAt: null,
+      installedAt: now,
+      updatedAt: now,
+    };
+    await this.db
+      .insert(serverEngines)
+      .values({ serverId, ...row })
+      .onConflictDoUpdate({ target: serverEngines.serverId, set: row });
+  }
+
+  private recordPack(
+    serverId: string,
+    optionId: string,
+    outcome: PackOutcome,
+    installedBy: string | undefined,
+  ): Promise<void> {
+    const { record } = outcome;
+    return this.record(serverId, {
+      kind: "pack",
+      optionId: optionId.slice(0, 160),
+      label: record.label.slice(0, 200),
+      versionId: record.versionId.slice(0, 120),
+      versionLabel: record.versionLabel.slice(0, 200),
+      versionPublishedAt: record.publishedAt,
+      gameVersion: record.gameVersion.slice(0, 40),
+      loader: record.loader?.slice(0, 80) ?? null,
+      packSource: record.source,
+      packProjectId: record.projectId.slice(0, 120),
+      files: record.files,
+      installedBy: installedBy ?? null,
+    });
+  }
+
+  /**
+   * Le chargeur demandé par le pack.
+   *
+   * **Fabric** : le serveur est posé à la version de Fabric Loader que le pack
+   * demande, sous le nom que l'egg attend — c'était la marche manquante, le
+   * pack se déballait sur le chargeur en place quelle que soit sa version.
+   * **Forge et NeoForge** : ils ne publient qu'un installeur, qui doit tourner
+   * dans le conteneur (`ENGINE_EXCLUSIONS`) ; le panel ne le lance pas, et le
+   * dit plutôt que de laisser croire que c'est fait. Rend ce message, ou `null`.
+   */
+  private async installLoader(
+    serverId: string,
+    loader: { loader: PackLoader; version: string } | null,
+    gameVersion: string,
+  ): Promise<string | null> {
+    if (!loader) return null;
+    if (loader.loader === "fabric") {
+      if (gameVersion === "") return null;
+      const jar = await this.sources.fabricServer(gameVersion, loader.version).catch(() => null);
+      if (!jar) {
+        return `Fabric Loader ${loader.version} pour Minecraft ${gameVersion} est introuvable chez Fabric : le chargeur en place a été gardé.`;
+      }
+      await this.placeJar(serverId, jar);
+      return null;
+    }
+    const name = loader.loader === "neoforge" ? "NeoForge" : "Forge";
+    return `Ce pack demande ${name}${loader.version ? ` ${loader.version}` : ""}${gameVersion ? ` pour Minecraft ${gameVersion}` : ""}. Le panel ne lance pas l'installeur de ${name} : vérifiez que l'egg de ce serveur installe cette version, et réinstallez-le depuis les paramètres si besoin.`;
   }
 
   /**
@@ -220,44 +480,61 @@ export class EngineService {
     serverId: string,
     optionId: string,
     versionId: string,
-    _runtime: DetectedRuntime,
-  ): Promise<{ label: string; files: number }> {
+    image: string | null,
+    installedBy: string | undefined,
+  ): Promise<Omit<EngineInstallResult, "eulaReset">> {
     const resolved = await this.sources.resolve(optionId, versionId);
     if (!resolved) {
       throw new NotFoundException("Cette version n'est plus proposée par son éditeur.");
     }
 
-    /*
-     * Le jar est posé sous le nom que **l'egg** attend, pas sous le sien.
-     *
-     * La commande de démarrage porte ce nom : déposer « paper-1.20.1-196.jar »
-     * à côté d'un egg qui lance « server.jar » donne un serveur qui ne démarre
-     * pas, avec à l'écran un moteur fraîchement installé. Le renommage n'est
-     * pas un détail de confort, c'est la condition pour que ça marche.
-     */
+    await this.placeJar(serverId, resolved);
+    if (image) await this.applyRuntimeImage(serverId, image);
+
+    const label = this.sources.labelOf(optionId);
+    await this.record(serverId, {
+      kind: "jar",
+      optionId: optionId.slice(0, 160),
+      label: label.slice(0, 200),
+      versionId: versionId.slice(0, 120),
+      versionLabel: versionId.slice(0, 200),
+      versionPublishedAt: null,
+      gameVersion: optionId === "paper:velocity" ? "" : versionId.slice(0, 40),
+      loader: null,
+      packSource: null,
+      packProjectId: null,
+      files: {},
+      installedBy: installedBy ?? null,
+    });
+
+    return {
+      label: `${label} ${versionId}`,
+      files: 1,
+      missing: [],
+      kept: [],
+      removed: 0,
+      notice: null,
+    };
+  }
+
+  /**
+   * Pose un jar de serveur sous le nom que **l'egg** attend, pas sous le sien.
+   *
+   * La commande de démarrage porte ce nom : déposer « paper-1.20.1-196.jar »
+   * à côté d'un egg qui lance « server.jar » donne un serveur qui ne démarre
+   * pas, avec à l'écran un moteur fraîchement installé. Le renommage n'est
+   * pas un détail de confort, c'est la condition pour que ça marche.
+   */
+  private async placeJar(
+    serverId: string,
+    resolved: { url: string; fileName: string },
+  ): Promise<void> {
     const target = await this.jarNameOf(serverId);
-
-    /*
-     * Le runtime est vérifié **avant** d'écrire quoi que ce soit.
-     *
-     * Relevé sur un vrai serveur : « Minecraft 26.1 and newer requires running
-     * the server with Java 25 or above ». Un egg dont l'image la plus récente
-     * est Java 21 ne peut pas faire tourner cette version — et poser le jar
-     * quand même donnerait un serveur cassé, avec à l'écran une installation
-     * réussie. Refuser avant est la seule option qui laisse le serveur dans
-     * l'état où on l'a trouvé.
-     */
-    const image = await this.runtimeImageFor(serverId, versionId);
-
     await this.wings.pullFile(serverId, "/", resolved.url, resolved.fileName);
     if (resolved.fileName !== target) {
       await this.wings.deleteFiles(serverId, "/", [target]).catch(() => undefined);
       await this.wings.renameFile(serverId, "/", resolved.fileName, target);
     }
-
-    if (image) await this.applyRuntimeImage(serverId, image);
-
-    return { label: `${optionId} ${versionId}`, files: 1 };
   }
 
   /**
@@ -330,104 +607,6 @@ export class EngineService {
   }
 
   /**
-   * Un modpack : l'archive, puis ce qu'elle désigne, puis ses surcharges.
-   *
-   * Croire qu'un `.mrpack` déballé suffit donne un serveur **sans aucun mod**,
-   * qui démarre — donc sans rien qui signale l'erreur. C'est le piège que cette
-   * méthode existe pour éviter.
-   */
-  private async installPack(
-    serverId: string,
-    versionId: string,
-  ): Promise<{ label: string; files: number }> {
-    const archive = await this.packs.archiveOf(versionId);
-    if (!archive) throw new NotFoundException("Cette version de modpack n'a pas d'archive.");
-    // Même liste que pour les mods de l'index, lus plus bas : l'adresse de
-    // l'archive vient de l'API de Modrinth, et le daemon la suivrait depuis
-    // le réseau du node sans regarder.
-    if (!isTrustedDownload(archive.url)) {
-      this.logger.warn(`Archive de modpack refusée : ${archive.url}`);
-      throw new ConflictException(
-        "L'archive de ce modpack est servie depuis une adresse hors des dépôts connus. Installation refusée.",
-      );
-    }
-
-    // 1. L'archive, puis son ouverture, toutes deux dans le conteneur.
-    await this.wings.pullFile(serverId, "/", archive.url, archive.fileName);
-    await this.wings.decompressFile(serverId, "/", archive.fileName);
-
-    // 2. L'index, lu par le panel : quelques kilooctets, et il décide de tout.
-    const raw = await this.wings.readFile(serverId, "modrinth.index.json").catch(() => "");
-    const index = raw === "" ? null : this.packs.parseIndex(raw);
-    if (!index) {
-      throw new ConflictException(
-        "L'archive ne contient pas d'index lisible. Le modpack a été déballé mais ses mods n'ont pas pu être téléchargés : vérifiez le contenu du serveur.",
-      );
-    }
-
-    // 3. Chaque mod, par le daemon, borné pour ne pas saturer le node.
-    let posed = 0;
-    for (let i = 0; i < index.files.length; i += PACK_CONCURRENCY) {
-      const slice = index.files.slice(i, i + PACK_CONCURRENCY);
-      await Promise.all(
-        slice.map(async (file) => {
-          const url = file.downloads[0];
-          if (!url) return;
-
-          // Le chemin du pack porte le dossier ; Wings veut la racine et le nom
-          // séparément.
-          const at = file.path.lastIndexOf("/");
-          const root = at === -1 ? "/" : `/${file.path.slice(0, at)}`;
-          const name = at === -1 ? file.path : file.path.slice(at + 1);
-
-          await this.wings.pullFile(serverId, root, url, name).catch((error) => {
-            // Un mod manquant ne doit pas annuler les deux cents autres : on
-            // le note et on continue, et le total rendu dira ce qui est passé.
-            this.logger.warn(`Mod ${file.path} non posé : ${describe(error)}`);
-          });
-          posed += 1;
-        }),
-      );
-    }
-
-    // 4. Les surcharges : configurations du pack, à déverser à la racine.
-    await this.applyOverrides(serverId);
-
-    // 5. L'archive et l'index n'ont plus lieu d'être dans le serveur.
-    await this.wings
-      .deleteFiles(serverId, "/", [archive.fileName, "modrinth.index.json"])
-      .catch(() => undefined);
-
-    return { label: index.name, files: posed };
-  }
-
-  /**
-   * Déplace `overrides/` à la racine du serveur.
-   *
-   * Ce dossier porte les fichiers de configuration que l'auteur du pack a
-   * réglés : sans eux, les mods sont là mais se comportent comme s'ils
-   * venaient d'être installés, ce qui n'est pas le pack qu'on a demandé.
-   *
-   * Entrée par entrée, parce que Wings déplace des chemins et non des
-   * contenus : déplacer `overrides` lui-même donnerait un dossier `overrides`
-   * à la racine, ce que le jeu ignore.
-   */
-  private async applyOverrides(serverId: string): Promise<void> {
-    const entries = await this.wings.listDirectory(serverId, "/overrides").catch(() => []);
-    if (entries.length === 0) return;
-
-    for (const entry of entries) {
-      await this.wings
-        .renameFile(serverId, "/", `overrides/${entry.name}`, entry.name)
-        .catch((error) => {
-          this.logger.warn(`Surcharge ${entry.name} non appliquée : ${describe(error)}`);
-        });
-    }
-
-    await this.wings.deleteFiles(serverId, "/", ["overrides"]).catch(() => undefined);
-  }
-
-  /**
    * Nom du jar attendu par l'egg du serveur.
    *
    * Lu dans ses variables, avec `server.jar` en repli — c'est la convention de
@@ -476,4 +655,19 @@ export class EngineService {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isPackSource(value: string): value is PackSource {
+  return value === "modrinth" || value === "curseforge";
+}
+
+/** Une recherche de packs et son sort, pour pouvoir dire pourquoi elle est vide. */
+async function settle(
+  pending: Promise<EngineOption[]>,
+): Promise<{ options: EngineOption[]; error: string | null }> {
+  try {
+    return { options: await pending, error: null };
+  } catch (error) {
+    return { options: [], error: describe(error) };
+  }
 }

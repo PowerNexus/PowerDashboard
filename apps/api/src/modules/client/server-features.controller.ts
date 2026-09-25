@@ -107,6 +107,14 @@ function readReleaseVersion(raw: unknown): string | undefined {
   return raw;
 }
 
+/**
+ * Attente d'une sauvegarde préalable à un changement de moteur.
+ *
+ * Un monde de plusieurs gigaoctets s'archive en minutes ; au-delà de celles-ci
+ * on renonce, sans rien écrire, plutôt que de garder le serveur verrouillé.
+ */
+const ENGINE_BACKUP_TIMEOUT_MS = 30 * 60_000;
+
 function principalOf(request: ClientRequest) {
   // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
   return { id: request.user.id, scopes: request.scopes, origin: requestOrigin(request) };
@@ -888,6 +896,7 @@ export class ServerFeaturesController {
         runtime: state.runtime,
         unavailableReason: state.unavailableReason,
         current: state.current,
+        packSources: state.packSources,
       },
     };
   }
@@ -906,12 +915,23 @@ export class ServerFeaturesController {
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
-    const payload = body as { optionId?: unknown; versionId?: unknown };
-    if (typeof payload?.optionId !== "string" || payload.optionId.trim() === "") {
+    const payload = body as { optionId?: unknown; versionId?: unknown; backupFirst?: unknown };
+    if (
+      typeof payload?.optionId !== "string" ||
+      payload.optionId.trim() === "" ||
+      payload.optionId.length > 160
+    ) {
       throw new BadRequestException("Moteur manquant.");
     }
-    if (typeof payload?.versionId !== "string" || payload.versionId.trim() === "") {
+    if (
+      typeof payload?.versionId !== "string" ||
+      payload.versionId.trim() === "" ||
+      payload.versionId.length > 120
+    ) {
       throw new BadRequestException("Version manquante.");
+    }
+    if (payload.backupFirst !== undefined && typeof payload.backupFirst !== "boolean") {
+      throw new BadRequestException("Choix de sauvegarde invalide.");
     }
 
     const principal = principalOf(request);
@@ -924,13 +944,43 @@ export class ServerFeaturesController {
     // seconde écrirait pendant que la première renomme.
     await this.access.requireOperable(id);
 
+    /*
+     * La sauvegarde préalable est une sauvegarde **ordinaire** : même quota,
+     * même permission, même liste à l'écran, même restauration. Elle est
+     * lancée serveur arrêté et verrouillé, et l'installation attend qu'elle
+     * soit close — une archive prise pendant qu'on écrase des fichiers ne
+     * servirait à rien. Son échec arrête tout avant la première écriture.
+     */
+    const backupFirst = payload.backupFirst === true;
+    if (backupFirst) await this.access.require(principal, id, "backups.create");
+    const beforeWrite = backupFirst
+      ? async () => {
+          const created = await this.backups.create(id, "Avant changement de moteur", []);
+          await this.log(request, id, "backup.create", {
+            name: created.name,
+            backupId: created.id,
+          });
+          await this.backups.awaitCompletion(id, created.id, ENGINE_BACKUP_TIMEOUT_MS);
+        }
+      : undefined;
+
     const installed = await this.relay(() =>
-      this.engine.install(id, payload.optionId as string, payload.versionId as string),
+      this.engine.install(id, payload.optionId as string, payload.versionId as string, {
+        installedBy: request.user.id,
+        beforeWrite,
+      }),
     );
+    // Des comptes et non des listes : un pack pose des centaines de fichiers,
+    // et le journal n'est pas un inventaire.
     await this.log(request, id, "engine.install", {
       optionId: payload.optionId,
       versionId: payload.versionId,
-      ...installed,
+      label: installed.label,
+      files: installed.files,
+      missing: installed.missing.length,
+      kept: installed.kept.length,
+      removed: installed.removed,
+      backupFirst,
     });
 
     /*

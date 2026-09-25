@@ -2,7 +2,7 @@
 
 import type { EngineOption, InstalledEngine } from "@gamedashboard/contracts";
 import { revalidatePath } from "next/cache";
-import { apiFetch, apiSend } from "./client";
+import { apiFetch, apiReadFor, apiSend, apiSendFor } from "./client";
 
 export interface EngineRuntime {
   game: string;
@@ -19,7 +19,20 @@ export interface EngineState {
   runtime: EngineRuntime | null;
   /** `null` quand le moteur du serveur n'a pas pu être déterminé. */
   unavailableReason: string | null;
+  /** Ce que le panel a posé, `null` s'il n'a rien posé depuis la dernière réinstallation. */
   current: InstalledEngine | null;
+  /** Le sort de chaque catalogue de modpacks : un CurseForge sans clé le dit. */
+  packSources: { source: string; error: string | null }[];
+}
+
+/** Ce qu'une installation a fait, pour le dire à l'écran. */
+export interface EngineInstallResult {
+  label: string;
+  files: number;
+  missing: string[];
+  kept: string[];
+  removed: number;
+  notice: string | null;
 }
 
 export async function fetchEngineState(serverId: string, query: string): Promise<EngineState> {
@@ -30,10 +43,11 @@ export async function fetchEngineState(serverId: string, query: string): Promise
       runtime: EngineRuntime | null;
       unavailableReason: string | null;
       current: InstalledEngine | null;
+      packSources?: { source: string; error: string | null }[];
     };
   }>(`/api/v1/client/servers/${serverId}/engine${params}`);
 
-  return { ...data, ...meta };
+  return { ...data, ...meta, packSources: meta.packSources ?? [] };
 }
 
 /**
@@ -48,13 +62,35 @@ export async function installEngine(
   serverId: string,
   optionId: string,
   versionId: string,
-): Promise<{ error: string | null }> {
+  backupFirst = false,
+): Promise<{ error: string | null; result: EngineInstallResult | null }> {
   try {
-    await apiSend(`/api/v1/client/servers/${serverId}/engine/install`, { optionId, versionId });
+    const { data } = await apiSendFor<{ data: EngineInstallResult }>(
+      `/api/v1/client/servers/${serverId}/engine/install`,
+      { optionId, versionId, backupFirst },
+    );
     revalidatePath(`/server/${serverId}/engine`);
-    return { error: null };
+    return { error: null, result: data };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Opération refusée." };
+    return { error: error instanceof Error ? error.message : "Opération refusée.", result: null };
+  }
+}
+
+/**
+ * Le serveur peut-il prendre une sauvegarde préalable ?
+ *
+ * Lecture d'appoint : un sous-utilisateur sans droit sur les sauvegardes voit
+ * l'écran du moteur quand même, sans l'option (`null`). Un quota nul le dit
+ * aussi : proposer une sauvegarde que l'API refusera ne servirait à rien.
+ */
+export async function fetchBackupRoom(serverId: string): Promise<boolean | null> {
+  try {
+    const { meta } = await apiReadFor<{ meta: { used: number; limit: number } }>(
+      `/api/v1/client/servers/${serverId}/backups`,
+    );
+    return meta.limit > 0;
+  } catch {
+    return null;
   }
 }
 

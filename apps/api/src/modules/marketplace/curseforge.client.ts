@@ -293,13 +293,29 @@ export class CurseForgeClient {
     return (process.env.CURSEFORGE_API_KEY ?? "").trim();
   }
 
-  private async get<T>(path: string, key: string): Promise<T> {
+  /**
+   * Un appel à l'API, clé comprise, pour les modpacks (`curseforge-pack.ts`).
+   *
+   * `body` fait un `POST` JSON : c'est ainsi que CurseForge résout des lots
+   * (`/v1/mods/files`, `/v1/mods`). La clé reste ici, lue et vérifiée comme
+   * pour le catalogue d'extensions — un seul endroit sait où elle vit.
+   */
+  async call<T>(path: string, body?: unknown): Promise<T> {
+    return this.get<T>(path, await this.key(), body);
+  }
+
+  private async get<T>(path: string, key: string, body?: unknown): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
       const response = await fetch(`${API}${path}`, {
-        headers: { "x-api-key": key, Accept: "application/json" },
+        ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
+        headers: {
+          "x-api-key": key,
+          Accept: "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
         signal: controller.signal,
       });
       if (!response.ok) {

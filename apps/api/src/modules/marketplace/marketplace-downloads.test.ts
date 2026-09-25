@@ -8,12 +8,14 @@ import { ConflictException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WingsClientService } from "../wings/wings-client.service";
 import type { CurseForgeClient } from "./curseforge.client";
+import type { CurseForgePackService } from "./curseforge-pack";
 import { EngineService } from "./engine.service";
 import type { EngineSourcesService } from "./engine-sources";
 import type { EulaService } from "./eula.service";
 import { MarketplaceService } from "./marketplace.service";
 import type { ModpackSourceService } from "./modpack-source";
 import type { ModrinthClient } from "./modrinth.client";
+import { PackInstallerService } from "./pack-installer.service";
 import type { DetectedRuntime } from "./server-runtime";
 import type { SpigetClient } from "./spiget.client";
 
@@ -127,24 +129,42 @@ describe("extension : adresse rendue par le catalogue", () => {
 
 describe("modpack : archive rendue par Modrinth", () => {
   function moteur(archiveUrl: string) {
-    const daemon = wings();
+    const daemon = { ...wings(), listDirectory: vi.fn(async () => []) };
     const db = {
       update: () => ({ set: () => ({ where: async () => {} }) }),
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => [] }) }) }),
     } as unknown as Database;
     const packs = {
-      archiveOf: vi.fn(async () => ({ url: archiveUrl, fileName: "pack.mrpack" })),
-      parseIndex: vi.fn(() => ({ name: "Pack", versionId: "v1", files: [] })),
+      version: vi.fn(async () => ({
+        id: "v1",
+        projectId: "pack",
+        label: "1.0 · 1.21.1",
+        gameVersion: "",
+        loaders: ["fabric"],
+        publishedAt: "2026-01-01T00:00:00Z",
+        archive: { url: archiveUrl, fileName: "pack.mrpack" },
+      })),
+      parseIndex: vi.fn(() => null),
     };
+    const installer = new PackInstallerService(
+      daemon as unknown as WingsClientService,
+      packs as unknown as ModpackSourceService,
+      {} as CurseForgePackService,
+    );
     const svc = new EngineService(
       db,
       daemon as unknown as WingsClientService,
       {} as EngineSourcesService,
       packs as unknown as ModpackSourceService,
       { reset: vi.fn(async () => false) } as unknown as EulaService,
+      installer,
+      {} as CurseForgePackService,
     );
-    vi.spyOn(svc as unknown as { runtimeOf: () => unknown }, "runtimeOf").mockResolvedValue(
-      RUNTIME,
-    );
+    vi.spyOn(svc as unknown as { runtimeOf: () => unknown }, "runtimeOf").mockResolvedValue({
+      ...RUNTIME,
+      loader: "fabric",
+      directory: "/mods",
+    });
     return { svc, daemon };
   }
 
@@ -157,16 +177,23 @@ describe("modpack : archive rendue par Modrinth", () => {
     // conflit, mais après avoir fait télécharger l'archive.
     await expect(refus).rejects.toThrow(/adresse/);
     expect(daemon.pullFile).not.toHaveBeenCalled();
+    // Refusé avant l'arrêt : le serveur reste tel qu'on l'a trouvé.
+    expect(daemon.power).not.toHaveBeenCalled();
   });
 
-  it("laisse passer l'archive servie par Modrinth", async () => {
+  it("laisse passer l'archive servie par Modrinth, tirée dans le dossier de travail", async () => {
     const url = "https://cdn.modrinth.com/data/abc/versions/v1/pack.mrpack";
     const { svc, daemon } = moteur(url);
 
-    // L'index est vide ici : l'installation s'arrête plus loin, et ce n'est
-    // pas le sujet. Seul compte ce qui a été demandé au daemon.
+    // L'index est illisible ici : l'installation s'arrête plus loin, et ce
+    // n'est pas le sujet. Seul compte ce qui a été demandé au daemon.
     await svc.install(SERVER, "modpack:pack", "v1").catch(() => undefined);
-    expect(daemon.pullFile).toHaveBeenCalledWith(SERVER, "/", url, "pack.mrpack");
+    expect(daemon.pullFile).toHaveBeenCalledWith(
+      SERVER,
+      "/.gamedashboard-pack",
+      url,
+      "pack.mrpack",
+    );
   });
 });
 
