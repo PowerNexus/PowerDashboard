@@ -578,6 +578,36 @@ function assertUrl(value: string | undefined, label: string): string {
   );
 }
 
+/**
+ * Champs de marque lus dans le corps d'une requête : les chaînes seules, tout
+ * le reste vide.
+ *
+ * **Tous** les champs de `BrandingOverrides`, et c'est le sens de cette
+ * fonction : la route du revendeur recopiait les champs un par un et avait
+ * oublié `replyTo`. Le formulaire l'envoyait, la route le jetait, et chaque
+ * enregistrement effaçait l'adresse de réponse — sans le moindre message.
+ */
+export function brandingInput(body: unknown): BrandingOverrides {
+  const payload = (body ?? {}) as Record<string, unknown>;
+  const text = (key: keyof BrandingOverrides): string =>
+    typeof payload[key] === "string" ? (payload[key] as string) : "";
+
+  const fields: Record<keyof BrandingOverrides, true> = {
+    name: true,
+    logoUrl: true,
+    faviconUrl: true,
+    accent: true,
+    supportUrl: true,
+    termsUrl: true,
+    footerText: true,
+    loginTagline: true,
+    replyTo: true,
+  };
+  return Object.fromEntries(
+    (Object.keys(fields) as (keyof BrandingOverrides)[]).map((key) => [key, text(key)]),
+  ) as unknown as BrandingOverrides;
+}
+
 /** Hôte comparable : sans port, sans casse, sans point final. */
 export function normalizeHost(host: string | null): string {
   return (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
