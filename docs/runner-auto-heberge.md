@@ -39,8 +39,11 @@ conteneur Linux** et y exécute toutes ses commandes, par
    sortir (archive de release, captures, rapports).
 4. `linux.sh fermer`, toujours exécuté, retire conteneurs, volume et réseau.
 
-Le store pnpm et le Chromium de Playwright restent d'une exécution à l'autre
-dans les volumes Docker `gd-ci-pnpm-store` et `gd-ci-playwright`. Le scan ZAP
+Le store pnpm, le Chromium de Playwright et le cache de build de Next restent
+d'une exécution à l'autre dans les volumes Docker `gd-ci-pnpm-store`,
+`gd-ci-playwright`, `gd-ci-next-cache` et `gd-ci-next-autonome-cache`
+(construction de l'archive autonome). Les vider (`docker volume rm`) ne coûte
+qu'un job plus lent. Le scan ZAP
 (`infra/ci/zap-baseline.sh`) partage le réseau du conteneur du job.
 
 Rien de ce qu'un job écrit en root ne reste dans `_work` : le dossier du
@@ -126,8 +129,8 @@ arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
 Resources → Advanced → Resource Saver**, activé, délai de 5 minutes. La
 machine virtuelle est alors arrêtée, sa mémoire rendue à Windows, et elle
 redémarre d'elle-même à la première commande `docker` du job suivant (quelques
-secondes de plus au démarrage). Les caches (`gd-ci-pnpm-store`,
-`gd-ci-playwright`) et les images survivent à la veille.
+secondes de plus au démarrage). Les caches (volumes `gd-ci-pnpm-store`,
+`gd-ci-playwright`, `gd-ci-next-*`) et les images survivent à la veille.
 
 ### Mémoire de Docker Desktop
 

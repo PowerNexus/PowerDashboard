@@ -649,6 +649,16 @@ describe("actions GitHub des workflows", () => {
     expect(linux).not.toMatch(/volume prune/);
   });
 
+  // « No build cache found » : Next recompilait tout à chaque job.
+  it("gardent le cache de build de Next d'un job à l'autre", () => {
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toContain("-v gd-ci-next-cache:/w/apps/web/.next/cache");
+    expect(linux).toContain("-v gd-ci-next-autonome-cache:/w/apps/web/.next-autonome/cache");
+    // Jamais dans l'archive publiée.
+    const assembler = readFileSync(join(RACINE, "infra", "release", "assembler.sh"), "utf8");
+    expect(assembler).toContain("--exclude=.next/cache");
+  });
+
   it("gardent le store pnpm sur le volume de cache, hors du dépôt", () => {
     const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
     expect(linux).toContain("-v gd-ci-pnpm-store:/pnpm-store");

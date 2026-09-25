@@ -70,6 +70,12 @@ ouvrir() {
     # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
     -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
+    # Cache de build de Next (« No build cache found » sinon, et tout est
+    # recompilé) : `next build` vide son dossier de sortie sauf `cache`, et
+    # assembler.sh l'exclut de l'archive. Un volume pour chaque sortie, la
+    # construction ordinaire et celle de l'archive autonome.
+    -v gd-ci-next-cache:/w/apps/web/.next/cache
+    -v gd-ci-next-autonome-cache:/w/apps/web/.next-autonome/cache
     -e TZ=UTC)
   local nom
   for nom in "${TRANSMISES[@]}"; do
