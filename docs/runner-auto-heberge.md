@@ -97,9 +97,18 @@ Expand-Archive runner.zip -DestinationPath .
 ./config.cmd --url https://github.com/PowerNexus/PowerDashboard --token <JETON> --unattended --runasservice
 ```
 
-Le service doit tourner sous un compte qui a accès à Docker Desktop (membre
-du groupe local `docker-users`) ; `--windowslogonaccount` le fixe à
-l'installation. Le runner se met à jour tout seul ; il apparaît « Idle »
+Le service doit tourner sous un compte qui a accès à Docker Desktop, c'est-à-dire
+membre du groupe local `docker-users` ; sinon chaque job s'arrête sur
+« permission denied while trying to connect to the docker API ». Dans un
+PowerShell administrateur, avec le compte du service (`svc-gh-runner` sur la
+machine actuelle) :
+
+```powershell
+Add-LocalGroupMember -Group docker-users -Member svc-gh-runner
+Get-Service actions.runner.* | Restart-Service
+```
+
+Docker Desktop doit tourner (démarré avec la session). Le runner se met à jour tout seul ; il apparaît « Idle »
 dans **Settings → Actions → Runners**.
 
 Arrêter le runner pendant un job fait échouer ce job : attendre qu'il soit
