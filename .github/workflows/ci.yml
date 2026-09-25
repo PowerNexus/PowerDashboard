@@ -80,8 +80,13 @@ jobs:
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - name: Conteneur Linux
-        run: bash infra/ci/linux.sh ouvrir
+      # Avec une base : sans `DATABASE_URL`, les tests d'intégration
+      # (`*.integration.test.ts`, plus de 300) se sautaient ici et ne
+      # tournaient qu'en local. Chacun crée sa base jetable sur ce serveur
+      # (apps/api/src/test/throwaway-database.ts), d'où le rôle
+      # superutilisateur de l'image.
+      - name: Conteneur Linux et base
+        run: bash infra/ci/linux.sh ouvrir --postgres
 
       # --frozen-lockfile : la CI échoue si le lockfile ne correspond pas au
       # package.json, plutôt que de résoudre silencieusement d'autres versions.
@@ -94,8 +99,13 @@ jobs:
       - name: Typecheck
         run: bash infra/ci/linux.sh lancer 'pnpm typecheck'
 
+      # Refuse de passer au vert sans base : un `DATABASE_URL` perdu ferait
+      # sauter les tests d'intégration sans que personne le voie.
       - name: Tests
-        run: bash infra/ci/linux.sh lancer 'pnpm test'
+        run: |
+          bash infra/ci/linux.sh lancer '
+            [ -n "${DATABASE_URL:-}" ] || { echo "::error::DATABASE_URL absente : les tests d intégration seraient sautés."; exit 1; }
+            pnpm test'
 
       # Le build a besoin des variables d'environnement, mais aucun secret
       # n'est requis pour compiler : les clés ne sont lues qu'à l'exécution.

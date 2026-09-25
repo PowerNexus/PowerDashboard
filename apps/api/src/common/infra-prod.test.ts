@@ -574,6 +574,23 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  /*
+   * Régression : le job de vérification ouvrait son conteneur sans base, et
+   * les tests d'intégration (plus de 300) s'y sautaient, la CI restant verte.
+   */
+  it("jouent les tests d'intégration contre une vraie base", () => {
+    const [ci] = workflows as [string];
+    const debut = ci.indexOf("  verify:\n");
+    const bloc = ci.slice(debut, ci.indexOf("\n  audit:\n", debut));
+    const ouverture = bloc.indexOf("run: bash infra/ci/linux.sh ouvrir --postgres");
+    const tests = bloc.indexOf("- name: Tests\n");
+    expect(ouverture).toBeGreaterThan(0);
+    expect(tests).toBeGreaterThan(ouverture);
+    const etape = bloc.slice(tests, bloc.indexOf("\n\n", tests));
+    expect(etape).toContain('[ -n "$' + '{DATABASE_URL:-}" ] || {');
+    expect(etape.indexOf("exit 1")).toBeLessThan(etape.indexOf("pnpm test"));
+  });
+
   it("lèvent la seconde preuve du personnel sur la base d'essai, avant la suite", () => {
     // Exigée par défaut (NC-10), et le compte d'essai est administrateur : sans
     // cette étape, chaque écran d'administration visité par la suite serait
