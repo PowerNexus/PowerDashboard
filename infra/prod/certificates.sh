@@ -53,6 +53,20 @@ PREFIX=gd-reseller-
 PANEL_WEB_PORT=${GD_WEB_PORT:-3210}
 CONTACT=${GD_ACME_CONTACT:-}
 
+# Page servie sur le port 80 d'un domaine vérifié **tant qu'il n'a pas de
+# certificat** (bloc de défi, `bloc_acme`) : un client du revendeur qui ouvre
+# son adresse trop tôt lit ce qui se passe et quand revenir, au lieu de la page
+# d'erreur nue de nginx.
+#
+# - Ni nom ni logo : la marque de la plateforme n'a rien à faire sur le domaine
+#   d'un revendeur (marque blanche), et celle du revendeur n'est servie que par
+#   le panel, en HTTPS. Le panel n'est jamais servi en clair.
+# - Aucune couleur écrite : `color-scheme` et les couleurs système (`Canvas`,
+#   `CanvasText`) suivent le thème clair ou sombre du visiteur.
+# - Une seule ligne, sans apostrophe droite ni `$` : nginx la reçoit entre
+#   apostrophes (`return 503 '…'`) et y remplacerait ses variables.
+PAGE_ATTENTE='<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mise en service en cours</title></head><body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;background:Canvas;color:CanvasText"><main style="max-width:32rem;padding:1.5rem;text-align:center"><h1 style="font-size:1.25rem">Mise en service en cours</h1><p>Ce domaine vient d&rsquo;être relié au panel. Son certificat de sécurité est en cours d&rsquo;émission : l&rsquo;accès sécurisé ouvrira d&rsquo;ici quelques minutes.</p><p>Réessayez un peu plus tard.</p></main></body></html>'
+
 STAGING=""
 DRY_RUN=""
 ONLY_DOMAIN=""
@@ -174,17 +188,27 @@ bloc_acme() { # domaine — juste de quoi répondre au défi HTTP-01
 # Étape 1 : répondre au défi ACME. Tant qu'il n'y a pas de certificat, ce
 # domaine ne peut pas être servi en HTTPS — et le proposer quand même ferait
 # tomber les clients du revendeur sur un avertissement.
+#
+# Le reste reçoit une page d'attente (503, Retry-After), et non la page
+# d'erreur nue de nginx ni le panel en clair. Voir PAGE_ATTENTE.
 server {
     listen 80;
     listen [::]:80;
     server_name $domaine;
+    server_tokens off;
 
     location /.well-known/acme-challenge/ {
         root $WEBROOT;
     }
 
     location / {
-        return 503;
+        default_type "text/html; charset=utf-8";
+        add_header Retry-After 900 always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'" always;
+        return 503 '$PAGE_ATTENTE';
     }
 }
 EOF
@@ -198,6 +222,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name $domaine;
+    server_tokens off;
 
     location /.well-known/acme-challenge/ {
         root $WEBROOT;
@@ -213,6 +238,7 @@ server {
     listen [::]:443 ssl;
     http2 on;
     server_name $domaine;
+    server_tokens off;
 
     ssl_certificate     /etc/letsencrypt/live/$domaine/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$domaine/privkey.pem;
@@ -241,8 +267,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        # Seul websocket est relayé comme mise à niveau, par les map de
+        # panel.conf (même nginx, portée http) : relayer n'importe quel
+        # Upgrade ouvrirait la contrebande h2c, comme sur le domaine du panel.
+        proxy_set_header Upgrade \$gd_upgrade;
+        proxy_set_header Connection \$gd_connection;
     }
 }
 EOF

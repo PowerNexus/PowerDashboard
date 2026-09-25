@@ -352,10 +352,22 @@ async function apiCall(path: string, body: unknown, method: string): Promise<Res
       method,
       headers: {
         ...(await forwardedIdentityHeaders()),
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(body === undefined
+          ? {}
+          : {
+              "content-type":
+                body instanceof Uint8Array ? "application/octet-stream" : "application/json",
+            }),
         ...(session ? { cookie: `${SESSION_COOKIE}=${session}` } : {}),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      // Des octets partent tels quels (envoi d'une image de marque) ; tout le
+      // reste en JSON.
+      body:
+        body === undefined
+          ? undefined
+          : body instanceof Uint8Array
+            ? (body as Uint8Array<ArrayBuffer>)
+            : JSON.stringify(body),
       cache: "no-store",
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });

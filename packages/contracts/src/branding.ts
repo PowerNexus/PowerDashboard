@@ -214,3 +214,79 @@ export function mailSender(branding: Pick<Branding, "name" | "replyTo">): MailSe
     replyTo: branding.replyTo && isValidReplyTo(branding.replyTo) ? branding.replyTo : null,
   };
 }
+
+/* --- Images de marque envoyées par fichier ------------------------------- */
+
+/** Les deux images qu'une marque peut envoyer. */
+export const BRAND_IMAGE_KINDS = ["logo", "favicon"] as const;
+export type BrandImageKind = (typeof BRAND_IMAGE_KINDS)[number];
+
+export function isBrandImageKind(value: unknown): value is BrandImageKind {
+  return typeof value === "string" && (BRAND_IMAGE_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Taille maximale d'une image de marque : 512 Kio.
+ *
+ * Un logo d'en-tête ou une icône d'onglet n'en demande pas davantage, et
+ * l'image est rangée en base puis relue à chaque premier affichage : un
+ * plafond bas protège la base et la mémoire du seul processus de l'API
+ * (hébergement cPanel). Il tient aussi sous la limite d'un mégaoctet que Next
+ * impose au corps d'une action serveur, par où l'envoi transite.
+ */
+export const BRAND_IMAGE_MAX_BYTES = 512 * 1024;
+
+/** Types servis, et rien d'autre. */
+export type BrandImageType = "image/png" | "image/jpeg" | "image/webp" | "image/x-icon";
+
+/**
+ * Type réel d'une image, lu dans ses premiers octets — jamais dans le nom du
+ * fichier ni dans le type annoncé par le navigateur, que l'expéditeur choisit.
+ *
+ * **Pas de SVG**, et c'est voulu : un SVG est un document qui peut porter du
+ * script. Ouvert directement à son adresse, il s'exécuterait sous le domaine
+ * du panel — ou d'un revendeur — avec ses cookies. Les quatre formats admis
+ * sont des images matricielles, que le navigateur ne fait qu'afficher.
+ */
+export function sniffBrandImage(bytes: Uint8Array): BrandImageType | null {
+  const debut = (...octets: number[]) => octets.every((octet, i) => bytes[i] === octet);
+  const ascii = (texte: string, depart: number) =>
+    [...texte].every((c, i) => bytes[depart + i] === c.charCodeAt(0));
+
+  if (debut(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (debut(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (bytes.length >= 12 && ascii("RIFF", 0) && ascii("WEBP", 8)) return "image/webp";
+  // ICO : réservé nul, type 1 (icône), au moins une image dans le répertoire.
+  if (bytes.length >= 6 && debut(0x00, 0x00, 0x01, 0x00) && (bytes[4] ?? 0) + (bytes[5] ?? 0) > 0) {
+    return "image/x-icon";
+  }
+  return null;
+}
+
+/**
+ * Chemin **interne** où l'interface sert une image envoyée.
+ *
+ * Interne, donc relatif au domaine d'arrivée : le même chemin sert sur le
+ * domaine de la plateforme et sur celui de chaque revendeur, et passe la règle
+ * `isSafeBrandUrl` comme n'importe quelle adresse saisie. Chaque envoi reçoit
+ * un nouvel identifiant : le contenu d'une adresse ne change jamais, ce qui
+ * permet de le garder en cache sans limite.
+ */
+export const BRAND_IMAGE_PATH_PREFIX = "/brand/fichier/";
+
+export function brandImagePath(id: string): string {
+  return `${BRAND_IMAGE_PATH_PREFIX}${id}`;
+}
+
+/** Identifiant d'image acceptable : un UUID, rien qui puisse sortir du chemin. */
+export function isBrandImageId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
+/** Identifiant de l'image qu'une adresse de marque désigne, ou `null`. */
+export function brandImageIdOf(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed.startsWith(BRAND_IMAGE_PATH_PREFIX)) return null;
+  const id = trimmed.slice(BRAND_IMAGE_PATH_PREFIX.length);
+  return isBrandImageId(id) ? id : null;
+}

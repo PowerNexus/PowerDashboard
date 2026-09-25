@@ -1323,6 +1323,11 @@
     "pwned": "Ce mot de passe apparaît dans {occurrences, plural, one {une fuite connue} other {# fuites connues}}. Choisissez-en un autre.",
     "checkUnavailable": "La vérification des fuites est indisponible. Le mot de passe a été accepté sans elle."
   },
+  "brandImage": {
+    "upload": "Envoyer une image",
+    "uploading": "Envoi…",
+    "formats": "PNG, JPEG, WebP ou ICO, 512 Kio au plus (pas de SVG). Appliquée dès l'envoi."
+  },
   "branding": {
     "title": "Marque blanche",
     "subtitle": "Votre nom, votre logo et votre couleur, servis sur votre propre domaine.",

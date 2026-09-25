@@ -1323,6 +1323,11 @@
     "pwned": "This password appears in {occurrences, plural, one {a known breach} other {# known breaches}}. Choose another one.",
     "checkUnavailable": "The breach check is unavailable. The password was accepted without it."
   },
+  "brandImage": {
+    "upload": "Upload an image",
+    "uploading": "Uploading…",
+    "formats": "PNG, JPEG, WebP or ICO, 512 KiB at most (no SVG). Applied as soon as it is uploaded."
+  },
   "branding": {
     "title": "White label",
     "subtitle": "Your name, your logo and your colour, served on your own domain.",

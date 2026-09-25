@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import {
   AuditExportQuery,
   AuditFilters,
+  isBrandImageKind,
   LocationInput,
   NodeCreateInput,
   SETTING_BY_KEY,
@@ -34,6 +35,7 @@ import { SessionRepository } from "../auth/session.repository";
 import { BillingService } from "../billing/billing.service";
 import { ServerResizeService } from "../client/server-resize.service";
 import { MailerService } from "../mail/mailer.service";
+import { BrandImagesService } from "../reseller/brand-images.service";
 import { BrandingService } from "../reseller/branding.service";
 import { ResellerQuotaService } from "../reseller/reseller-quota.service";
 import { ResellerShareService } from "../reseller/reseller-share.service";
@@ -207,6 +209,8 @@ export class AdminController {
     // l.espace revendeur empruntent.
     @Inject(ServerResizeService) private readonly resize: ServerResizeService,
     @Inject(BillingService) private readonly billing: BillingService,
+    // En dernier : des tests construisent ce contrôleur par position.
+    @Inject(BrandImagesService) private readonly brandImages: BrandImagesService,
   ) {}
 
   @Get("overview")
@@ -372,6 +376,10 @@ export class AdminController {
     // cette purge, le nouveau logo n'apparaîtrait qu'une minute plus tard, et
     // l'on rechargerait la page en croyant l'enregistrement perdu.
     if (result.saved.some((key) => key.startsWith("brand."))) this.branding.forgetAll();
+    // Un logo envoyé que le réglage ne désigne plus n'a plus rien à faire en base.
+    if (result.saved.some((key) => key === "brand.logoUrl" || key === "brand.faviconUrl")) {
+      await this.brandImages.prune(null);
+    }
 
     if (result.saved.length > 0) {
       await this.trace(
@@ -381,6 +389,24 @@ export class AdminController {
       );
     }
     return { data: result };
+  }
+
+  /**
+   * Envoi du logo ou du favicon de la plateforme par fichier (corps
+   * `application/octet-stream`). Type lu dans les octets, jamais de SVG ;
+   * l'adresse interne rendue remplace aussitôt le réglage `brand.*`.
+   */
+  @Post("settings/brand-images/:kind")
+  @UseGuards(AdminWriteGuard)
+  async uploadBrandImage(
+    @Req() request: AdminRequest,
+    @Param("kind") kind: string,
+    @Body() body: unknown,
+  ) {
+    if (!isBrandImageKind(kind)) throw new BadRequestException("Image de marque inconnue.");
+    const url = await this.brandImages.uploadForPlatform(kind, body);
+    await this.trace(request, "admin.brand_image_uploaded", { kind });
+    return { data: { url } };
   }
 
   @Post("settings/flags/:key")
