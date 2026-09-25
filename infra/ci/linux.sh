@@ -62,6 +62,11 @@ ouvrir() {
     # Caches d'une exécution à l'autre, sur la machine du runner : le store
     # pnpm et le navigateur de Playwright.
     -v gd-ci-pnpm-store:/pnpm-store
+    # Le store sur ce volume, pas dans /w : pnpm le posait sinon dans
+    # /w/.pnpm-store (autre système de fichiers que son dossier par défaut),
+    # perdu à chaque job et lu par Trivy et Semgrep. Variable plutôt que la
+    # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
+    -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
     -e TZ=UTC)
   local nom
@@ -86,10 +91,6 @@ ouvrir() {
     cat <<'PREPARER'
 git config --global --add safe.directory /w
 npm install -g --no-fund --no-audit --loglevel=error "$(node -p 'require("./package.json").packageManager')"
-# Le store sur le volume de cache, pas dans /w : pnpm le posait sinon dans
-# /w/.pnpm-store (autre système de fichiers que son dossier par défaut), perdu
-# à chaque job et lu par Trivy et Semgrep.
-pnpm config set --global store-dir /pnpm-store
 pnpm --version
 PREPARER
   )"

@@ -614,7 +614,9 @@ describe("actions GitHub des workflows", () => {
   it("gardent le store pnpm sur le volume de cache, hors du dépôt", () => {
     const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
     expect(linux).toContain("-v gd-ci-pnpm-store:/pnpm-store");
-    expect(linux).toContain("pnpm config set --global store-dir /pnpm-store");
+    expect(linux).toContain("-e pnpm_config_store_dir=/pnpm-store");
+    // `pnpm config set --global` échoue sans dossier bin global dans le PATH.
+    expect(linux).not.toContain("pnpm config set --global");
   });
 });
 
