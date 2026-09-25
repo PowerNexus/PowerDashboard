@@ -132,8 +132,8 @@ au bout d'une heure. Pour vider à la main ce qui date d'avant ces étiquettes :
 docker ps -aq --filter name=gd-ci- | xargs -r docker rm -f
 docker ps -aq --filter ancestor=ghcr.io/zaproxy/zaproxy | xargs -r docker rm -f
 ```
- Il reste à laisser Docker Desktop
-arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
+
+Il reste à laisser Docker Desktop arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
 Resources → Advanced → Resource Saver**, activé, délai de 5 minutes. La
 machine virtuelle est alors arrêtée, sa mémoire rendue à Windows, et elle
 redémarre d'elle-même à la première commande `docker` du job suivant (quelques
