@@ -638,6 +638,17 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
+  // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.
+  it("marquent leurs conteneurs et retirent ceux qu'un job tué a laissés", () => {
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toMatch(/^ {2}balayer$/m);
+    expect(linux).toContain('--name "$NOM" --label gd-ci');
+    expect(linux).toContain('--name "$BASE" --label gd-ci');
+    expect(linux).toContain("docker ps -aq --filter label=gd-ci");
+    // Les caches ne sont jamais balayés.
+    expect(linux).not.toMatch(/volume prune/);
+  });
+
   it("gardent le store pnpm sur le volume de cache, hors du dépôt", () => {
     const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
     expect(linux).toContain("-v gd-ci-pnpm-store:/pnpm-store");
@@ -765,7 +776,7 @@ describe("workflow des captures de référence", () => {
   it("reprend toutes les captures de la suite visuelle, et les pousse sur la branche lancée", () => {
     expect(captures).toContain("playwright test e2e/visuel.spec.ts --update-snapshots=all");
     expect(captures).toContain("git add apps/web/e2e/visuel.spec.ts-snapshots");
-    expect(captures).toContain("BRANCHE: ${{ github.ref_name }}");
+    expect(captures).toContain(`BRANCHE: \${{ github.ref_name }}`);
     expect(captures).toContain('git push origin "HEAD:$BRANCHE"');
   });
 });

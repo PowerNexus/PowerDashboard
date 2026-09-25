@@ -116,6 +116,19 @@ Arrêter le runner pendant un job fait échouer ce job : attendre qu'il soit
 conteneur `gd-ci-…` : `docker ps -a --filter name=gd-ci-` les montre, et
 `docker rm -f` puis `docker volume prune` les retirent.
 
+### Veille de Docker Desktop
+
+Entre deux jobs, Docker ne doit rien garder d'actif : chaque job retire ses
+conteneurs, même en échec (`linux.sh fermer`), et le suivant retire ceux
+qu'un job tué net aurait laissés depuis plus de deux heures (`linux.sh
+balayer`, conteneurs marqués `gd-ci`). Il reste à laisser Docker Desktop
+arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
+Resources → Advanced → Resource Saver**, activé, délai de 5 minutes. La
+machine virtuelle est alors arrêtée, sa mémoire rendue à Windows, et elle
+redémarre d'elle-même à la première commande `docker` du job suivant (quelques
+secondes de plus au démarrage). Les caches (`gd-ci-pnpm-store`,
+`gd-ci-playwright`) et les images survivent à la veille.
+
 ### Mémoire de Docker Desktop
 
 Le build de Next.js et les tests tournent dans la machine virtuelle WSL 2 de
