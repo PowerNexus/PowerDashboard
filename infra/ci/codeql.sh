@@ -62,12 +62,35 @@ base=$(mktemp -d)
   --language="$(IFS=,; echo "${langages[*]}")" --build-mode=none \
   --source-root=. --threads=0
 
+# Mémoire de l'évaluateur, en Mo. Sans `--ram`, le CLI part du tas par défaut
+# de sa JVM (le quart de la mémoire vue), relevé à 2 Gio au plus bas : dans la
+# machine virtuelle de Docker Desktop (8 Gio au plus sur le runner), cela
+# faisait 1,1 Go de tas, dont 673 Mio pour les relations, partagés entre les
+# 24 fils de `--threads=0`, et l'analyse JavaScript manquait de tas selon
+# l'ordre où partaient les requêtes (« ran out of Java heap », code 99). Même
+# règle que l'action officielle de CodeQL : la mémoire vue par le conteneur
+# (limite du cgroup comprise), moins 1 Gio pour le système et 5 % de ce qui
+# dépasse 8 Gio. `$1` : racine où lire /proc et /sys (vide ici).
+memoire_evaluateur() {
+  local total limite fichier
+  total=$(awk '/^MemTotal:/ { print int($2 / 1024) }' "$1/proc/meminfo")
+  for fichier in "$1/sys/fs/cgroup/memory.max" "$1/sys/fs/cgroup/memory/memory.limit_in_bytes"; do
+    limite=$(cat "$fichier" 2>/dev/null) || continue
+    if [[ $limite =~ ^[0-9]+$ ]] && ((limite / 1048576 < total)); then
+      total=$((limite / 1048576))
+    fi
+  done
+  echo $((total - 1024 - (total > 8192 ? (total - 8192) * 5 / 100 : 0)))
+}
+ram=$(memoire_evaluateur "")
+echo "CodeQL : $ram Mo pour l'évaluateur, $(nproc) fils."
+
 mkdir -p "$sortie"
 for langage in "${langages[@]}"; do
   # Le dossier de la base et la catégorie portent le nom court (javascript),
   # celui que GitHub affiche pour cette analyse.
   court=${langage%%-*}
-  "$codeql" database analyze "$base/$court" --threads=0 \
+  "$codeql" database analyze "$base/$court" --threads=0 --ram="$ram" \
     --format=sarif-latest --output="$sortie/$court.sarif" \
     --sarif-category="/language:$court"
 done

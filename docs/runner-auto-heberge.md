@@ -197,6 +197,13 @@ l'empreinte est revérifiée à chaque job avant extraction dans le conteneur,
 et le checkout ne laisse pas le jeton dans `.git/config`
 (`persist-credentials: false`), puisque le dépôt est copié dans le conteneur.
 
+L'évaluateur reçoit la mémoire vue par le conteneur, moins 1 Gio (règle de
+l'action officielle), et le journal du job en donne le chiffre (« CodeQL : …
+Mo pour l'évaluateur »). Laissé à lui-même, le CLI se bornait à 2 Gio, et
+l'analyse JavaScript manquait de tas sur les 24 cœurs du runner (code 99).
+Si elle en manque encore, donner davantage de mémoire à WSL (voir « Mémoire
+de Docker Desktop »).
+
 La « configuration par défaut » de GitHub (**Settings → Code security →
 CodeQL analysis → Default setup**) ne sert pas ici : elle réclame un runner
 hébergé. Elle doit rester **désactivée**, sinon GitHub refuse les résultats

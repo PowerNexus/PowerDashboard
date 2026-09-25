@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -703,6 +704,63 @@ describe("actions GitHub des workflows", () => {
     expect(codeql).toMatch(
       /- uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}persist-credentials: false\n/,
     );
+  });
+
+  /*
+   * Régression (#50, runner) : « Query evaluation ran out of Java heap (Java
+   * heap (and arrays) maximum: 673 MiB) », code 99. Sans `--ram`, le CLI part
+   * du tas par défaut de sa JVM, le quart de la mémoire vue, relevé à 2 Gio :
+   * dans la machine virtuelle de Docker Desktop, 1,1 Go de tas pour 24 fils.
+   * L'évaluateur reçoit désormais la mémoire du conteneur, moins la réserve
+   * de l'action officielle de CodeQL ; le calcul est rendu par bash à partir
+   * du script, sur des machines d'essai.
+   */
+  it("donnent à l'évaluateur de CodeQL la mémoire du conteneur", () => {
+    const chemin = join(RACINE, "infra", "ci", "codeql.sh");
+    const code = readFileSync(chemin, "utf8").replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^ram=\$\(memoire_evaluateur ""\)$/m);
+    const analyses = code.match(/database analyze .*$/gm) ?? [];
+    expect(analyses.length).toBe(1);
+    expect(analyses[0]).toContain('--ram="$ram"');
+
+    const memoire = (meminfoKo: number, cgroup: { v2?: string; v1?: string } = {}) => {
+      const racine = mkdtempSync(join(tmpdir(), "gd-memoire-"));
+      try {
+        const sys = join(racine, "sys", "fs", "cgroup");
+        mkdirSync(join(racine, "proc"));
+        mkdirSync(join(sys, "memory"), { recursive: true });
+        writeFileSync(join(racine, "proc", "meminfo"), `MemTotal:       ${meminfoKo} kB\n`);
+        if (cgroup.v2) writeFileSync(join(sys, "memory.max"), `${cgroup.v2}\n`);
+        if (cgroup.v1) {
+          writeFileSync(join(sys, "memory", "memory.limit_in_bytes"), `${cgroup.v1}\n`);
+        }
+        const sortie = execFileSync(
+          "bash",
+          [
+            "-c",
+            `set -euo pipefail; source <(sed -n '/^memoire_evaluateur()/,/^}$/p' "$1"); memoire_evaluateur "$2"`,
+            "rendu",
+            chemin,
+            racine,
+          ],
+          { encoding: "utf8" },
+        );
+        return Number(sortie.trim());
+      } finally {
+        rmSync(racine, { recursive: true, force: true });
+      }
+    };
+    const gio = 1024 * 1024;
+    // Machine virtuelle de 8 Gio sans limite : 1 Gio pour le système, et non
+    // plus le plancher de 2 Gio du CLI.
+    expect(memoire(8 * gio, { v2: "max" })).toBe(7168);
+    // Au-delà de 8 Gio, 5 % de l'excédent en plus.
+    expect(memoire(16 * gio, { v2: "max" })).toBe(16384 - 1024 - 409);
+    // La limite du conteneur l'emporte sur la machine (cgroup v2, puis v1).
+    expect(memoire(16 * gio, { v2: String(4 * 1024 ** 3) })).toBe(3072);
+    expect(memoire(16 * gio, { v1: String(6 * 1024 ** 3) })).toBe(5120);
+    // « Pas de limite » en v1 est un nombre géant : la machine compte.
+    expect(memoire(8 * gio, { v1: "9223372036854771712" })).toBe(7168);
   });
 
   // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.
