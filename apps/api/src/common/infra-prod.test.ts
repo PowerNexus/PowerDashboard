@@ -881,3 +881,99 @@ describe("domaine de revendeur en attente de certificat", () => {
     }
   });
 });
+
+/**
+ * Domaine de revendeur **déclaré, pas encore vérifié**.
+ *
+ * Il n'avait aucun bloc : ses requêtes tombaient sur le `default_server` de
+ * nginx (page d'erreur nue, ou un autre site de la machine). Il reçoit
+ * désormais la même page d'attente que le bloc de défi, par un bloc à son nom
+ * exact, port 80 seul — jamais un attrape-tout, qui capterait le trafic des
+ * autres sites d'une machine partagée.
+ *
+ * Rendu par bash à partir du script, comme le bloc de défi ci-dessus.
+ */
+describe("domaine de revendeur déclaré, pas encore vérifié", () => {
+  const script = join(PROD, "certificates.sh");
+  const source = readFileSync(script, "utf8");
+  const rendre = (fonction: string) =>
+    execFileSync(
+      "bash",
+      [
+        "-c",
+        `source <(sed -n '/^PAGE_ATTENTE=/p;/^${fonction}()/,/^EOF$/p' "$1"; echo "}"); WEBROOT=/var/www/html; domaine=panel.revendeur.fr; ${fonction} "$domaine"`,
+        "rendu",
+        script,
+      ],
+      { encoding: "utf8" },
+    );
+  const attente = rendre("bloc_attente");
+  const acme = rendre("bloc_acme");
+  const sansCommentaires = (bloc: string) => bloc.replace(/#.*$/gm, "").trim();
+
+  it("écoute le seul nom déclaré, sur le port 80, sans attrape-tout", () => {
+    const utile = sansCommentaires(attente);
+    expect(utile).toMatch(/^\s*server_name panel\.revendeur\.fr;$/m);
+    expect(utile.match(/server_name/g)).toHaveLength(1);
+    expect(utile).not.toMatch(/default_server|server_name\s+_|\*|~/);
+    expect(utile).not.toMatch(/listen\s+(\[::\]:)?443|ssl/);
+    expect(utile.match(/^\s*listen /gm)).toHaveLength(2);
+    expect(utile).toMatch(/^\s*server_tokens off;/m);
+    expect(utile).not.toMatch(/proxy_pass/);
+  });
+
+  it("sert la même page d'attente, avec les mêmes en-têtes, et le défi ACME", () => {
+    // Même bloc que celui du défi, commentaires mis à part : un écart
+    // introduit dans l'un et oublié dans l'autre ferait diverger la page.
+    expect(sansCommentaires(attente)).toBe(sansCommentaires(acme));
+    expect(attente).toMatch(/return 503 '<!doctype html>.*Mise en service en cours.*<\/html>';/);
+    expect(attente).toMatch(
+      /location \/\.well-known\/acme-challenge\/ \{\s*root \/var\/www\/html;\s*\}/,
+    );
+  });
+
+  it("ne demande jamais de certificat pour un domaine non vérifié", () => {
+    // Seules les lignes vérifiées et `pending` partent vers certbot.
+    expect(source).toMatch(
+      /if ligne\.get\("pending"\) and ligne\.get\("verified", True\) is True:/,
+    );
+    expect(source).toMatch(/attendre "\$domaine"/);
+    const attendre = source.slice(source.indexOf("attendre() {"), source.indexOf("# ─── Tour"));
+    expect(attendre).not.toMatch(/certbot|bloc_acme|bloc_servi/);
+    expect(attendre).toMatch(/poser_bloc "\$domaine" "\$contenu" --exclusif/);
+  });
+
+  it("refuse un nom qu'un autre site de la machine sert déjà", () => {
+    const servi = (nom: string) => {
+      try {
+        execFileSync(
+          "bash",
+          [
+            "-c",
+            `source <(sed -n '/^nom_servi_ailleurs()/,/^}$/p' "$1"); PREFIX=gd-reseller-; CONFIG_NGINX=$2; nom_servi_ailleurs "$3"`,
+            "rendu",
+            script,
+            [
+              "# configuration file /etc/nginx/sites-enabled/autre.conf:",
+              "server {",
+              "    server_name www.autre.fr *.joker.fr;",
+              "}",
+              "# configuration file /etc/nginx/sites-enabled/gd-reseller-a.revendeur.fr.conf:",
+              "    server_name a.revendeur.fr;",
+            ].join("\n"),
+            nom,
+          ],
+          { stdio: "ignore" },
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(servi("www.autre.fr")).toBe(true);
+    expect(servi("x.joker.fr")).toBe(true);
+    // Nos propres blocs ne comptent pas : ce sont eux qu'on réécrit.
+    expect(servi("a.revendeur.fr")).toBe(false);
+    expect(servi("libre.revendeur.fr")).toBe(false);
+  });
+});

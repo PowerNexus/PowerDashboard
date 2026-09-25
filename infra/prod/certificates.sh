@@ -54,9 +54,10 @@ PANEL_WEB_PORT=${GD_WEB_PORT:-3210}
 CONTACT=${GD_ACME_CONTACT:-}
 
 # Page servie sur le port 80 d'un domaine vérifié **tant qu'il n'a pas de
-# certificat** (bloc de défi, `bloc_acme`) : un client du revendeur qui ouvre
-# son adresse trop tôt lit ce qui se passe et quand revenir, au lieu de la page
-# d'erreur nue de nginx.
+# certificat** (bloc de défi, `bloc_acme`), et d'un domaine déclaré **pas encore
+# vérifié** (`bloc_attente`) : un client du revendeur qui ouvre son adresse trop
+# tôt lit ce qui se passe et quand revenir, au lieu de la page d'erreur nue du
+# `default_server` de nginx — ou d'un autre site de la machine.
 #
 # - Ni nom ni logo : la marque de la plateforme n'a rien à faire sur le domaine
 #   d'un revendeur (marque blanche), et celle du revendeur n'est servie que par
@@ -140,8 +141,12 @@ print(json.dumps({
 # Le fichier est d'abord écrit ailleurs : un fichier incomplet dans
 # `sites-enabled` serait pris au prochain rechargement, déclenché par n'importe
 # quel autre outil de la machine.
-poser_bloc() { # domaine fichier_contenu
-  local domaine=$1 contenu=$2
+#
+# Avec `--exclusif`, un nom que nginx déclare en conflit (« conflicting server
+# name ») fait retirer le bloc : `nginx -t` n'y voit qu'un avertissement, mais
+# l'un des deux sites cesserait d'être servi.
+poser_bloc() { # domaine fichier_contenu [--exclusif]
+  local domaine=$1 contenu=$2 exclusif=${3:-}
   local cible="$NGINX_DIR/$PREFIX$domaine.conf"
   local tampon
   tampon=$(mktemp)
@@ -169,6 +174,13 @@ poser_bloc() { # domaine fichier_contenu
     return 1
   fi
 
+  if [ "$exclusif" = "--exclusif" ] \
+    && nginx -t 2>&1 | grep -qF "conflicting server name \"$domaine\""; then
+    rm -f "$cible"
+    log "  REFUS Un autre site de cette machine sert déjà ce nom ; le bloc a été retiré."
+    return 1
+  fi
+
   systemctl reload nginx || { log "  ERREUR Le rechargement de nginx a échoué."; return 1; }
   return 0
 }
@@ -191,6 +203,39 @@ bloc_acme() { # domaine — juste de quoi répondre au défi HTTP-01
 #
 # Le reste reçoit une page d'attente (503, Retry-After), et non la page
 # d'erreur nue de nginx ni le panel en clair. Voir PAGE_ATTENTE.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domaine;
+    server_tokens off;
+
+    location /.well-known/acme-challenge/ {
+        root $WEBROOT;
+    }
+
+    location / {
+        default_type "text/html; charset=utf-8";
+        add_header Retry-After 900 always;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+        add_header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'" always;
+        return 503 '$PAGE_ATTENTE';
+    }
+}
+EOF
+}
+
+bloc_attente() { # domaine — déclaré, pas encore vérifié
+  cat <<EOF
+# Posé par GameDashboard (agent de certificats). Ne pas modifier à la main :
+# ce fichier est retiré dès que le domaine est supprimé ou abandonné, et
+# remplacé par le bloc de défi dès qu'il est vérifié.
+#
+# Domaine déclaré par un revendeur, **pas encore vérifié** : rien ne prouve
+# qu'il est à lui. Port 80 seul, sans certificat ni panel : la même page
+# d'attente que le bloc de défi, et le défi ACME, inoffensif et prêt pour la
+# suite. Nom exact, jamais de serveur par défaut ni de joker.
 server {
     listen 80;
     listen [::]:80;
@@ -371,6 +416,59 @@ traiter() {
   return 0
 }
 
+# ─── Domaine déclaré, pas encore vérifié ─────────────────────────────────────
+
+# Rend 0 si un site qui n'est pas à nous sert déjà ce nom (exact, `*.suffixe`,
+# `.suffixe` ou `préfixe.*`), d'après `CONFIG_NGINX` (sortie de `nginx -T`).
+# Le nom n'est pas prouvé : sans cette garde, un revendeur qui déclarerait le
+# domaine d'un autre site de la machine en capterait le port 80.
+nom_servi_ailleurs() { # domaine
+  printf '%s' "$CONFIG_NGINX" | python3 -c '
+import re, sys
+domaine, prefixe = sys.argv[1], sys.argv[2]
+fichier = ""
+for ligne in sys.stdin.read().splitlines():
+    entete = re.match(r"# configuration file (.+):$", ligne)
+    if entete:
+        fichier = entete.group(1)
+        continue
+    if fichier.rsplit("/", 1)[-1].startswith(prefixe):
+        continue
+    directive = re.match(r"\s*server_name\s+([^;#]*)", ligne)
+    if not directive:
+        continue
+    for nom in directive.group(1).split():
+        nom = nom.lower()
+        if (nom == domaine
+                or (nom.startswith("*.") and domaine.endswith(nom[1:]))
+                or (nom.startswith(".") and (domaine == nom[1:] or domaine.endswith(nom)))
+                or (nom.endswith(".*") and domaine.startswith(nom[:-1]))):
+            raise SystemExit(0)
+raise SystemExit(1)
+' "$1" "$PREFIX"
+}
+
+attendre() { # domaine — pose la page d'attente, sans rien demander à l'autorité
+  local domaine=$1
+  local cible="$NGINX_DIR/$PREFIX$domaine.conf"
+  local contenu
+  contenu=$(bloc_attente "$domaine")
+
+  if nom_servi_ailleurs "$domaine"; then
+    log "Domaine $domaine (non vérifié) : un autre site de la machine sert ce nom, aucune page d'attente."
+    if [ -e "$cible" ] && [ -z "$DRY_RUN" ]; then retirer_bloc "$domaine"; fi
+    return 0
+  fi
+
+  # Déjà en place à l'identique : aucun rechargement de nginx à chaque tour.
+  if [ -e "$cible" ] && [ "$(cat "$cible")" = "$contenu" ]; then
+    return 0
+  fi
+
+  log "Domaine $domaine (non vérifié) : page d'attente"
+  poser_bloc "$domaine" "$contenu" --exclusif
+}
+
 # ─── Tour ────────────────────────────────────────────────────────────────────
 
 log "Agent de certificats — début${STAGING:+ (autorité de test)}${DRY_RUN:+ (essai)}"
@@ -406,7 +504,19 @@ lignes = json.load(sys.stdin)["data"]
 if not isinstance(lignes, list):
     raise SystemExit(1)
 for ligne in lignes:
-    if ligne.get("pending"):
+    # `verified` absent : panel plus ancien, qui ne rend que des domaines vérifiés.
+    if ligne.get("pending") and ligne.get("verified", True) is True:
+        print(ligne["domain"])
+') || {
+    log "ERREUR Le panel a répondu autre chose qu'une file de domaines."
+    exit 4
+  }
+
+  # Les domaines déclarés pas encore vérifiés : page d'attente seulement.
+  en_attente=$(printf '%s' "$reponse" | python3 -c '
+import json, sys
+for ligne in json.load(sys.stdin)["data"]:
+    if ligne.get("verified", True) is False and not ligne.get("pending"):
         print(ligne["domain"])
 ') || {
     log "ERREUR Le panel a répondu autre chose qu'une file de domaines."
@@ -446,6 +556,28 @@ echecs=0
 for domaine in $domaines; do
   traiter "$domaine" || echecs=$((echecs + 1))
 done
+
+# Après les domaines vérifiés. Le cycle de vie tient dans le nom du fichier,
+# le même pour les trois blocs : vérifié, le domaine sort de cette liste et
+# reçoit le bloc de défi ; supprimé ou abandonné (le panel ne le rend plus),
+# son bloc est retiré avec les orphelins, plus haut.
+if [ -n "${en_attente:-}" ]; then
+  if CONFIG_NGINX=$(nginx -T 2>/dev/null); then
+    for domaine in $en_attente; do
+      # Le panel a déjà filtré ; ce nom devient un nom de fichier et un
+      # server_name, il est donc recontrôlé ici.
+      if ! [[ $domaine =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; then
+        log "Domaine ignoré, nom invalide : $domaine"
+        continue
+      fi
+      attendre "$domaine" || echecs=$((echecs + 1))
+    done
+  else
+    # Sans la configuration entière, rien ne dit qu'un autre site ne sert pas
+    # déjà ces noms : on s'abstient.
+    log "ATTENTION nginx -T a échoué : aucune page d'attente posée à ce tour."
+  fi
+fi
 
 log "Agent de certificats — fin ($echecs échec(s))"
 # Le code de sortie ne signale que les pannes de l'agent, pas les refus de
