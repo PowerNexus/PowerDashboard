@@ -27,6 +27,12 @@ export interface BrandingOverrides {
   termsUrl: string;
   footerText: string;
   loginTagline: string;
+  /**
+   * Adresse de réponse des courriels (`Reply-To`). Le courrier part toujours
+   * de l'adresse de la plateforme — celle que SPF et DKIM couvrent — mais une
+   * réponse du client arrive chez le revendeur. Voir `mailSender`.
+   */
+  replyTo: string;
 }
 
 /** Marque effective, une fois les replis appliqués. Jamais de champ vide obligatoire. */
@@ -39,6 +45,7 @@ export interface Branding {
   termsUrl: string | null;
   footerText: string | null;
   loginTagline: string | null;
+  replyTo: string | null;
   /** Revendeur dont la marque est servie, ou `null` pour la plateforme. */
   resellerId: string | null;
 }
@@ -53,6 +60,7 @@ export const DEFAULT_BRANDING: Branding = {
   termsUrl: null,
   footerText: null,
   loginTagline: null,
+  replyTo: null,
   resellerId: null,
 };
 
@@ -87,6 +95,9 @@ export function composeBranding(
     termsUrl: optional("termsUrl"),
     footerText: optional("footerText"),
     loginTagline: optional("loginTagline"),
+    // Contrôlée ici aussi, et pas seulement à la saisie : une ancienne valeur
+    // invalide ne doit jamais atteindre un en-tête de courriel.
+    replyTo: isValidReplyTo(pick("replyTo")) ? pick("replyTo") || null : null,
     resellerId: reseller?.resellerId ?? null,
   };
 }
@@ -151,4 +162,55 @@ export function isValidDomain(value: string): boolean {
 /** Nom où le revendeur publie sa preuve de possession. */
 export function ownershipRecordName(domain: string): string {
   return `_gamedashboard.${domain.trim().toLowerCase()}`;
+}
+
+/** Longueur maximale d'une adresse électronique (RFC 5321). */
+export const REPLY_TO_MAX_LENGTH = 254;
+
+/**
+ * Adresse de réponse acceptable, ou vide.
+ *
+ * Volontairement stricte : cette valeur finit dans un en-tête de courriel, où
+ * un saut de ligne ajouterait des en-têtes — un `Bcc:` glissé par qui remplit
+ * le champ. Ni blanc, ni chevron, ni guillemet, ni virgule : une seule adresse.
+ */
+export function isValidReplyTo(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed === "") return true;
+  if (trimmed.length > REPLY_TO_MAX_LENGTH) return false;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: on les refuse dans un en-tête.
+  return /^[^\s\u0000-\u001f\u007f@<>"(),;:\\[\]]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(
+    trimmed,
+  );
+}
+
+/** Longueur maximale du nom d'expéditeur affiché. */
+export const SENDER_NAME_MAX_LENGTH = 80;
+
+/**
+ * Ce qu'un courriel porte de la marque : le nom d'expéditeur affiché et
+ * l'adresse de réponse.
+ *
+ * **L'adresse d'envoi, elle, ne change pas.** Écrire « From: support@revendeur.fr »
+ * depuis le serveur de la plateforme ferait échouer SPF et DKIM chez le
+ * destinataire : le courrier finirait en indésirables, ou refusé. Le nom
+ * affiché et la réponse suffisent à ce que le client voie son hébergeur.
+ */
+export interface MailSender {
+  fromName: string;
+  replyTo: string | null;
+}
+
+export function mailSender(branding: Pick<Branding, "name" | "replyTo">): MailSender {
+  const fromName = branding.name
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: on les retire d'un en-tête.
+    .replace(/[\u0000-\u001f\u007f"<>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, SENDER_NAME_MAX_LENGTH)
+    .trim();
+  return {
+    fromName: fromName || DEFAULT_BRANDING.name,
+    replyTo: branding.replyTo && isValidReplyTo(branding.replyTo) ? branding.replyTo : null,
+  };
 }

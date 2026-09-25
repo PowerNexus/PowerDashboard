@@ -22,6 +22,8 @@ describe("export de l'egg Minecraft Java livré", () => {
     expect(lu.installScript.length).toBeGreaterThan(1000);
     // Les commandes de la vue joueurs survivent à l'aller-retour.
     expect(lu.playerCommands.kick).toBe("kick {player} {reason}");
+    // La sonde de jeu déclarée aussi.
+    expect(lu.gameQuery).toEqual({ protocol: "minecraft" });
     expect(parsePterodactylEgg(exportPterodactylEgg(lu))).toEqual(lu);
   });
 });

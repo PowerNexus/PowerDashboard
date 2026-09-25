@@ -83,6 +83,18 @@ describe.skipIf(!HAS_DATABASE)("BrandingService (intégration)", () => {
     // Rien n'a été écrit : le logo enregistré plus haut est toujours servi.
     expect(await settings.text("brand.logoUrl")).toBe("https://cdn.hebergeur.fr/logo.webp");
   });
+
+  it("enregistre l'adresse de réponse d'un revendeur, et refuse ce qui ajouterait un en-tête", async () => {
+    const service = new BrandingService(db, settings);
+    const revendeur = await seedUser(db);
+
+    await expect(
+      service.save(revendeur, { replyTo: "support@revendeur.fr\r\nBcc: tous@exemple.fr" }),
+    ).rejects.toThrow("une seule adresse");
+    expect((await service.save(revendeur, { replyTo: " support@revendeur.fr " })).replyTo).toBe(
+      "support@revendeur.fr",
+    );
+  });
 });
 
 if (!HAS_DATABASE) console.warn(NO_DATABASE_REASON);

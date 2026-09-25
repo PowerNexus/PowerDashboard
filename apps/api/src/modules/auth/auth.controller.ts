@@ -30,6 +30,7 @@ import { ActivityService } from "../activity/activity.service";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { requiresStaffSecondFactor } from "../admin/staff-2fa.guard";
 import { MailerService } from "../mail/mailer.service";
+import { BrandingService } from "../reseller/branding.service";
 import { WingsClientService } from "../wings/wings-client.service";
 import { WingsTokenService } from "../wings/wings-token.service";
 import { AccountMailService } from "./account-mail.service";
@@ -48,7 +49,7 @@ import {
   pause,
   type WithoutLocalPassword,
 } from "./password-confirmation.service";
-import { relyingPartyFromEnv } from "./relying-party";
+import { passkeyScope, relyingPartyFor } from "./relying-party";
 import type { CredentialChange } from "./security-alert.messages";
 import { type FailureStage, SecurityAlertService } from "./security-alert.service";
 import { authCookieOptions, SessionGuard, sessionCookie } from "./session.guard";
@@ -241,7 +242,52 @@ export class AuthController {
     @Inject(WingsClientService) private readonly wings: WingsClientService,
     @Inject(PasswordConfirmationService)
     private readonly confirmation: PasswordConfirmationService,
+    // Le domaine relais des clés d'accès suit le domaine vérifié d'arrivée.
+    @Inject(BrandingService) private readonly branding: BrandingService,
   ) {}
+
+  /**
+   * Domaine relais d'une cérémonie WebAuthn : celui du revendeur quand on
+   * arrive par son domaine vérifié, celui de la plateforme sinon. Voir
+   * `relyingPartyFor` pour ce qui rend l'en-tête d'arrivée sans danger ici.
+   */
+  private async relyingParty(request: ClientRequest) {
+    const host = arrivalHost(request);
+    return relyingPartyFor(host, await this.branding.forHost(host));
+  }
+
+  /**
+   * L'adresse de retour SSO ne peut viser que le panel : son origine
+   * (`PANEL_ORIGIN`) ou le domaine **vérifié** d'un revendeur, servi par lui.
+   *
+   * C'est le fournisseur qui fait le contrôle exact, mais l'API n'a aucune
+   * raison de lancer une cérémonie vers une adresse étrangère : celle-ci
+   * recevrait le code d'autorisation. Le domaine d'un revendeur n'est admis
+   * qu'en `https://`, sans port : c'est ainsi qu'il est servi.
+   */
+  private async isPanelRedirect(redirectUri: string): Promise<boolean> {
+    let url: URL;
+    try {
+      url = new URL(redirectUri);
+    } catch {
+      return false;
+    }
+    try {
+      const expected = new URL(process.env.PANEL_ORIGIN ?? "http://localhost:3000");
+      if (url.origin === expected.origin) return true;
+    } catch {
+      // Origine du panel illisible : seul un domaine de revendeur peut passer.
+    }
+    if (url.protocol !== "https:" || url.port !== "") return false;
+    return (await this.branding.forHost(url.hostname)).resellerId !== null;
+  }
+
+  /** Des clés utilisables sur ce domaine ? L'écran de connexion ne propose que celles-là. */
+  private async passkeysHere(userId: string, request: ClientRequest): Promise<boolean> {
+    const host = arrivalHost(request);
+    const scope = passkeyScope(host, await this.branding.forHost(host));
+    return (await this.passkeys.countInScope(userId, scope)) > 0;
+  }
 
   /**
    * Refuse une entrée quand la preuve anti-automate manque ou ne vaut rien.
@@ -365,7 +411,7 @@ export class AuthController {
         // Les preuves réellement disponibles : proposer « utiliser ma clé
         // d'accès » à quelqu'un qui n'en a pas mènerait à une boîte de dialogue
         // du navigateur vouée à échouer.
-        methods: { totp: status.totp, passkeys: status.passkeys > 0 },
+        methods: { totp: status.totp, passkeys: await this.passkeysHere(user.id, request) },
         // Le dire évite d'avoir à retrouver son papier pour découvrir qu'il ne
         // reste rien, une fois le téléphone déjà perdu.
         remainingRecoveryCodes: status.remainingRecoveryCodes,
@@ -1449,7 +1495,7 @@ export class AuthController {
       reply.status(200).send({
         twoFactorRequired: true,
         challenge: issueChallenge("login", consumed.userId, { method: "billing_sso" }),
-        methods: { totp: status.totp, passkeys: status.passkeys > 0 },
+        methods: { totp: status.totp, passkeys: await this.passkeysHere(consumed.userId, request) },
         remainingRecoveryCodes: status.remainingRecoveryCodes,
       });
       return;
@@ -1532,7 +1578,7 @@ export class AuthController {
       return;
     }
 
-    if (!isPanelRedirect(parsed.data.redirectUri)) {
+    if (!(await this.isPanelRedirect(parsed.data.redirectUri))) {
       reply.status(422).send({ message: "Adresse de retour hors du panel." });
       return;
     }
@@ -1558,7 +1604,7 @@ export class AuthController {
       return;
     }
 
-    if (!isPanelRedirect(parsed.data.redirectUri)) {
+    if (!(await this.isPanelRedirect(parsed.data.redirectUri))) {
       reply.status(422).send({ message: "Adresse de retour hors du panel." });
       return;
     }
@@ -1648,7 +1694,7 @@ export class AuthController {
       reply.status(200).send({
         twoFactorRequired: true,
         challenge: issueChallenge("login", resolved.id, { method }),
-        methods: { totp: status.totp, passkeys: status.passkeys > 0 },
+        methods: { totp: status.totp, passkeys: await this.passkeysHere(resolved.id, request) },
         remainingRecoveryCodes: status.remainingRecoveryCodes,
       });
       return;
@@ -1760,7 +1806,7 @@ export class AuthController {
     const user = await this.confirmedUser(body, request, reply, "allow");
     if (!user) return;
 
-    const rp = relyingPartyFromEnv();
+    const rp = await this.relyingParty(request);
     const options = await this.passkeyService.registrationOptions(rp, {
       id: user.id,
       email: user.email,
@@ -1804,7 +1850,7 @@ export class AuthController {
     }
 
     const registered = await this.passkeyService.verifyRegistration(
-      relyingPartyFromEnv(),
+      await this.relyingParty(request),
       user.id,
       sealed.webauthn,
       parsed.data.response as never,
@@ -1901,7 +1947,11 @@ export class AuthController {
    * directement la bonne clé plutôt que de demander laquelle employer.
    */
   @Post("login/2fa/passkey/options")
-  async passkeyAuthenticationOptions(@Body() body: unknown, @Res() reply: Reply): Promise<void> {
+  async passkeyAuthenticationOptions(
+    @Body() body: unknown,
+    @Req() request: ClientRequest,
+    @Res() reply: Reply,
+  ): Promise<void> {
     const parsed = ChallengeOnly.safeParse(body);
     if (!parsed.success) {
       reply.status(422).send({ message: publicFailureMessage() });
@@ -1915,7 +1965,7 @@ export class AuthController {
       return;
     }
 
-    const rp = relyingPartyFromEnv();
+    const rp = await this.relyingParty(request);
     const options = await this.passkeyService.authenticationOptions(rp, sealed.userId);
 
     reply.status(200).send({
@@ -1962,7 +2012,7 @@ export class AuthController {
     }
 
     const verified = await this.passkeyService.verifyAuthentication(
-      relyingPartyFromEnv(),
+      await this.relyingParty(request),
       sealed.userId,
       sealed.webauthn,
       parsed.data.response as never,
@@ -2113,22 +2163,6 @@ let cachedDigest: Promise<string> | null = null;
 function emptyDigest(): Promise<string> {
   cachedDigest ??= hashPassword("compte-inexistant");
   return cachedDigest;
-}
-
-/**
- * L'adresse de retour SSO ne peut viser que le panel.
- *
- * C'est le fournisseur qui fait le contrôle exact, mais l'API n'a aucune
- * raison de lancer une cérémonie vers une adresse étrangère : celle-ci
- * recevrait le code d'autorisation.
- */
-function isPanelRedirect(redirectUri: string): boolean {
-  try {
-    const expected = new URL(process.env.PANEL_ORIGIN ?? "http://localhost:3000");
-    return new URL(redirectUri).origin === expected.origin;
-  } catch {
-    return false;
-  }
 }
 
 /**

@@ -156,6 +156,13 @@ export function PasskeyList({
             <li key={passkey.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-fg">{passkey.label}</p>
+                {/* Une clé est liée au domaine où elle a été créée : le dire
+                    évite de chercher pourquoi elle n'est pas proposée ailleurs. */}
+                {passkey.domain ? (
+                  <p className="text-xs text-muted">
+                    {t("passkeyDomain", { domain: passkey.domain })}
+                  </p>
+                ) : null}
                 <p className="text-xs text-muted">
                   {/* « Jamais » plutôt qu'une date de repli : une clé enregistrée
                       et jamais employée est précisément ce qu'on cherche à voir. */}

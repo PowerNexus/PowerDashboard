@@ -1,6 +1,6 @@
 import { type Database, userPasskeys } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, type SQL } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 /** Clé d'accès telle qu'un écran la montre. La clé publique n'en fait pas partie. */
@@ -10,6 +10,8 @@ export interface PasskeySummary {
   transports: string[];
   createdAt: string;
   lastUsedAt: string | null;
+  /** Domaine du revendeur où la clé a été créée, `null` pour la plateforme. */
+  domain: string | null;
 }
 
 /** Ce que la vérification d'une assertion a besoin de retrouver. */
@@ -40,6 +42,7 @@ export class PasskeyRepository {
         transports: userPasskeys.transports,
         createdAt: userPasskeys.createdAt,
         lastUsedAt: userPasskeys.lastUsedAt,
+        domain: userPasskeys.rpId,
       })
       .from(userPasskeys)
       .where(eq(userPasskeys.userId, userId))
@@ -47,7 +50,7 @@ export class PasskeyRepository {
   }
 
   /** Clés exploitables pour une cérémonie, avec de quoi vérifier une signature. */
-  async credentialsForUser(userId: string): Promise<StoredPasskey[]> {
+  async credentialsForUser(userId: string, scope: string | null): Promise<StoredPasskey[]> {
     return this.db
       .select({
         id: userPasskeys.id,
@@ -57,7 +60,12 @@ export class PasskeyRepository {
         transports: userPasskeys.transports,
       })
       .from(userPasskeys)
-      .where(eq(userPasskeys.userId, userId));
+      .where(and(eq(userPasskeys.userId, userId), inScope(scope)));
+  }
+
+  /** Nombre de clés utilisables dans une portée : ce que l'écran de connexion propose. */
+  async countInScope(userId: string, scope: string | null): Promise<number> {
+    return (await this.credentialsForUser(userId, scope)).length;
   }
 
   /**
@@ -67,7 +75,11 @@ export class PasskeyRepository {
    * par la clé d'autrui serait vérifiée contre la bonne clé publique et
    * ouvrirait la session du mauvais compte.
    */
-  async findCredential(userId: string, credentialId: string): Promise<StoredPasskey | null> {
+  async findCredential(
+    userId: string,
+    credentialId: string,
+    scope: string | null,
+  ): Promise<StoredPasskey | null> {
     const [row] = await this.db
       .select({
         id: userPasskeys.id,
@@ -77,7 +89,13 @@ export class PasskeyRepository {
         transports: userPasskeys.transports,
       })
       .from(userPasskeys)
-      .where(and(eq(userPasskeys.userId, userId), eq(userPasskeys.credentialId, credentialId)))
+      .where(
+        and(
+          eq(userPasskeys.userId, userId),
+          eq(userPasskeys.credentialId, credentialId),
+          inScope(scope),
+        ),
+      )
       .limit(1);
 
     return row ?? null;
@@ -90,6 +108,7 @@ export class PasskeyRepository {
     counter: number;
     transports: string[];
     label: string;
+    rpId: string | null;
   }): Promise<void> {
     const now = new Date().toISOString();
     await this.db.insert(userPasskeys).values({ ...input, createdAt: now, updatedAt: now });
@@ -138,4 +157,9 @@ export class PasskeyRepository {
   async removeAllForUser(userId: string): Promise<void> {
     await this.db.delete(userPasskeys).where(eq(userPasskeys.userId, userId));
   }
+}
+
+/** Condition « clé de cette portée » : `null` désigne le domaine de la plateforme. */
+function inScope(scope: string | null): SQL {
+  return scope === null ? isNull(userPasskeys.rpId) : eq(userPasskeys.rpId, scope);
 }

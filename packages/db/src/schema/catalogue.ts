@@ -65,6 +65,12 @@ export const eggs = pgTable(
      * la console.
      */
     playerCommands: jsonb("player_commands").notNull().default({}),
+    /**
+     * Sonde de jeu déclarée par l'egg (`game_query` : protocole, variable du
+     * port de requête, décalage), extension propre à GameDashboard. Nulle,
+     * la sonde reconnaît le jeu à son nom. Jamais servie à Wings.
+     */
+    gameQuery: jsonb("game_query"),
 
     /** Provenance, pour distinguer un egg importé d'un egg écrit à la main (§8.3). */
     sourceId: uuid("source_id").references(() => eggSources.id, { onDelete: "set null" }),

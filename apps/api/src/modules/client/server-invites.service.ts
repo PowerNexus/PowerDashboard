@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { mailSender } from "@gamedashboard/contracts";
 import { type Database, serverInvites, serverSubusers, servers, users } from "@gamedashboard/db";
 import {
   BadRequestException,
@@ -170,6 +171,7 @@ export class ServerInvitesService {
     const lien = `${await this.origine(host)}/invitation/${jeton}`;
     const { ok, error } = await this.mail.sendAndReport({
       to: adresse,
+      ...mailSender(marque),
       subject: `Invitation à gérer le serveur « ${cible.name} » sur ${marque.name}`,
       text: [
         `${auteur?.email ?? "Un utilisateur"} vous propose l'accès au serveur « ${cible.name} ».`,

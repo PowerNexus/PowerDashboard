@@ -471,6 +471,7 @@ export class EggImportService {
       fileDenylist: parsed.fileDenylist,
       consoleCommands: parsed.consoleCommands,
       playerCommands: parsed.playerCommands,
+      gameQuery: parsed.gameQuery,
       sourceId: origin.sourceId,
       sourceRef: origin.sourceRef,
       importedAt: new Date().toISOString(),

@@ -6,6 +6,7 @@ import {
   composeBranding,
   isSafeBrandUrl,
   isValidDomain,
+  isValidReplyTo,
   normalizeHex,
   ownershipRecordName,
   PLATFORM_BRAND_SETTINGS,
@@ -108,6 +109,7 @@ export class BrandingService {
       termsUrl: row?.termsUrl ?? "",
       footerText: row?.footerText ?? "",
       loginTagline: row?.loginTagline ?? "",
+      replyTo: row?.replyTo ?? "",
     };
   }
 
@@ -126,6 +128,13 @@ export class BrandingService {
       );
     }
 
+    const replyTo = (input.replyTo ?? "").trim();
+    if (!isValidReplyTo(replyTo)) {
+      throw new BadRequestException(
+        "L'adresse de réponse doit être une seule adresse e-mail, comme support@exemple.fr.",
+      );
+    }
+
     const values = {
       name: (input.name ?? "").trim().slice(0, 120),
       logoUrl: assertUrl(input.logoUrl, "logo"),
@@ -135,6 +144,7 @@ export class BrandingService {
       termsUrl: assertUrl(input.termsUrl, "lien des conditions"),
       footerText: (input.footerText ?? "").trim().slice(0, 255),
       loginTagline: (input.loginTagline ?? "").trim().slice(0, 255),
+      replyTo,
       updatedAt: new Date().toISOString(),
     };
 
@@ -492,7 +502,39 @@ export class BrandingService {
       termsUrl: row.termsUrl,
       footerText: row.footerText,
       loginTagline: row.loginTagline,
+      replyTo: row.replyTo,
     };
+  }
+
+  /**
+   * Marque et domaine à employer pour un courriel **sans requête** : une
+   * notification sur un serveur, écrite par une tâche de fond ou un daemon.
+   *
+   * La règle reste « le domaine décide » (`composeBranding`) : un revendeur
+   * ne prête sa marque que s'il a un domaine **vérifié**, celui où ses clients
+   * voient déjà cette marque. Ce n'est pas la marque déduite d'un compte — un
+   * client peut louer chez deux revendeurs — mais celle du **serveur**, qui
+   * n'en a qu'un. Sans domaine vérifié, c'est la plateforme, avec son domaine.
+   */
+  async forReseller(
+    resellerId: string | null,
+  ): Promise<{ branding: Branding; domain: string | null }> {
+    if (resellerId) {
+      const [row] = await this.db
+        .select({ domain: resellerBrandings.domain })
+        .from(resellerBrandings)
+        .where(
+          and(
+            eq(resellerBrandings.userId, resellerId),
+            isNotNull(resellerBrandings.domainVerifiedAt),
+          ),
+        )
+        .limit(1);
+      if (row?.domain) return { branding: await this.forHost(row.domain), domain: row.domain };
+    }
+
+    const domain = normalizeHost(await this.settings.text("brand.domain")) || null;
+    return { branding: await this.forHost(domain), domain };
   }
 
   /**
@@ -534,6 +576,36 @@ function assertUrl(value: string | undefined, label: string): string {
   throw new BadRequestException(
     `L'adresse du ${label} doit commencer par « https:// » ou par « / ».`,
   );
+}
+
+/**
+ * Champs de marque lus dans le corps d'une requête : les chaînes seules, tout
+ * le reste vide.
+ *
+ * **Tous** les champs de `BrandingOverrides`, et c'est le sens de cette
+ * fonction : la route du revendeur recopiait les champs un par un et avait
+ * oublié `replyTo`. Le formulaire l'envoyait, la route le jetait, et chaque
+ * enregistrement effaçait l'adresse de réponse — sans le moindre message.
+ */
+export function brandingInput(body: unknown): BrandingOverrides {
+  const payload = (body ?? {}) as Record<string, unknown>;
+  const text = (key: keyof BrandingOverrides): string =>
+    typeof payload[key] === "string" ? (payload[key] as string) : "";
+
+  const fields: Record<keyof BrandingOverrides, true> = {
+    name: true,
+    logoUrl: true,
+    faviconUrl: true,
+    accent: true,
+    supportUrl: true,
+    termsUrl: true,
+    footerText: true,
+    loginTagline: true,
+    replyTo: true,
+  };
+  return Object.fromEntries(
+    (Object.keys(fields) as (keyof BrandingOverrides)[]).map((key) => [key, text(key)]),
+  ) as unknown as BrandingOverrides;
 }
 
 /** Hôte comparable : sans port, sans casse, sans point final. */
