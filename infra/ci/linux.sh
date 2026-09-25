@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Un conteneur Linux par job de CI, piloté depuis le runner.
 #
-#   bash infra/ci/linux.sh ouvrir [--postgres]   crée le conteneur, y copie le dépôt
+#   bash infra/ci/linux.sh ouvrir [--postgres] [--codeql]
+#                                                crée le conteneur, y copie le dépôt
 #   bash infra/ci/linux.sh lancer '<commande>'   exécute dans /w (bash -euo pipefail)
 #   bash infra/ci/linux.sh outil <image> <args…> lance un outil sur le même /w
 #   bash infra/ci/linux.sh psql '<sql>'          exécute sur la base du job
@@ -47,8 +48,17 @@ TRANSMISES=(CI APP_SECRET_KEY E2E_EMAIL E2E_PASSWORD TURBO_TELEMETRY_DISABLED NE
   GAMEDASHBOARD_AUTONOME VERSION)
 
 ouvrir() {
-  local postgres=0
-  [ "${1:-}" = "--postgres" ] && postgres=1
+  local postgres=0 codeql=0 option
+  for option in "$@"; do
+    case $option in
+      --postgres) postgres=1 ;;
+      --codeql) codeql=1 ;;
+      *)
+        echo "Option inconnue : $option" >&2
+        return 2
+        ;;
+    esac
+  done
 
   # Un refus d'accès au moteur est un réglage de la machine, pas du dépôt :
   # le dire tel quel plutôt que laisser « permission denied » sans suite.
@@ -74,8 +84,6 @@ ouvrir() {
     # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
     -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
-    # Le CLI de CodeQL (près de 2 Go une fois extrait), pour codeql.yml.
-    -v gd-ci-codeql:/codeql
     # Cache de build de Next (« No build cache found » sinon, et tout est
     # recompilé) : `next build` vide son dossier de sortie sauf `cache`, et
     # assembler.sh l'exclut de l'archive. Un volume pour chaque sortie, la
@@ -87,6 +95,12 @@ ouvrir() {
   for nom in "${TRANSMISES[@]}"; do
     if [ -n "${!nom+x}" ]; then options+=(-e "$nom"); fi
   done
+
+  # L'archive de CodeQL, pour le seul job de codeql.yml : les autres jobs
+  # exécutent le code des dépendances (installation, tests), qui pourrait
+  # sinon y laisser un fichier que le job CodeQL reprendrait. codeql.sh
+  # revérifie de toute façon l'empreinte à chaque job.
+  if [ "$codeql" = 1 ]; then options+=(-v gd-ci-codeql:/codeql); fi
 
   if [ "$postgres" = 1 ]; then
     docker run -d --name "$BASE" "${ETIQUETTES[@]}" --network "$RESEAU" \

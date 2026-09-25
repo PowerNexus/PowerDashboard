@@ -20,8 +20,10 @@ on:
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
+# Par événement aussi : l'analyse de la semaine et un push sur main ne
+# s'annulent pas l'une l'autre.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +40,8 @@ jobs:
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
-    # Le premier passage télécharge le CLI (700 Mo) ; ensuite, deux minutes.
+    # Le premier passage télécharge le CLI (700 Mo) ; ensuite, deux minutes
+    # et demie (l'archive est revérifiée et extraite à chaque job).
     timeout-minutes: 30
     permissions:
       contents: read
@@ -70,10 +73,15 @@ jobs:
       - name: Fins de ligne du dépôt
         run: git config --global core.autocrlf false
 
+      # Sans jeton dans .git/config : le dépôt est copié tel quel dans le
+      # conteneur, où tournent des scripts que la PR peut changer, et le jeton
+      # de ce job peut écrire dans Code scanning. upload-sarif prend le sien.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Conteneur Linux
-        run: bash infra/ci/linux.sh ouvrir
+        run: bash infra/ci/linux.sh ouvrir --codeql
 
       - name: Analyser
         run: bash infra/ci/linux.sh lancer 'bash infra/ci/codeql.sh codeql-resultats'

@@ -42,9 +42,9 @@ conteneur Linux** et y exécute toutes ses commandes, par
 Le store pnpm, le Chromium de Playwright et le cache de build de Next restent
 d'une exécution à l'autre dans les volumes Docker `gd-ci-pnpm-store`,
 `gd-ci-playwright`, `gd-ci-next-cache`, `gd-ci-next-autonome-cache`
-(construction de l'archive autonome) et `gd-ci-codeql` (le CLI de CodeQL,
-près de 2 Go, retéléchargé seulement quand `CODEQL_VERSION` change dans
-`infra/ci/outils.env`). Les vider (`docker volume rm`) ne coûte
+(construction de l'archive autonome) et `gd-ci-codeql` (l'archive de CodeQL,
+700 Mo, retéléchargée seulement quand `CODEQL_VERSION` change dans
+`infra/ci/outils.env` ; monté dans le seul job de `codeql.yml`). Les vider (`docker volume rm`) ne coûte
 qu'un job plus lent. Le scan ZAP
 (`infra/ci/zap-baseline.sh`) partage le réseau du conteneur du job.
 
@@ -189,6 +189,13 @@ push sur `main` et chaque lundi. Le CLI tourne dans le conteneur du job
 (`infra/ci/codeql.sh`, archive épinglée par `CODEQL_VERSION` et
 `CODEQL_SHA256` dans `infra/ci/outils.env`) ; le runner ne fait que
 téléverser les fichiers SARIF, lisibles dans **Security → Code scanning**.
+
+Le job écrit dans Code scanning : rien de ce qu'il exécute ne doit pouvoir
+venir d'un autre job. Le cache `gd-ci-codeql` n'est monté que dans son
+conteneur (`linux.sh ouvrir --codeql`), il ne garde que l'archive, dont
+l'empreinte est revérifiée à chaque job avant extraction dans le conteneur,
+et le checkout ne laisse pas le jeton dans `.git/config`
+(`persist-credentials: false`), puisque le dépôt est copié dans le conteneur.
 
 La « configuration par défaut » de GitHub (**Settings → Code security →
 CodeQL analysis → Default setup**) ne sert pas ici : elle réclame un runner

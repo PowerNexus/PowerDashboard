@@ -18,28 +18,38 @@ set -euo pipefail
 sortie=${1:?"usage : codeql.sh <dossier de sortie>"}
 source infra/ci/outils.env
 
-# L'archive (près de 700 Mo) n'est téléchargée qu'une fois par version, dans
-# le volume de cache `gd-ci-codeql` monté sur /codeql (infra/ci/linux.sh).
-# Extraite à côté puis renommée : un job coupé en pleine extraction ne laisse
-# jamais un CLI incomplet que le suivant prendrait pour bon.
-racine=/codeql/$CODEQL_VERSION
-if [ ! -x "$racine/codeql/codeql" ]; then
-  rm -rf /codeql/.telechargement
-  mkdir -p /codeql/.telechargement
-  curl -fsSL --retry 3 -o /codeql/.telechargement/bundle.tar.gz \
+# Le cache `gd-ci-codeql` (monté sur /codeql par `linux.sh ouvrir --codeql`)
+# ne garde que l'**archive**, jamais le CLI extrait : un fichier du cache
+# n'est cru qu'après vérification de son empreinte, **à chaque job**. Un CLI
+# gardé tout prêt ne serait vérifié qu'au téléchargement, et ce qu'un job
+# précédent y aurait changé s'exécuterait ici sans que rien ne le voie.
+archive=/codeql/codeql-bundle-$CODEQL_VERSION-linux64.tar.gz
+verifier() { echo "$CODEQL_SHA256  $1" | sha256sum -c --quiet - >/dev/null 2>&1; }
+if ! verifier "$archive"; then
+  # Nom propre au conteneur, puis renommage : deux jobs simultanés ne
+  # s'écrivent pas dessus, et un téléchargement coupé ne passe jamais pour
+  # l'archive.
+  partiel=$(mktemp /codeql/.telechargement-XXXXXX)
+  curl -fsSL --retry 3 -o "$partiel" \
     "https://github.com/github/codeql-action/releases/download/codeql-bundle-v$CODEQL_VERSION/codeql-bundle-linux64.tar.gz"
   # Épinglée comme les images : une archive remplacée sous le même nom ne
   # s'exécute pas.
-  echo "$CODEQL_SHA256  /codeql/.telechargement/bundle.tar.gz" | sha256sum -c --quiet -
-  tar -xzf /codeql/.telechargement/bundle.tar.gz -C /codeql/.telechargement
-  rm -rf "$racine"
-  mkdir -p "$racine"
-  mv /codeql/.telechargement/codeql "$racine/codeql"
-  rm -rf /codeql/.telechargement
-  # Les versions précédentes ne servent plus : elles pèseraient 2 Go chacune.
-  find /codeql -mindepth 1 -maxdepth 1 ! -name "$CODEQL_VERSION" -exec rm -rf {} +
+  if ! verifier "$partiel"; then
+    rm -f "$partiel"
+    echo "::error::L'archive de CodeQL $CODEQL_VERSION ne correspond pas à CODEQL_SHA256 (infra/ci/outils.env)." >&2
+    exit 1
+  fi
+  mv -f "$partiel" "$archive"
+  # Les autres versions ne servent plus, ni ce qu'un job coupé a laissé il y
+  # a plus d'une heure (le téléchargement en cours d'un autre job reste).
+  find /codeql -mindepth 1 -maxdepth 1 ! -name "${archive##*/}" ! -name '.telechargement-*' -exec rm -rf {} +
+  find /codeql -mindepth 1 -maxdepth 1 -name '.telechargement-*' -mmin +60 -exec rm -rf {} +
 fi
-codeql=$racine/codeql/codeql
+# Extraite dans le conteneur du job, qui disparaît avec lui, depuis une
+# archive tout juste vérifiée.
+outils=$(mktemp -d)
+tar -xzf "$archive" -C "$outils"
+codeql=$outils/codeql/codeql
 "$codeql" version --format=terse
 
 # TypeScript et JavaScript sans compilation (`--build-mode=none`), comme la
@@ -61,4 +71,4 @@ for langage in "${langages[@]}"; do
     --format=sarif-latest --output="$sortie/$court.sarif" \
     --sarif-category="/language:$court"
 done
-rm -rf "$base"
+rm -rf "$base" "$outils"

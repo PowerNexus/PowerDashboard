@@ -672,9 +672,37 @@ describe("actions GitHub des workflows", () => {
     expect(script.indexOf("tar -xzf")).toBeGreaterThan(script.indexOf("sha256sum -c"));
     expect(script).toContain("--build-mode=none");
     expect(script).toContain("langages=(javascript-typescript actions)");
-    // Le CLI (2 Go extrait) reste d'un job à l'autre.
+  });
+
+  /*
+   * Régression (revue de #50) : le cache de CodeQL était monté en écriture
+   * dans le conteneur de tous les jobs, y compris ceux qui exécutent le code
+   * des dépendances, et le CLI extrait n'était vérifié qu'au téléchargement ;
+   * le checkout laissait le jeton du job (security-events: write) dans
+   * .git/config, copié dans le conteneur avec le dépôt.
+   */
+  it("ne laissent au job CodeQL rien qu'un autre job aurait pu changer", () => {
+    const codeql = workflows[3] as string;
     const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
-    expect(linux).toContain("-v gd-ci-codeql:/codeql");
+    // Le volume n'est monté que sur demande, et seul codeql.yml la fait.
+    expect(linux).toContain('if [ "$codeql" = 1 ]; then options+=(-v gd-ci-codeql:/codeql); fi');
+    expect(linux.match(/gd-ci-codeql/g)?.length).toBe(1);
+    expect(codeql).toContain("run: bash infra/ci/linux.sh ouvrir --codeql\n");
+    for (const texte of workflows.slice(0, 3)) {
+      expect(texte).not.toContain("--codeql");
+    }
+    // Aucun CLI gardé tout prêt : l'archive du cache est revérifiée à chaque
+    // job, puis extraite hors du cache, dans le conteneur.
+    const script = readFileSync(join(RACINE, "infra", "ci", "codeql.sh"), "utf8");
+    const code = script.replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^if ! verifier "\$archive"; then$/m);
+    expect(code).toMatch(/^outils=\$\(mktemp -d\)\ntar -xzf "\$archive" -C "\$outils"$/m);
+    expect(code).toContain("codeql=$outils/codeql/codeql");
+    expect(code).not.toMatch(/-x "\$racine|mv [^\n]*\/codeql\/[0-9]/);
+    // Pas de jeton dans le dépôt copié.
+    expect(codeql).toMatch(
+      /- uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}persist-credentials: false\n/,
+    );
   });
 
   // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.
