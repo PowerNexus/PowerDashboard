@@ -19,7 +19,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 
@@ -41,6 +41,31 @@ import { PlatformSettingsService } from "../admin/platform-settings.service";
 
 /** Durée de vie du cache de résolution par domaine. */
 const CACHE_TTL_MS = 60_000;
+
+/**
+ * Domaines déclarés non vérifiés rendus à l'agent de certificats, au plus.
+ * Chacun coûte un bloc nginx : la borne tient la configuration de la machine
+ * web à une taille raisonnable, quoi que déclarent les revendeurs.
+ */
+export const MAX_DOMAINES_EN_ATTENTE = 200;
+
+/** Sans déclaration ni vérification depuis ce délai, un domaine est abandonné. */
+export const ABANDON_DOMAINE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Une ligne de la file de l'agent de certificats. */
+export interface CertificateQueueEntry {
+  domain: string;
+  /**
+   * Faux pour un domaine déclaré mais pas encore vérifié : l'agent ne lui pose
+   * que la page d'attente, jamais de demande de certificat.
+   */
+  verified: boolean;
+  pending: boolean;
+  issuedAt: string | null;
+  expiresAt: string | null;
+  attemptedAt: string | null;
+  failure: string | null;
+}
 
 export interface DomainState {
   domain: string | null;
@@ -317,7 +342,9 @@ export class BrandingService {
   }
 
   /**
-   * Les domaines vérifiés, avec l'état de leur certificat.
+   * Les domaines vérifiés, avec l'état de leur certificat, puis les domaines
+   * déclarés pas encore vérifiés (`verified: false`, jamais `pending`) : voir
+   * `awaitingVerification`.
    *
    * `pending` dit s'il y a quelque chose à faire, et le dit **ici** plutôt que
    * dans l'agent : c'est le panel qui connaît la règle, et un agent qui la
@@ -339,16 +366,7 @@ export class BrandingService {
    * Encrypt coupe après cinq échecs d'autorisation par heure — la retenue
    * n'existait qu'au moment précis où elle devait servir.
    */
-  async certificateQueue(): Promise<
-    {
-      domain: string;
-      pending: boolean;
-      issuedAt: string | null;
-      expiresAt: string | null;
-      attemptedAt: string | null;
-      failure: string | null;
-    }[]
-  > {
+  async certificateQueue(): Promise<CertificateQueueEntry[]> {
     const rows = await this.db
       .select({
         domain: resellerBrandings.domain,
@@ -363,7 +381,7 @@ export class BrandingService {
           isNotNull(resellerBrandings.domain),
           // Un domaine non vérifié ne doit surtout pas être tenté : on
           // demanderait un certificat pour un nom dont rien ne prouve qu'il
-          // est à ce revendeur.
+          // est à ce revendeur. Il vient à part, plus bas, sans `pending`.
           isNotNull(resellerBrandings.domainVerifiedAt),
         ),
       );
@@ -372,7 +390,7 @@ export class BrandingService {
     const TRENTE_JOURS = 30 * 24 * 60 * 60 * 1000;
     const UNE_HEURE = 60 * 60 * 1000;
 
-    return rows.flatMap((row) => {
+    const verifies = rows.flatMap((row): CertificateQueueEntry[] => {
       if (!row.domain) return [];
 
       const expire = row.expiresAt === null ? null : new Date(row.expiresAt).getTime();
@@ -386,8 +404,74 @@ export class BrandingService {
 
       const pending = besoin && !enRepos;
 
-      return [{ ...row, domain: row.domain, pending }];
+      return [{ ...row, domain: row.domain, verified: true, pending }];
     });
+
+    return [...verifies, ...(await this.awaitingVerification(maintenant))];
+  }
+
+  /**
+   * Les domaines déclarés **pas encore vérifiés**, pour la page d'attente.
+   *
+   * Sans bloc à leur nom, leurs requêtes tombent sur le `default_server` de
+   * nginx — la page d'erreur nue, ou pire, un autre site de la machine. L'agent
+   * leur pose donc un bloc de port 80 seul, sans certificat, qui ne sert que la
+   * page d'attente neutre et le défi ACME.
+   *
+   * Rien ne prouve encore que ces noms sont au revendeur : ce qu'ils ouvrent est
+   * borné ici, et l'agent refuse en plus tout nom qu'un autre site de la
+   * machine sert déjà.
+   *
+   * - `pending` toujours faux : aucun certificat n'est demandé pour eux. Un
+   *   agent plus ancien, qui ne connaît pas `verified`, les ignore donc.
+   * - Seuls les noms qui passent `isValidDomain`, en minuscules, et jamais le
+   *   domaine de la plateforme ni l'un de ses sous-domaines.
+   * - Abandonné — ni déclaré ni retenté depuis trente jours — il sort de la
+   *   liste, et l'agent retire son bloc comme celui d'un domaine supprimé.
+   * - Au plus `MAX_DOMAINES_EN_ATTENTE`, les plus récemment actifs d'abord.
+   */
+  private async awaitingVerification(maintenant: number): Promise<CertificateQueueEntry[]> {
+    const rows = await this.db
+      .select({
+        domain: resellerBrandings.domain,
+        checkedAt: resellerBrandings.domainCheckedAt,
+        updatedAt: resellerBrandings.updatedAt,
+      })
+      .from(resellerBrandings)
+      .where(
+        and(
+          isNotNull(resellerBrandings.domain),
+          // Un domaine déclaré porte toujours son jeton de preuve.
+          isNotNull(resellerBrandings.domainToken),
+          isNull(resellerBrandings.domainVerifiedAt),
+        ),
+      );
+
+    const plateforme = ((await this.settings.text("brand.domain")) || "").trim().toLowerCase();
+
+    return rows
+      .flatMap((row) => {
+        const domain = row.domain?.trim().toLowerCase() ?? "";
+        if (!isValidDomain(domain) || domain !== row.domain) return [];
+        if (plateforme && (domain === plateforme || domain.endsWith(`.${plateforme}`))) return [];
+
+        // `setDomain` efface `domainCheckedAt` : la déclaration compte alors.
+        const actif = new Date(row.checkedAt ?? row.updatedAt).getTime();
+        if (!Number.isFinite(actif) || maintenant - actif > ABANDON_DOMAINE_MS) return [];
+
+        return [{ domain, actif }];
+      })
+      .sort((a, b) => b.actif - a.actif)
+      .slice(0, MAX_DOMAINES_EN_ATTENTE)
+      .map(({ domain }) => ({
+        domain,
+        verified: false,
+        pending: false,
+        issuedAt: null,
+        expiresAt: null,
+        attemptedAt: null,
+        failure: null,
+      }));
   }
 
   /**

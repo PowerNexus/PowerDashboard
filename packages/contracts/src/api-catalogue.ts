@@ -463,7 +463,9 @@ export const APPLICATION_ROUTES: ApiRoute[] = [
     summary:
       "Domaines vérifiés et état de leur certificat TLS. « pending » dit s'il y a " +
       "quelque chose à faire : aucun certificat, expiration à moins de trente jours, " +
-      "ou échec vieux d'une heure.",
+      "ou échec vieux d'une heure. Suivent les domaines déclarés non vérifiés " +
+      "(« verified » à faux, jamais « pending », actifs depuis moins de trente jours, " +
+      "deux cents au plus), à qui l'agent ne pose qu'une page d'attente.",
     scope: "domains.certificates",
     group: "Certificats",
   },

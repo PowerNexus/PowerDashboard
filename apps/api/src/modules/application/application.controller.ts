@@ -433,7 +433,9 @@ export class ApplicationController {
    */
 
   /**
-   * Les domaines vérifiés et l'état de leur certificat.
+   * Les domaines vérifiés et l'état de leur certificat, puis les domaines
+   * déclarés non vérifiés (`verified: false`, jamais `pending`), à qui l'agent
+   * ne pose qu'une page d'attente sur le port 80.
    *
    * `pending` est calculé **ici** et non dans l'agent : la règle de reprise —
    * pas de certificat, expiration proche, ou échec vieux d'une heure —
