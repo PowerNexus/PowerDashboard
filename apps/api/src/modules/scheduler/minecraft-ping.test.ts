@@ -3,6 +3,7 @@ import {
   buildStatusRequest,
   decodeVarInt,
   encodeVarInt,
+  PLAYER_SAMPLE_MAX,
   parseStatusJson,
   readStatusResponse,
 } from "./minecraft-ping";
@@ -80,7 +81,12 @@ describe("lecture de la réponse", () => {
         JSON.stringify({ players: { online: 7, max: 20 }, version: { name: "Paper 1.21.11" } }),
       ),
     );
-    expect(status).toEqual({ playersOnline: 7, playersMax: 20, version: "Paper 1.21.11" });
+    expect(status).toEqual({
+      playersOnline: 7,
+      playersMax: 20,
+      version: "Paper 1.21.11",
+      sample: null,
+    });
   });
 
   it("attend la suite plutôt que de conclure sur une trame incomplète", () => {
@@ -112,6 +118,7 @@ describe("JSON d'état", () => {
       playersOnline: null,
       playersMax: null,
       version: null,
+      sample: null,
     });
     expect(
       parseStatusJson(JSON.stringify({ players: { online: 0, max: 20 } }))?.playersOnline,
@@ -124,6 +131,36 @@ describe("JSON d'état", () => {
     const status = parseStatusJson(JSON.stringify({ players: { online: "beaucoup", max: null } }));
     expect(status?.playersOnline).toBe(null);
     expect(status?.playersMax).toBe(null);
+  });
+
+  it("lit l'échantillon de joueurs sans les lignes décoratives ni les noms dangereux", () => {
+    const status = parseStatusJson(
+      JSON.stringify({
+        players: {
+          online: 4,
+          max: 20,
+          sample: [
+            { name: "Steve", id: "069a79f4-44e9-4726-a5be-fca90e38aaf5" },
+            { name: "§6Bienvenue", id: "00000000-0000-0000-0000-000000000000" },
+            { name: "Alex", id: "00000000-0000-0000-0000-000000000000" },
+            { name: "x\nop x", id: "1" },
+            { name: "Steve", id: "069a79f4-44e9-4726-a5be-fca90e38aaf5" },
+            { name: 12 },
+            null,
+            { name: ".Bedrock", id: "2" },
+          ],
+        },
+      }),
+    );
+    expect(status?.sample).toEqual(["Steve", ".Bedrock"]);
+  });
+
+  it("borne l'échantillon, et distingue « absent » de « vide »", () => {
+    const sample = Array.from({ length: 500 }, (_, i) => ({ name: `p${i}`, id: String(i) }));
+    const plein = parseStatusJson(JSON.stringify({ players: { online: 500, sample } }));
+    expect(plein?.sample).toHaveLength(PLAYER_SAMPLE_MAX);
+    expect(parseStatusJson(JSON.stringify({ players: { sample: [] } }))?.sample).toEqual([]);
+    expect(parseStatusJson(JSON.stringify({ players: { online: 0 } }))?.sample).toBe(null);
   });
 
   it("rend null sur un JSON invalide", () => {

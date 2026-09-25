@@ -51,6 +51,7 @@ describe("sonde de jeu", () => {
       playersOnline: 3,
       playersMax: 20,
       version: "Paper 1.21.11",
+      sample: null,
     });
   });
 
@@ -70,6 +71,7 @@ describe("sonde de jeu", () => {
       playersOnline: 0,
       playersMax: 100,
       version: "1.20.4",
+      sample: null,
     });
   });
 

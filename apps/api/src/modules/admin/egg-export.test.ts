@@ -20,6 +20,8 @@ describe("export de l'egg Minecraft Java livré", () => {
 
     expect(lu.variables.length).toBeGreaterThan(0);
     expect(lu.installScript.length).toBeGreaterThan(1000);
+    // Les commandes de la vue joueurs survivent à l'aller-retour.
+    expect(lu.playerCommands.kick).toBe("kick {player} {reason}");
     expect(parsePterodactylEgg(exportPterodactylEgg(lu))).toEqual(lu);
   });
 });

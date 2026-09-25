@@ -20,6 +20,7 @@ import type { SchedulesService } from "./schedules.service";
 import type { ServerAccessService } from "./server-access.service";
 import { ServerFeaturesController } from "./server-features.controller";
 import type { ServerInvitesService } from "./server-invites.service";
+import type { ServerPlayersService } from "./server-players.service";
 import { ServerRuntimeController } from "./server-runtime.controller";
 import type { ServerSettingsService } from "./server-settings.service";
 import type { ServerWebhooksService } from "./server-webhooks.service";
@@ -55,6 +56,7 @@ function execution(echec: Error) {
     {} as WingsTokenService,
     activity as unknown as ActivityService,
     {} as FileUploadService,
+    {} as ServerPlayersService,
   );
 }
 

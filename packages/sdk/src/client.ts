@@ -112,6 +112,26 @@ export class GameDashboardClient {
     return this.call("GET", `/api/v1/client/servers/${encodeURIComponent(serverId)}/commands`);
   }
 
+  /** Joueurs connectés, lus dans la dernière sonde de jeu, et actions proposées. */
+  players(serverId: string): Promise<unknown> {
+    return this.call("GET", `/api/v1/client/servers/${encodeURIComponent(serverId)}/players`);
+  }
+
+  /**
+   * Une action de modération (`kick`, `ban`, `pardon`, `whitelist_add`…).
+   * La commande vient de l'egg : on ne choisit que l'action et le joueur.
+   */
+  playerAction(
+    serverId: string,
+    input: { action: string; player: string; reason?: string },
+  ): Promise<unknown> {
+    return this.call(
+      "POST",
+      `/api/v1/client/servers/${encodeURIComponent(serverId)}/players`,
+      input,
+    );
+  }
+
   /* --- Espace applicatif, pour un système tiers ---------------------------- */
 
   createServer(input: Record<string, unknown>): Promise<unknown> {

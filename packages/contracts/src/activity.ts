@@ -41,6 +41,8 @@ interface ActivityDescriptor {
 export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
   "server.power": { category: "power", label: "Alimentation" },
   "server.command": { category: "console", label: "Commande envoyée" },
+  // Vue joueurs : l'action et le joueur sont dans les propriétés de la ligne.
+  "server.player": { category: "console", label: "Joueur modéré" },
   "server.rename": { category: "settings", label: "Serveur renommé" },
   "server.variables": { category: "settings", label: "Variables de démarrage modifiées" },
   "server.behaviour": { category: "settings", label: "Comportement modifié" },

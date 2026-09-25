@@ -108,5 +108,14 @@
       "user_editable": false,
       "rules": "required|string|regex:/^[\\w\\d.-]+\\.jar$/"
     }
-  ]
+  ],
+  "player_commands": {
+    "kick": "kick {player} {reason}",
+    "ban": "ban {player} {reason}",
+    "pardon": "pardon {player}",
+    "whitelist_add": "whitelist add {player}",
+    "whitelist_remove": "whitelist remove {player}",
+    "op": "op {player}",
+    "deop": "deop {player}"
+  }
 }

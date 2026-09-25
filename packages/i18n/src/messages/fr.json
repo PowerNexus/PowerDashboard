@@ -1286,7 +1286,8 @@
     "schedules": "Tâches planifiées",
     "activity": "Journal d'activité",
     "incidents": "Incidents",
-    "engine": "Moteur"
+    "engine": "Moteur",
+    "players": "Joueurs"
   },
   "network": {
     "title": "Réseau",
@@ -2471,5 +2472,36 @@
     "reactivateBody": "Motif de la suspension : {reason}. Le titulaire pourra de nouveau se connecter ; ses clés d'API et son SFTP refonctionneront.",
     "reactivateConfirm": "Réactiver",
     "reactivated": "Compte réactivé."
+  },
+  "players": {
+    "title": "Joueurs",
+    "subtitle": "Qui est connecté, et les commandes de modération du jeu.",
+    "act": "Agir sur un joueur",
+    "actHint": "Le panel tape la commande déclarée par le jeu dans la console. Le joueur peut être hors ligne.",
+    "counter": "{online} / {max} joueurs",
+    "unknownCount": "Nombre de joueurs inconnu",
+    "observed": "Relevé",
+    "noProbe": "Aucun relevé récent",
+    "noProbeHint": "Le panel interroge le serveur chaque minute quand il tourne. Démarrez-le, ou attendez le prochain relevé.",
+    "empty": "Personne n'est connecté",
+    "emptyHint": "Vous pouvez tout de même bannir ou ajouter à la liste blanche un joueur hors ligne.",
+    "partial": "Le jeu n'annonce qu'une partie des joueurs connectés : la liste ci-dessous est un échantillon.",
+    "noCommands": "Aucune commande de modération pour ce jeu",
+    "noCommandsHint": "L'egg de ce serveur ne déclare pas de commandes joueurs (clé player_commands). Passez par la console.",
+    "playerLabel": "Joueur",
+    "actionLabel": "Action",
+    "reasonLabel": "Motif",
+    "reasonHint": "Facultatif. Affiché au joueur par le jeu.",
+    "send": "Envoyer",
+    "sent": "{action} : commande envoyée pour {player}.",
+    "action": {
+      "kick": "Expulser",
+      "ban": "Bannir",
+      "pardon": "Lever le bannissement",
+      "whitelist_add": "Ajouter à la liste blanche",
+      "whitelist_remove": "Retirer de la liste blanche",
+      "op": "Nommer opérateur",
+      "deop": "Retirer opérateur"
+    }
   }
 }

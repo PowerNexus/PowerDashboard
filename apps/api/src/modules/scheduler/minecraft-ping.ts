@@ -12,7 +12,9 @@
  * n'exige **aucune** configuration côté serveur de jeu — contrairement à la
  * requête GameSpy, qu'il faut activer dans `server.properties` et que
  * personne n'active.
- *
+ */
+
+import { isPlayerName } from "@gamedashboard/contracts";
 
 /*
  * Il vit dans l'API et non dans `@gamedashboard/contracts` : `Buffer` est propre à
@@ -115,6 +117,37 @@ export interface MinecraftStatus {
   playersMax: number | null;
   /** Version annoncée, telle quelle — « Paper 1.21.11 », « 1.20.4 »… */
   version: string | null;
+  /**
+   * Noms tirés de `players.sample`. C'est un **échantillon** : le serveur en
+   * choisit une douzaine au plus, et peut n'en donner aucun. `null` quand le
+   * champ manque, pour ne pas le confondre avec « personne ».
+   */
+  sample: string[] | null;
+}
+
+/** Plafond des noms retenus : au-delà, un serveur modifié gonflerait la base à chaque sonde. */
+export const PLAYER_SAMPLE_MAX = 100;
+
+/** Identifiant nul que les serveurs donnent aux lignes décoratives de l'échantillon. */
+const DECORATIVE_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Lit l'échantillon de joueurs.
+ *
+ * Beaucoup de serveurs y glissent des lignes de texte (« §6Bienvenue ! ») avec
+ * un identifiant nul : ce ne sont pas des joueurs. Seuls restent les noms qu'on
+ * pourrait réellement viser dans une commande.
+ */
+function readSample(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const names: string[] = [];
+  for (const entry of raw) {
+    const player = (entry ?? {}) as { name?: unknown; id?: unknown };
+    if (player.id === DECORATIVE_ID || !isPlayerName(player.name)) continue;
+    if (!names.includes(player.name)) names.push(player.name);
+    if (names.length >= PLAYER_SAMPLE_MAX) break;
+  }
+  return names;
 }
 
 /**
@@ -162,12 +195,13 @@ export function parseStatusJson(raw: string): MinecraftStatus | null {
   }
 
   const body = parsed as { players?: unknown; version?: unknown };
-  const players = (body.players ?? {}) as { online?: unknown; max?: unknown };
+  const players = (body.players ?? {}) as { online?: unknown; max?: unknown; sample?: unknown };
   const version = (body.version ?? {}) as { name?: unknown };
 
   return {
     playersOnline: typeof players.online === "number" ? players.online : null,
     playersMax: typeof players.max === "number" ? players.max : null,
     version: typeof version.name === "string" ? version.name : null,
+    sample: readSample(players.sample),
   };
 }

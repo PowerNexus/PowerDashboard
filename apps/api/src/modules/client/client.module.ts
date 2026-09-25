@@ -31,6 +31,7 @@ import { ServerFeaturesController } from "./server-features.controller";
 import { ServerInvitesService } from "./server-invites.service";
 import { ServerMetricsController } from "./server-metrics.controller";
 import { ServerMetricsService } from "./server-metrics.service";
+import { ServerPlayersService } from "./server-players.service";
 import { ServerProvisioningService } from "./server-provisioning.service";
 import { ServerResizeService } from "./server-resize.service";
 import { ServerRuntimeController } from "./server-runtime.controller";
@@ -75,6 +76,8 @@ import { SubusersService } from "./subusers.service";
     ClientNodesService,
     ServerAccessService,
     ServerMetricsService,
+    // La vue joueurs : dernière sonde et commandes déclarées par l'egg.
+    ServerPlayersService,
     // L'assemblage des envois reprenables. Il vit côté panel parce que Wings,
     // non modifié, ne sait pas compléter un fichier déjà commencé.
     FileUploadService,

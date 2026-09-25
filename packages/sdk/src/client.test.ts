@@ -159,6 +159,8 @@ describe("GameDashboardClient", () => {
     await c.power(id, "start");
     await c.websocketGrant(id);
     await c.command(id, "say bonjour");
+    await c.players(id);
+    await c.playerAction(id, { action: "kick", player: "Steve" });
     await c.createServer({});
     await c.suspendServer(id, "impayé");
     await c.unsuspendServer(id);

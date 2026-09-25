@@ -6,7 +6,9 @@ import {
   eggRefusalMessage,
   exportPterodactylEgg,
   type ParsedEgg,
+  type PlayerCommands,
   type PterodactylEggExport,
+  readPlayerCommands,
 } from "@gamedashboard/contracts";
 import {
   type Database,
@@ -60,6 +62,8 @@ export interface EggDetail {
   fileDenylist: string[];
   /** Commandes du jeu proposées à la console (`say <message>`). */
   consoleCommands: string[];
+  /** Commandes de la vue joueurs, reprises telles quelles à l'export. */
+  playerCommands: PlayerCommands;
   enabled: boolean;
   locallyModified: boolean;
   sourceRef: string | null;
@@ -141,6 +145,7 @@ export class EggEditorService {
       features: egg.features,
       fileDenylist: egg.fileDenylist,
       consoleCommands: egg.consoleCommands,
+      playerCommands: readPlayerCommands(egg.playerCommands),
       enabled: egg.enabled,
       locallyModified: egg.locallyModified,
       sourceRef: egg.sourceRef,
@@ -174,6 +179,7 @@ export class EggEditorService {
       features: detail.features,
       fileDenylist: detail.fileDenylist,
       consoleCommands: detail.consoleCommands,
+      playerCommands: detail.playerCommands,
       variables: detail.variables.map((variable) => ({
         name: variable.name,
         envVariable: variable.envVariable,

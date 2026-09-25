@@ -4,6 +4,7 @@ import {
   MAX_CONSOLE_COMMAND_LENGTH,
   PATH_REFUSAL_MESSAGES,
   PowerSignal,
+  PRIVILEGED_PLAYER_ACTIONS,
   RenameRequest,
   refusePath,
   WINGS_RENAME_COLLISION,
@@ -38,6 +39,7 @@ import {
 import { WingsTokenService } from "../wings/wings-token.service";
 import { FileUploadService } from "./file-upload.service";
 import { ServerAccessService } from "./server-access.service";
+import { ServerPlayersService } from "./server-players.service";
 
 type ClientRequest = AuthenticatedRequest & { ip?: string };
 
@@ -89,6 +91,7 @@ export class ServerRuntimeController {
     // L'assembleur des envois reprenables : il garde les morceaux le temps de
     // les recoller, parce que le daemon ne sait pas écrire à un décalage.
     @Inject(FileUploadService) private readonly uploads: FileUploadService,
+    @Inject(ServerPlayersService) private readonly players: ServerPlayersService,
   ) {}
 
   /**
@@ -173,6 +176,54 @@ export class ServerRuntimeController {
     // arguments que passent les mots de passe (`consoleCommandTrace`).
     await this.log(request, id, "server.command", { ...consoleCommandTrace(command) });
     return { data: { sent: true } };
+  }
+
+  /**
+   * Joueurs connectés, lus dans la dernière sonde de jeu.
+   *
+   * Rien n'est demandé au daemon ni au jeu : la sonde tourne déjà chaque
+   * minute, et ouvrir la page ne doit pas ajouter de trafic vers le serveur.
+   */
+  @Get("players")
+  async listPlayers(@Req() request: ClientRequest, @Param("id") id: string) {
+    await this.access.require(principalOf(request), id, "players.read");
+    return { data: await this.players.view(id) };
+  }
+
+  /**
+   * Expulser, bannir, gracier, gérer la liste blanche et les opérateurs.
+   *
+   * La commande vient de l'egg, jamais du client : il choisit une action et un
+   * nom, et le panel écrit la ligne (`renderPlayerCommand`). Nommer un
+   * opérateur exige en plus `console.send`, puisqu'un opérateur peut taper
+   * n'importe quelle commande.
+   *
+   * Le journal garde l'action et le nom du joueur, contrairement aux commandes
+   * libres dont seul le premier mot est consigné : ici il n'y a pas d'argument
+   * libre où un mot de passe pourrait passer, et « qui a banni qui » est
+   * précisément ce qu'on vient y chercher.
+   */
+  @Post("players")
+  async playerAction(
+    @Req() request: ClientRequest,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    const input = (body ?? {}) as { action?: unknown; player?: unknown; reason?: unknown };
+    await this.access.require(principalOf(request), id, "players.manage");
+    if (PRIVILEGED_PLAYER_ACTIONS.includes(input.action as never)) {
+      await this.access.require(principalOf(request), id, "console.send");
+    }
+    const { action, player, command } = await this.players.command(
+      id,
+      input.action,
+      input.player,
+      input.reason,
+    );
+    await this.access.requireOperable(id);
+    await this.relay(() => this.wings.sendCommand(id, command));
+    await this.log(request, id, "server.player", { action, player });
+    return { data: { action, player } };
   }
 
   /**
