@@ -29,7 +29,7 @@ const directives = vhost
 
 /** Les variables que nginx fournit lui-même, parmi celles que ce vhost lit. */
 const NATIVES = new Set([
-  "host",
+  "server_name",
   "request_uri",
   "remote_addr",
   "binary_remote_addr",
@@ -46,6 +46,21 @@ describe("infra/prod/panel.conf", () => {
     const lues = new Set([...directives.matchAll(/\$(\w+)/g)].map((m) => m[1] ?? ""));
     const inconnues = [...lues].filter((v) => !NATIVES.has(v) && !declarees.has(v));
     expect(inconnues).toEqual([]);
+  });
+
+  // Régression (Semgrep) : `$host` est l'en-tête Host du client, et relayer
+  // tout `Upgrade` ouvre la contrebande h2c. Même règle pour la production
+  // locale.
+  it("ne relaie ni le Host du client ni un Upgrade autre que websocket", () => {
+    const local = readFileSync(
+      join(RACINE, "infra", "local", "gamedashboard.local.conf"),
+      "utf8",
+    ).replace(/#.*$/gm, "");
+    for (const texte of [directives, local]) {
+      expect(texte).not.toMatch(/\$(http_)?host\b/);
+      expect(texte).not.toMatch(/proxy_set_header\s+Upgrade\s+\$http_upgrade/);
+      expect(texte).toMatch(/~\*\^websocket\$\s+websocket;/);
+    }
   });
 
   it("ne déclare que des variables à son préfixe, pour ne heurter aucun autre vhost", () => {
@@ -608,6 +623,39 @@ describe("actions GitHub des workflows", () => {
     expect(texte).not.toContain("trivy-action@");
     expect(texte).not.toContain("semgrep-action@");
   });
+
+  // Régression : sans store-dir, pnpm posait son store dans /w/.pnpm-store,
+  // perdu à chaque job (tout retéléchargé) et lu par Trivy et Semgrep.
+  // Régression (Semgrep) : un nom de branche interpolé dans un script `run:`
+  // s'y exécute comme du code.
+  it("n'interpolent aucune donnée de branche dans un script", () => {
+    const scripts = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^( +)run: \|\n((?:\1 {2}.*\n|\n)*)/gm)].map((m) => m[2] ?? ""),
+    );
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const script of scripts) {
+      expect(script).not.toMatch(/\$\{\{\s*github\.(ref|head_ref|ref_name|event)\b/);
+    }
+  });
+
+  // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.
+  it("marquent leurs conteneurs et retirent ceux qu'un job tué a laissés", () => {
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toMatch(/^ {2}balayer$/m);
+    expect(linux).toContain('--name "$NOM" --label gd-ci');
+    expect(linux).toContain('--name "$BASE" --label gd-ci');
+    expect(linux).toContain("docker ps -aq --filter label=gd-ci");
+    // Les caches ne sont jamais balayés.
+    expect(linux).not.toMatch(/volume prune/);
+  });
+
+  it("gardent le store pnpm sur le volume de cache, hors du dépôt", () => {
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    expect(linux).toContain("-v gd-ci-pnpm-store:/pnpm-store");
+    expect(linux).toContain("-e pnpm_config_store_dir=/pnpm-store");
+    // `pnpm config set --global` échoue sans dossier bin global dans le PATH.
+    expect(linux).not.toContain("pnpm config set --global");
+  });
 });
 
 /**
@@ -728,6 +776,7 @@ describe("workflow des captures de référence", () => {
   it("reprend toutes les captures de la suite visuelle, et les pousse sur la branche lancée", () => {
     expect(captures).toContain("playwright test e2e/visuel.spec.ts --update-snapshots=all");
     expect(captures).toContain("git add apps/web/e2e/visuel.spec.ts-snapshots");
-    expect(captures).toContain(`git push origin "HEAD:\${{ github.ref_name }}"`);
+    expect(captures).toContain(`BRANCHE: \${{ github.ref_name }}`);
+    expect(captures).toContain('git push origin "HEAD:$BRANCHE"');
   });
 });

@@ -54,14 +54,21 @@ ouvrir() {
     return 1
   fi
 
-  docker network create "$RESEAU" >/dev/null
-  docker volume create "$VOLUME" >/dev/null
+  balayer
 
-  local options=(--name "$NOM" --network "$RESEAU" -w /w
+  docker network create --label gd-ci "$RESEAU" >/dev/null
+  docker volume create --label gd-ci "$VOLUME" >/dev/null
+
+  local options=(--name "$NOM" --label gd-ci --network "$RESEAU" -w /w
     -v "$VOLUME:/w"
     # Caches d'une exécution à l'autre, sur la machine du runner : le store
     # pnpm et le navigateur de Playwright.
-    -v gd-ci-pnpm-store:/root/.local/share/pnpm/store
+    -v gd-ci-pnpm-store:/pnpm-store
+    # Le store sur ce volume, pas dans /w : pnpm le posait sinon dans
+    # /w/.pnpm-store (autre système de fichiers que son dossier par défaut),
+    # perdu à chaque job et lu par Trivy et Semgrep. Variable plutôt que la
+    # configuration globale de pnpm, qui exige un dossier bin global dans le PATH.
+    -e pnpm_config_store_dir=/pnpm-store
     -v gd-ci-playwright:/root/.cache/ms-playwright
     -e TZ=UTC)
   local nom
@@ -70,7 +77,7 @@ ouvrir() {
   done
 
   if [ "$postgres" = 1 ]; then
-    docker run -d --name "$BASE" --network "$RESEAU" \
+    docker run -d --name "$BASE" --label gd-ci --network "$RESEAU" \
       -e POSTGRES_USER=gamedashboard -e POSTGRES_PASSWORD=gamedashboard \
       -e POSTGRES_DB=gamedashboard -e TZ=UTC "$IMAGE_POSTGRES" >/dev/null
     options+=(-e "DATABASE_URL=postgres://gamedashboard:gamedashboard@$BASE:5432/gamedashboard")
@@ -102,8 +109,35 @@ PREPARER
   fi
 }
 
+# Un job tué net (runner arrêté, machine éteinte) ne passe pas par `fermer` :
+# son conteneur `sleep infinity` tournerait pour toujours et empêcherait Docker
+# Desktop de se mettre en veille (docs/runner-auto-heberge.md). Chaque job
+# retire donc ce que les précédents ont laissé depuis plus de deux heures,
+# bien au-delà du plus long délai d'un job.
+balayer() {
+  local limite id nom cree
+  limite=$(($(date +%s) - 7200))
+  for id in $(docker ps -aq --filter label=gd-ci); do
+    read -r nom cree < <(docker inspect -f '{{.Name}} {{.Created}}' "$id" 2>/dev/null) || continue
+    if [ "$(date -d "$cree" +%s 2>/dev/null || echo "$limite")" -lt "$limite" ]; then
+      docker rm -f "$id" >/dev/null 2>&1 || true
+      # Le volume du dépôt porte le nom du conteneur ; celui d'un autre job
+      # en cours, pas encore rattaché à son conteneur, n'est jamais visé.
+      docker volume rm -f "${nom#/}-w" >/dev/null 2>&1 || true
+    fi
+  done
+  docker network prune -f --filter label=gd-ci --filter until=2h >/dev/null 2>&1 || true
+}
+
 lancer() {
-  docker exec -w /w "$NOM" bash -euo pipefail -c "$1"
+  local code=0
+  docker exec -w /w "$NOM" bash -euo pipefail -c "$1" || code=$?
+  # 137 = tué par SIGKILL : dans un conteneur, presque toujours le manque de
+  # mémoire de la machine virtuelle de Docker Desktop.
+  if [ "$code" = 137 ]; then
+    echo "::error::Commande tuée (code 137), probablement faute de mémoire. Docker dispose de $(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%.1f Go", $1/1073741824}') ; en donner davantage à WSL (docs/runner-auto-heberge.md)." >&2
+  fi
+  return "$code"
 }
 
 outil() {

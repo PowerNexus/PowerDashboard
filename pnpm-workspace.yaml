@@ -33,3 +33,17 @@ overrides:
   # n'importe quel site (GHSA-67mh-4wv8-2f99). Uniquement exploitable en
   # développement, mais la correction ne coûte rien.
   esbuild: ">=0.25.0"
+
+# Aucune dépendance transitive tirée d'une source hors du registre (dépôt git,
+# archive par URL) : seule une dépendance directe, écrite ici, peut le faire.
+blockExoticSubdeps: true
+
+# Refuse une version publiée avec moins de garanties que la précédente (perte
+# de la provenance ou de la publication de confiance) : c'est la trace d'un
+# compte de mainteneur repris.
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  # Correctif de sécurité (CVE-2022-25883) rétroporté sur la branche 6 en
+  # juillet 2023, publié à la main sans la provenance des 7.x : faux positif
+  # connu. Amené par @babel/core (Storybook, styled-jsx de Next).
+  - semver@6.3.1

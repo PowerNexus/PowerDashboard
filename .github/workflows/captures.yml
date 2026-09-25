@@ -117,7 +117,12 @@ jobs:
       - name: Rapatrier les captures
         run: bash infra/ci/linux.sh rapatrier apps/web/e2e/visuel.spec.ts-snapshots
 
+      # Le contexte `github` passe par l'environnement, jamais interpolé dans
+      # le script : un nom de branche est choisi par qui la pousse.
       - name: Commiter les captures
+        env:
+          EXECUTION: ${{ github.run_id }}
+          BRANCHE: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -126,8 +131,8 @@ jobs:
             echo "Captures identiques aux références : rien à commiter."
             exit 0
           fi
-          git commit -m "Captures de référence, prises sur le runner" -m "Workflow « Captures de référence », exécution ${{ github.run_id }}."
-          git push origin "HEAD:${{ github.ref_name }}"
+          git commit -m "Captures de référence, prises sur le runner" -m "Workflow « Captures de référence », exécution $EXECUTION."
+          git push origin "HEAD:$BRANCHE"
 
       - name: Rendre la machine du runner
         if: always()
