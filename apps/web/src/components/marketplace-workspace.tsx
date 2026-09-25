@@ -16,12 +16,14 @@ import {
   Input,
   PageHeader,
   PageTemplate,
+  Select,
 } from "@gamedashboard/ui";
 import {
   ArrowUpCircle,
   Ban,
   Check,
   Download,
+  History,
   Package,
   PackageX,
   Search,
@@ -31,7 +33,13 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useState, useTransition } from "react";
-import { type Catalogue, installAddon, uninstallAddon } from "@/server/api/marketplace";
+import {
+  type Catalogue,
+  installAddon,
+  uninstallAddon,
+  updateAllAddons,
+} from "@/server/api/marketplace";
+import { MarketplaceInstalled } from "./marketplace-installed";
 import { ServerBlockBanner, useServerBlock } from "./server-block-context";
 
 function formatDownloads(count: number): string {
@@ -43,14 +51,26 @@ function formatDownloads(count: number): string {
 interface ProjectCardProps {
   project: MarketplaceProject;
   state: AddonState;
+  /** Versions proposables : au-delà d'une, un choix est offert. */
+  choices: string[];
   /** Décrit ce à quoi le projet devrait convenir, pour le cas incompatible. */
   target: string;
   busy: boolean;
   onInstall: () => void;
+  onPickVersion: () => void;
   onRemove: () => void;
 }
 
-function ProjectCard({ project, state, target, busy, onInstall, onRemove }: ProjectCardProps) {
+function ProjectCard({
+  project,
+  state,
+  choices,
+  target,
+  busy,
+  onInstall,
+  onPickVersion,
+  onRemove,
+}: ProjectCardProps) {
   const t = useTranslations("marketplace");
   const tc = useTranslations("common");
 
@@ -129,6 +149,16 @@ function ProjectCard({ project, state, target, busy, onInstall, onRemove }: Proj
             <span className="text-xs text-faint">{t("noVersionFor", { target })}</span>
           )}
         </div>
+
+        {/*
+         * Choisir une version précise, y compris antérieure : c'est le moyen
+         * de revenir en arrière quand une mise à jour casse le serveur.
+         */}
+        {choices.length > 1 ? (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={onPickVersion}>
+            <History /> {t("otherVersion")}
+          </Button>
+        ) : null}
       </CardBody>
     </Card>
   );
@@ -157,7 +187,11 @@ export function MarketplaceWorkspace({
   const params = useSearchParams();
   const [query, setQuery] = useState(params.get("q") ?? initialQuery);
   const [error, setError] = useState<string | null>(null);
-  const [toRemove, setToRemove] = useState<MarketplaceProject | null>(null);
+  const [toRemove, setToRemove] = useState<{ id: string; name: string } | null>(null);
+  const [toPick, setToPick] = useState<{ project: MarketplaceProject; choices: string[] } | null>(
+    null,
+  );
+  const [chosen, setChosen] = useState("");
   const [pending, startTransition] = useTransition();
   /*
    * Poser ou retirer une extension revient à écrire dans le conteneur, et
@@ -256,6 +290,25 @@ export function MarketplaceWorkspace({
         </AlertBanner>
       ) : null}
 
+      <MarketplaceInstalled
+        installed={initial.installed}
+        busy={pending || bloc !== null}
+        onUpdate={(item, version) => run(() => installAddon(serverId, item.projectId, version))}
+        onUpdateAll={() =>
+          run(() =>
+            updateAllAddons(
+              serverId,
+              initial.installed.flatMap((item) =>
+                item.latestVersion
+                  ? [{ projectId: item.projectId, version: item.latestVersion }]
+                  : [],
+              ),
+            ),
+          )
+        }
+        onRemove={(item) => setToRemove({ id: item.projectId, name: item.name })}
+      />
+
       {initial.entries.length === 0 ? (
         <EmptyState
           icon={<PackageX />}
@@ -264,19 +317,49 @@ export function MarketplaceWorkspace({
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {initial.entries.map(({ project, state }) => (
+          {initial.entries.map(({ project, state, choices }) => (
             <ProjectCard
               key={`${project.source}-${project.id}`}
               project={project}
               state={state}
+              choices={choices}
               target={target}
               busy={pending || bloc !== null}
               onInstall={() => run(() => installAddon(serverId, project.id))}
+              onPickVersion={() => {
+                setChosen(choices[0] ?? "");
+                setToPick({ project, choices });
+              }}
               onRemove={() => setToRemove(project)}
             />
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={toPick !== null}
+        onOpenChange={(o) => !o && setToPick(null)}
+        title={t("pickVersionTitle")}
+        description={
+          toPick ? (
+            <span className="flex flex-col gap-3">
+              <span>{t("pickVersionBody", { name: toPick.project.name })}</span>
+              <Select
+                aria-label={t("pickVersionLabel")}
+                value={chosen}
+                onChange={(e) => setChosen(e.target.value)}
+                options={toPick.choices.map((v) => ({ value: v, label: v }))}
+              />
+            </span>
+          ) : undefined
+        }
+        confirmLabel={t("install")}
+        onConfirm={() => {
+          const cible = toPick;
+          setToPick(null);
+          if (cible && chosen !== "") run(() => installAddon(serverId, cible.project.id, chosen));
+        }}
+      />
 
       <ConfirmDialog
         open={toRemove !== null}

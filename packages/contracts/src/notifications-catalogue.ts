@@ -71,6 +71,9 @@ export const NOTIFICATION_EVENTS: readonly NotificationEventDefinition[] = [
     defaults: ["inapp", "email"],
     mandatory: true,
   },
+  // La cloche seule : une extension en retard d'une version n'a rien
+  // d'urgent, et la veille repasse chaque jour.
+  { type: "marketplace.update_available", group: "server", defaults: ["inapp"] },
   { type: "reseller.quota_enforced", group: "reseller", defaults: ["inapp", "email"] },
   { type: "billing.due_soon", group: "billing", defaults: ["inapp", "email"] },
   { type: "billing.overdue", group: "billing", defaults: ["inapp", "email"] },

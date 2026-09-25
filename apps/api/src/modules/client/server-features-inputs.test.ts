@@ -110,3 +110,16 @@ describe("POST settings/docker-image", () => {
     expect(settings.setDockerImage).not.toHaveBeenCalled();
   });
 });
+
+describe("POST marketplace/install — version choisie", () => {
+  it.each([
+    ["vide", ""],
+    ["non textuelle", 42],
+    ["démesurée", "1".repeat(300)],
+  ])("refuse une version %s, avant tout le reste", async (_cas, version) => {
+    const { controleur } = monter();
+    await expect(
+      controleur.installAddon(requete, SERVEUR, { projectId: "modrinth:abc", version }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

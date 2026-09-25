@@ -105,6 +105,9 @@
         "due_soon": "Payment due soon",
         "overdue": "Payment overdue",
         "suspended": "Service suspended"
+      },
+      "marketplace": {
+        "update_available": "Add-on update available"
       }
     },
     "mandatoryHint": "Always sent: this is decided without you, and you must be able to learn it other than from the silence of your players.",
@@ -1117,7 +1120,17 @@
     "noVersionFor": "No version for {target}",
     "removeTitle": "Remove this add-on?",
     "removeBody": "The file for “{name}” will be deleted from the server. Its configuration data stays in place.",
-    "sourcesDown": "{count} catalogue(s) did not answer"
+    "sourcesDown": "{count} catalogue(s) did not answer",
+    "otherVersion": "Choose a version",
+    "pickVersionTitle": "Install a specific version",
+    "pickVersionBody": "Only versions of “{name}” compatible with this server are listed. Picking an older version replaces the installed one.",
+    "pickVersionLabel": "Version",
+    "installedTitle": "{count, plural, =1 {One installed add-on} other {# installed add-ons}}",
+    "installedLate": "{count, plural, =1 {One update available} other {# updates available}}",
+    "installedFresh": "Everything is up to date. Catalogues are checked again daily.",
+    "updateAll": "Update all",
+    "checked": "checked",
+    "neverChecked": "never"
   },
   "metrics": {
     "cpu": "CPU",

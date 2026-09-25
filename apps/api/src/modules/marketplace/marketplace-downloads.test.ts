@@ -1,4 +1,8 @@
-import type { MarketplaceProject, MarketplaceSource } from "@gamedashboard/contracts";
+import type {
+  MarketplaceProject,
+  MarketplaceSource,
+  ProjectRelease,
+} from "@gamedashboard/contracts";
 import type { Database } from "@gamedashboard/db";
 import { ConflictException } from "@nestjs/common";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -163,5 +167,49 @@ describe("modpack : archive rendue par Modrinth", () => {
     // pas le sujet. Seul compte ce qui a été demandé au daemon.
     await svc.install(SERVER, "modpack:pack", "v1").catch(() => undefined);
     expect(daemon.pullFile).toHaveBeenCalledWith(SERVER, "/", url, "pack.mrpack");
+  });
+});
+
+describe("extension : version choisie", () => {
+  const MODRINTH = "https://cdn.modrinth.com/data/abc/versions";
+
+  function historique(): MarketplaceProject {
+    const base = projet("modrinth", `${MODRINTH}/new/essentials-2.jar`);
+    const recente = base.releases[0] as ProjectRelease;
+    return {
+      ...base,
+      releases: [
+        { ...recente, version: "2.21.0", fileName: "essentials-2.jar" },
+        {
+          ...recente,
+          version: "2.20.0",
+          publishedAt: "2025-06-01T00:00:00.000Z",
+          downloadUrl: `${MODRINTH}/old/essentials-1.jar`,
+          fileName: "essentials-1.jar",
+        },
+      ],
+    };
+  }
+
+  it("télécharge la publication demandée, même antérieure à la plus récente", async () => {
+    const { svc, daemon } = catalogue(historique());
+
+    const fait = await svc.install(SERVER, "modrinth:essentials", "2.20.0");
+    expect(fait).toMatchObject({ version: "2.20.0", fileName: "essentials-1.jar" });
+    expect(daemon.pullFile).toHaveBeenCalledWith(
+      SERVER,
+      "/plugins",
+      `${MODRINTH}/old/essentials-1.jar`,
+      "essentials-1.jar",
+    );
+  });
+
+  it("refuse une version absente du catalogue, sans rien demander au daemon", async () => {
+    const { svc, daemon } = catalogue(historique());
+
+    await expect(svc.install(SERVER, "modrinth:essentials", "9.9.9")).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(daemon.pullFile).not.toHaveBeenCalled();
   });
 });

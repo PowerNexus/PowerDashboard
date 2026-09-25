@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addonState,
+  chooseRelease,
+  compatibleReleases,
   GAME_SOURCES,
   gameVersionFromPing,
   hasCatalogue,
@@ -223,6 +225,87 @@ describe("addonState", () => {
     expect(addonState(p, upgraded, installedAs("1.0.0"))).toEqual({
       kind: "installed-incompatible",
       installed: "1.0.0",
+    });
+  });
+});
+
+describe("compatibleReleases", () => {
+  it("rend les publications compatibles et téléchargeables, la plus récente d'abord", () => {
+    const p = project([
+      release("1.0.0", ["1.21.4"], ["paper"], "2026-01-01T00:00:00.000Z"),
+      release("2.0.0", ["1.21.4"], ["paper"], "2026-03-01T00:00:00.000Z"),
+      release("1.5.0", ["1.20.6"], ["paper"], "2026-02-01T00:00:00.000Z"),
+      blockedRelease("2.1.0", ["1.21.4"], ["paper"]),
+    ]);
+    expect(compatibleReleases(p, paper).map((r) => r.version)).toEqual(["2.0.0", "1.0.0"]);
+  });
+});
+
+describe("chooseRelease", () => {
+  const installedAs = (version: string): InstalledAddon => ({
+    projectId: "p1",
+    version,
+    installedAt: "2026-09-01T00:00:00.000Z",
+    fileName: `${version}.jar`,
+  });
+  const historique = () =>
+    project([
+      release("1.0.0", ["1.21.4"], ["paper"], "2026-01-01T00:00:00.000Z"),
+      release("1.3.0", ["1.21.4"], ["paper"], "2026-04-01T00:00:00.000Z"),
+      release("0.9.0", ["1.20.6"], ["paper"], "2025-12-01T00:00:00.000Z"),
+    ]);
+
+  it("sans version, prend la plus récente compatible, comme avant", () => {
+    const choice = chooseRelease(historique(), paper, undefined);
+    expect(choice).toMatchObject({ kind: "ok", release: { version: "1.3.0" } });
+  });
+
+  it("sans version, ne rétrograde jamais", () => {
+    expect(chooseRelease(historique(), paper, installedAs("1.3.0"))).toEqual({
+      kind: "refused",
+      reason: "up-to-date",
+    });
+  });
+
+  it("avec une version, installe exactement celle-là", () => {
+    const choice = chooseRelease(historique(), paper, undefined, "1.0.0");
+    expect(choice).toMatchObject({ kind: "ok", release: { version: "1.0.0" } });
+  });
+
+  it("avec une version antérieure, permet de revenir en arrière", () => {
+    // Usage principal du choix : une mise à jour a cassé le serveur.
+    const choice = chooseRelease(historique(), paper, installedAs("1.3.0"), "1.0.0");
+    expect(choice).toMatchObject({ kind: "ok", release: { version: "1.0.0" } });
+  });
+
+  it("refuse la version déjà installée", () => {
+    expect(chooseRelease(historique(), paper, installedAs("1.0.0"), "1.0.0")).toEqual({
+      kind: "refused",
+      reason: "up-to-date",
+    });
+  });
+
+  it("refuse une version incompatible, même demandée explicitement", () => {
+    // Le choix porte sur la version, pas sur la compatibilité : 0.9.0 vise
+    // 1.20.6 et ne démarrerait pas sur un serveur en 1.21.4.
+    expect(chooseRelease(historique(), paper, undefined, "0.9.0")).toEqual({
+      kind: "refused",
+      reason: "unknown-version",
+    });
+  });
+
+  it("refuse une version inconnue du catalogue", () => {
+    expect(chooseRelease(historique(), paper, undefined, "9.9.9")).toEqual({
+      kind: "refused",
+      reason: "unknown-version",
+    });
+  });
+
+  it("refuse une version dont l'auteur interdit le téléchargement", () => {
+    const p = project([blockedRelease("1.0.0", ["1.21.4"], ["paper"])]);
+    expect(chooseRelease(p, paper, undefined, "1.0.0")).toEqual({
+      kind: "refused",
+      reason: "download-blocked",
     });
   });
 });

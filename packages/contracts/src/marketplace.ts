@@ -52,6 +52,21 @@ export const ProjectLoader = z.enum([
 ]);
 export type ProjectLoader = z.infer<typeof ProjectLoader>;
 
+/**
+ * Lien déclaré par une publication vers un autre projet du même catalogue.
+ *
+ * Deux sortes seulement comptent pour le panel : ce qu'il faut poser avec
+ * (`required`) et ce qui empêche de poser (`incompatible`). Les dépendances
+ * facultatives sont des suggestions ; les installer d'office serait décider à
+ * la place de l'utilisateur.
+ */
+export const ReleaseDependency = z.object({
+  /** Identifiant préfixé par la source, comme celui des projets. */
+  projectId: z.string(),
+  kind: z.enum(["required", "incompatible"]),
+});
+export type ReleaseDependency = z.infer<typeof ReleaseDependency>;
+
 export const ProjectRelease = z.object({
   version: z.string(),
   /** Versions de jeu prises en charge par cette publication. */
@@ -69,6 +84,8 @@ export const ProjectRelease = z.object({
   downloadUrl: z.string().url().nullable(),
   /** Nom du fichier tel qu'il sera posé, pour pouvoir le retirer ensuite. */
   fileName: z.string(),
+  /** Absent quand le catalogue n'en dit rien (SpigotMC). */
+  dependencies: z.array(ReleaseDependency).optional(),
 });
 export type ProjectRelease = z.infer<typeof ProjectRelease>;
 
@@ -193,6 +210,77 @@ export function addonState(
   }
 
   return { kind: "update-available", installed: installed.version, release };
+}
+
+/** Nombre de publications proposées au choix : au-delà, la liste ne sert plus. */
+export const RELEASE_CHOICES_MAX = 25;
+
+/** Longueur maximale d'une version reçue du client, bien au-delà des cas réels. */
+export const RELEASE_VERSION_MAX_LENGTH = 200;
+
+/**
+ * Publications compatibles et installables, de la plus récente à la plus
+ * ancienne.
+ *
+ * C'est la liste offerte au choix de l'utilisateur. Les publications
+ * bloquées par leur auteur n'y figurent pas : les proposer mènerait à un
+ * refus certain.
+ */
+export function compatibleReleases(
+  project: MarketplaceProject,
+  runtime: ServerRuntime,
+): ProjectRelease[] {
+  return project.releases
+    .filter((r) => isReleaseCompatible(r, runtime) && isInstallable(r))
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+}
+
+export type ReleaseChoice =
+  | { kind: "ok"; release: ProjectRelease }
+  | {
+      kind: "refused";
+      reason: "download-blocked" | "up-to-date" | "incompatible" | "unknown-version";
+    };
+
+/**
+ * Publication à installer, selon qu'une version précise est demandée ou non.
+ *
+ * Sans version, c'est la règle de toujours : la plus récente compatible, et
+ * jamais de retour en arrière. Avec une version, le choix est **explicite** :
+ * revenir à une publication antérieure devient possible, c'est même l'usage
+ * principal (une mise à jour qui casse le serveur). La version demandée doit
+ * cependant figurer parmi les publications compatibles : le choix porte sur
+ * la version, jamais sur la compatibilité, que le panel continue de décider.
+ */
+export function chooseRelease(
+  project: MarketplaceProject,
+  runtime: ServerRuntime,
+  installed: InstalledAddon | undefined,
+  wanted?: string,
+): ReleaseChoice {
+  if (wanted === undefined) {
+    const state = addonState(project, runtime, installed);
+    if (state.kind === "installable" || state.kind === "update-available") {
+      return { kind: "ok", release: state.release };
+    }
+    return {
+      kind: "refused",
+      reason:
+        state.kind === "download-blocked"
+          ? "download-blocked"
+          : state.kind === "up-to-date"
+            ? "up-to-date"
+            : "incompatible",
+    };
+  }
+
+  const release = project.releases.find(
+    (r) => r.version === wanted && isReleaseCompatible(r, runtime),
+  );
+  if (!release) return { kind: "refused", reason: "unknown-version" };
+  if (!isInstallable(release)) return { kind: "refused", reason: "download-blocked" };
+  if (installed?.version === release.version) return { kind: "refused", reason: "up-to-date" };
+  return { kind: "ok", release };
 }
 
 /**

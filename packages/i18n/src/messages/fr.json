@@ -105,6 +105,9 @@
         "due_soon": "Échéance proche",
         "overdue": "Paiement en retard",
         "suspended": "Service suspendu"
+      },
+      "marketplace": {
+        "update_available": "Mise à jour d'extension disponible"
       }
     },
     "mandatoryHint": "Toujours envoyé : cela se décide sans vous, et vous devez pouvoir le savoir autrement que par le silence de vos joueurs.",
@@ -1117,7 +1120,17 @@
     "noVersionFor": "Aucune version pour {target}",
     "removeTitle": "Retirer cette extension ?",
     "removeBody": "Le fichier de « {name} » sera supprimé du serveur. Ses données de configuration, elles, resteront en place.",
-    "sourcesDown": "{count} catalogue(s) n'ont pas répondu"
+    "sourcesDown": "{count} catalogue(s) n'ont pas répondu",
+    "otherVersion": "Choisir une version",
+    "pickVersionTitle": "Installer une version précise",
+    "pickVersionBody": "Seules les versions de « {name} » compatibles avec ce serveur sont proposées. Choisir une version antérieure remplace celle installée.",
+    "pickVersionLabel": "Version",
+    "installedTitle": "{count, plural, =1 {Une extension installée} other {# extensions installées}}",
+    "installedLate": "{count, plural, =1 {Une mise à jour disponible} other {# mises à jour disponibles}}",
+    "installedFresh": "Tout est à jour. Les catalogues sont revérifiés chaque jour.",
+    "updateAll": "Tout mettre à jour",
+    "checked": "vérifiée",
+    "neverChecked": "jamais"
   },
   "metrics": {
     "cpu": "Processeur",

@@ -1,4 +1,9 @@
-import type { MarketplaceProject, ProjectLoader, ProjectRelease } from "@gamedashboard/contracts";
+import type {
+  MarketplaceProject,
+  ProjectLoader,
+  ProjectRelease,
+  ReleaseDependency,
+} from "@gamedashboard/contracts";
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 
 /**
@@ -36,6 +41,11 @@ interface ModrinthVersion {
   loaders: string[];
   date_published: string;
   files: { url: string; filename: string; primary: boolean }[];
+  dependencies?: {
+    project_id: string | null;
+    version_id: string | null;
+    dependency_type: "required" | "optional" | "incompatible" | "embedded";
+  }[];
 }
 
 @Injectable()
@@ -174,6 +184,7 @@ export class ModrinthClient {
           publishedAt: new Date(version.date_published).toISOString(),
           downloadUrl: file.url,
           fileName: file.filename,
+          dependencies: toDependencies(version.dependencies ?? []),
         };
       })
       .filter(
@@ -203,6 +214,24 @@ export class ModrinthClient {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * Dépendances d'une version Modrinth.
+ *
+ * `embedded` est déjà dans le fichier, `optional` reste un choix : seules
+ * `required` et `incompatible` sont retenues. Une dépendance désignée par sa
+ * seule version, sans projet, est écartée : la résoudre coûterait un appel de
+ * plus pour un cas que les auteurs n'emploient presque jamais.
+ */
+export function toDependencies(
+  raw: NonNullable<ModrinthVersion["dependencies"]>,
+): ReleaseDependency[] {
+  return raw.flatMap((dep) =>
+    dep.project_id && (dep.dependency_type === "required" || dep.dependency_type === "incompatible")
+      ? [{ projectId: `modrinth:${dep.project_id}`, kind: dep.dependency_type }]
+      : [],
+  );
 }
 
 const KNOWN_LOADERS = new Set<string>([
