@@ -49,10 +49,9 @@ describe("engineRoleOf", () => {
 describe("ENGINE_EXCLUSIONS", () => {
   it("nomme chaque absence et la justifie", () => {
     /*
-     * Dire « Forge n'est pas là » sans dire pourquoi fait chercher une panne
-     * du panel. Ces raisons sont des faits relevés chez l'éditeur : le maven
-     * de NeoForge ne publie qu'un installeur, la méta de Quilt rend un profil
-     * de lancement et non un jar.
+     * Dire « Quilt n'est pas là » sans dire pourquoi fait chercher une panne
+     * du panel. Ces raisons sont des faits relevés chez l'éditeur : la méta
+     * de Quilt rend un profil de lancement et non un jar.
      */
     expect(ENGINE_EXCLUSIONS.length).toBeGreaterThan(0);
 
@@ -66,10 +65,11 @@ describe("ENGINE_EXCLUSIONS", () => {
     }
   });
 
-  it("couvre les trois plateformes qu'on nous réclame", () => {
+  it("explique l'absence de Quilt, et ne présente plus Forge ni NeoForge comme absents", () => {
     const texte = ENGINE_EXCLUSIONS.map((e) => `${e.label} ${e.reason}`).join(" ");
-    for (const nom of ["Forge", "NeoForge", "Quilt"]) {
-      expect(texte, `« ${nom} » devrait être expliqué.`).toContain(nom);
-    }
+    expect(texte).toContain("Quilt");
+    // Régression : l'écran disait Forge et NeoForge non pris en charge, alors
+    // que leur chargeur est posé avec le modpack qui les demande.
+    expect(texte).not.toMatch(/Forge/);
   });
 });

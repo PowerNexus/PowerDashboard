@@ -52,6 +52,9 @@
       "name": "Mise en service"
     },
     {
+      "name": "Moteur"
+    },
+    {
       "name": "Planification"
     },
     {
@@ -2520,6 +2523,115 @@
           },
           "2XX": {
             "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/engine": {
+      "get": {
+        "summary": "Moteur du serveur : plateformes proposées, modpacks Modrinth et CurseForge, moteur posé par le panel (meta.current) avec la mise à jour de pack relevée par la veille, sort de chaque catalogue (meta.packSources) et dernière installation lancée (meta.install : status running, done avec son compte rendu report, ou failed avec sa raison error ; startedAt, finishedAt).",
+        "description": "Clé personnelle. Portée requise : `files.read`.",
+        "tags": [
+          "Moteur"
+        ],
+        "operationId": "client-get-servers-by-server-engine",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Valeur de « q ».",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
+    "/api/v1/client/servers/{server}/engine/install": {
+      "post": {
+        "summary": "Installer une plateforme ou un modpack, ou mettre à jour le pack en place (même optionId, autre versionId) : { optionId, versionId, backupFirst? }. Répond 202 aussitôt : l'installation se poursuit en tâche de fond, son état et son compte rendu (fichiers posés, manquants, gardés, chargeur posé) se lisent sur GET engine (meta.install). Un pack Forge ou NeoForge fait poser son chargeur par une réinstallation de l'egg Minecraft Java (variables LOADER, LOADER_VERSION, MINECRAFT_VERSION réglées d'après le manifeste, versions vérifiées sur le dépôt officiel) ; son échec est dit dans le compte rendu, le suivi des fichiers du pack reste. Refus immédiats : version, chargeur ou archive refusés, installation déjà en cours (409). Arrête le serveur ; backupFirst (portée backups.create) prend une sauvegarde ordinaire et l'attend avant toute écriture, et son échec redémarre le serveur s'il tournait. Exige aussi files.delete et power.stop.",
+        "description": "Clé personnelle. Portée requise : `files.write`.",
+        "tags": [
+          "Moteur"
+        ],
+        "operationId": "client-post-servers-by-server-engine-install",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "files.write"
+            ]
+          }
+        ],
+        "x-gd-scope": "files.write",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « files.write »."
+          },
+          "2XX": {
+            "description": "Effectué."
           }
         }
       }

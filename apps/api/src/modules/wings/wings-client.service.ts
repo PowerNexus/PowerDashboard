@@ -551,9 +551,27 @@ export class WingsClientService {
   }
 
   renameFile(serverId: string, root: string, from: string, to: string): Promise<void> {
+    return this.renameFiles(serverId, root, [{ from, to }]);
+  }
+
+  /**
+   * Plusieurs déplacements en une requête, relatifs à `root`.
+   *
+   * Contrat relevé dans la source de Wings (`putServerRenameFiles`) : les
+   * entrées sont traitées en parallèle, une destination **existante** fait
+   * échouer la requête (« destination already exists », 400) sans défaire les
+   * autres, une source absente est ignorée, et les dossiers parents de la
+   * destination sont créés au besoin.
+   */
+  renameFiles(
+    serverId: string,
+    root: string,
+    files: { from: string; to: string }[],
+  ): Promise<void> {
     return this.call<void>(serverId, `/api/servers/${serverId}/files/rename`, {
       method: "PUT",
-      body: { root, files: [{ from, to }] },
+      body: { root, files },
+      timeoutMs: 60_000,
     });
   }
 

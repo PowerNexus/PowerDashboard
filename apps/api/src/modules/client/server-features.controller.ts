@@ -12,6 +12,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  HttpCode,
   Inject,
   Logger,
   Param,
@@ -106,6 +107,14 @@ function readReleaseVersion(raw: unknown): string | undefined {
   }
   return raw;
 }
+
+/**
+ * Attente d'une sauvegarde préalable à un changement de moteur.
+ *
+ * Un monde de plusieurs gigaoctets s'archive en minutes ; au-delà de celles-ci
+ * on renonce, sans rien écrire, plutôt que de garder le serveur verrouillé.
+ */
+const ENGINE_BACKUP_TIMEOUT_MS = 30 * 60_000;
 
 function principalOf(request: ClientRequest) {
   // `origin` ne sert qu'au journal des refus : route et adresse de la demande.
@@ -888,6 +897,8 @@ export class ServerFeaturesController {
         runtime: state.runtime,
         unavailableReason: state.unavailableReason,
         current: state.current,
+        packSources: state.packSources,
+        install: state.install,
       },
     };
   }
@@ -901,17 +912,29 @@ export class ServerFeaturesController {
    * l'arborescence d'un serveur par un choix dans une liste.
    */
   @Post("engine/install")
+  @HttpCode(202)
   async installEngine(
     @Req() request: ClientRequest,
     @Param("id") id: string,
     @Body() body: unknown,
   ) {
-    const payload = body as { optionId?: unknown; versionId?: unknown };
-    if (typeof payload?.optionId !== "string" || payload.optionId.trim() === "") {
+    const payload = body as { optionId?: unknown; versionId?: unknown; backupFirst?: unknown };
+    if (
+      typeof payload?.optionId !== "string" ||
+      payload.optionId.trim() === "" ||
+      payload.optionId.length > 160
+    ) {
       throw new BadRequestException("Moteur manquant.");
     }
-    if (typeof payload?.versionId !== "string" || payload.versionId.trim() === "") {
+    if (
+      typeof payload?.versionId !== "string" ||
+      payload.versionId.trim() === "" ||
+      payload.versionId.length > 120
+    ) {
       throw new BadRequestException("Version manquante.");
+    }
+    if (payload.backupFirst !== undefined && typeof payload.backupFirst !== "boolean") {
+      throw new BadRequestException("Choix de sauvegarde invalide.");
     }
 
     const principal = principalOf(request);
@@ -924,27 +947,78 @@ export class ServerFeaturesController {
     // seconde écrirait pendant que la première renomme.
     await this.access.requireOperable(id);
 
-    const installed = await this.relay(() =>
-      this.engine.install(id, payload.optionId as string, payload.versionId as string),
-    );
-    await this.log(request, id, "engine.install", {
-      optionId: payload.optionId,
-      versionId: payload.versionId,
-      ...installed,
-    });
+    /*
+     * La sauvegarde préalable est une sauvegarde **ordinaire** : même quota,
+     * même permission, même liste à l'écran, même restauration. Elle est
+     * lancée serveur arrêté et verrouillé, et l'installation attend qu'elle
+     * soit close — une archive prise pendant qu'on écrase des fichiers ne
+     * servirait à rien. Son échec arrête tout avant la première écriture.
+     */
+    const backupFirst = payload.backupFirst === true;
+    if (backupFirst) await this.access.require(principal, id, "backups.create");
+    const beforeWrite = backupFirst
+      ? async () => {
+          const created = await this.backups.create(id, "Avant changement de moteur", []);
+          await this.log(request, id, "backup.create", {
+            name: created.name,
+            backupId: created.id,
+          });
+          await this.backups.awaitCompletion(id, created.id, ENGINE_BACKUP_TIMEOUT_MS);
+        }
+      : undefined;
 
     /*
-     * Le retrait de l'acceptation est un événement **à part**.
-     *
-     * Le noyer dans les propriétés de l'installation le rendrait invisible :
-     * qui relit un journal pour savoir depuis quand un serveur ne peut plus
-     * démarrer cherche « acceptation », pas « moteur installé ».
+     * L'installation part **en tâche de fond** : un modpack enchaîne des
+     * centaines de téléchargements, la sauvegarde préalable peut prendre une
+     * demi-heure, et l'interface, le vhost ou Passenger couperaient la requête
+     * bien avant. Les refus sûrs (version, chargeur, archive, runtime, une
+     * installation déjà en cours) tombent ici, avant la réponse ; le compte
+     * rendu se lit ensuite sur `GET engine` (`meta.install`).
      */
-    if (installed.eulaReset) {
-      await this.log(request, id, "server.eula_reset", { reason: installed.label });
-    }
-
-    return { data: installed };
+    const optionId = payload.optionId as string;
+    const versionId = payload.versionId as string;
+    const run = await this.relay(() =>
+      this.engine.start(id, optionId, versionId, {
+        installedBy: request.user.id,
+        beforeWrite,
+        onSettled: async (outcome) => {
+          if ("error" in outcome) {
+            await this.log(request, id, "engine.install_failed", {
+              optionId,
+              versionId,
+              error: outcome.error,
+              backupFirst,
+            });
+            return;
+          }
+          const installed = outcome.result;
+          // Des comptes et non des listes : un pack pose des centaines de
+          // fichiers, et le journal n'est pas un inventaire.
+          await this.log(request, id, "engine.install", {
+            optionId,
+            versionId,
+            label: installed.label,
+            files: installed.files,
+            missing: installed.missing.length,
+            kept: installed.kept.length,
+            removed: installed.removed,
+            backupFirst,
+          });
+          /*
+           * Le retrait de l'acceptation est un événement **à part**.
+           *
+           * Le noyer dans les propriétés de l'installation le rendrait
+           * invisible : qui relit un journal pour savoir depuis quand un
+           * serveur ne peut plus démarrer cherche « acceptation », pas
+           * « moteur installé ».
+           */
+          if (installed.eulaReset) {
+            await this.log(request, id, "server.eula_reset", { reason: installed.label });
+          }
+        },
+      }),
+    );
+    return { data: run };
   }
 
   /**

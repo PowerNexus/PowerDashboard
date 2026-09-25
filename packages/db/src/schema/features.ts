@@ -4,6 +4,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   uniqueIndex,
@@ -234,3 +235,79 @@ export const marketplaceInstalls = pgTable(
     uniqueIndex("marketplace_install_unique").on(table.serverId, table.source, table.projectId),
   ],
 );
+
+/**
+ * Le moteur que le panel a posé sur un serveur : plateforme ou modpack (§10.2).
+ *
+ * Une ligne par serveur au plus, remplacée à chaque installation, **effacée**
+ * quand le daemon rend compte d'une réinstallation réussie : ce qui tourne
+ * alors est ce que le script de l'egg a posé, que le panel ne connaît pas.
+ * Sans elle, l'écran du moteur ne pouvait dire ni ce qui était installé, ni
+ * qu'une version plus récente d'un modpack existait.
+ */
+export const serverEngines = pgTable("server_engines", {
+  serverId: uuid("server_id")
+    .primaryKey()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  /** `jar` (une plateforme) ou `pack` (un modpack). */
+  kind: varchar("kind", { length: 8 }).notNull(),
+  /** Identifiant de l'option telle que l'écran la propose : `paper:paper`, `modpack:…`. */
+  optionId: varchar("option_id", { length: 160 }).notNull(),
+  label: varchar("label", { length: 200 }).notNull(),
+  versionId: varchar("version_id", { length: 120 }).notNull(),
+  versionLabel: varchar("version_label", { length: 200 }).notNull(),
+  /** Date de publication de la version, pour ne proposer que plus récent. */
+  versionPublishedAt: moment("version_published_at"),
+  gameVersion: varchar("game_version", { length: 40 }).notNull().default(""),
+  /** Chargeur demandé par le pack (« fabric 0.16.10 »), s'il le dit. */
+  loader: varchar("loader", { length: 80 }),
+  packSource: marketplaceSource("pack_source"),
+  packProjectId: varchar("pack_project_id", { length: 120 }),
+  /**
+   * Fichiers posés par le pack, avec l'empreinte relevée juste après (taille et
+   * date de modification) : une mise à jour retire ou remplace ce que le pack a
+   * posé, et garde ce que l'utilisateur a modifié depuis.
+   */
+  files: jsonb("files").$type<Record<string, string>>().notNull().default({}),
+  /** Version plus récente et compatible relevée par la veille ; nulle : à jour ou pas vérifié. */
+  latestVersionId: varchar("latest_version_id", { length: 120 }),
+  latestVersionLabel: varchar("latest_version_label", { length: 200 }),
+  checkedAt: moment("checked_at"),
+  installedBy: uuid("installed_by").references(() => users.id, { onDelete: "set null" }),
+  installedAt: moment("installed_at").notNull(),
+  ...timestamps,
+});
+
+/**
+ * La dernière installation de moteur lancée sur un serveur, et son sort.
+ *
+ * Une installation de modpack enchaîne des centaines de téléchargements et
+ * peut attendre une demi-heure une sauvegarde préalable : aucune requête HTTP
+ * ne tient jusque-là (échéance de l'interface, du vhost, de Passenger). Elle
+ * part donc en tâche de fond, et c'est cette ligne qui porte son état jusqu'à
+ * l'écran : `running`, puis `done` avec son compte rendu, ou `failed` avec sa
+ * raison.
+ *
+ * Une ligne par serveur, remplacée à chaque lancement : c'est aussi le verrou
+ * qui interdit deux installations à la fois. Une ligne restée `running` après
+ * un redémarrage de l'API est close en échec au démarrage suivant, sans quoi
+ * le serveur resterait bloqué pour toujours.
+ */
+export const serverEngineInstalls = pgTable("server_engine_installs", {
+  serverId: uuid("server_id")
+    .primaryKey()
+    .references(() => servers.id, { onDelete: "cascade" }),
+  /** `running`, `done` ou `failed`. */
+  status: varchar("status", { length: 8 }).notNull(),
+  optionId: varchar("option_id", { length: 160 }).notNull(),
+  versionId: varchar("version_id", { length: 120 }).notNull(),
+  /** Ce qui est installé, lisible (« Pack 1.2 », « Paper 1.21.1 »). */
+  label: varchar("label", { length: 200 }).notNull(),
+  /** Compte rendu d'une installation terminée (fichiers posés, manquants, gardés…). */
+  report: jsonb("report").$type<Record<string, unknown>>(),
+  /** Raison d'un échec, en clair. */
+  error: varchar("error", { length: 1000 }),
+  startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+  startedAt: moment("started_at").notNull(),
+  finishedAt: moment("finished_at"),
+});

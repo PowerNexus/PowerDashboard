@@ -6,6 +6,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { battre } from "../../common/background-tick";
+import { EngineService } from "../marketplace/engine.service";
 import { MarketplaceService, type UpdateFound } from "../marketplace/marketplace.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
@@ -18,6 +19,10 @@ import { NotificationsService } from "../notifications/notifications.service";
  * relit chaque installation dans son catalogue, une fois par jour, et range le
  * résultat en base — la liste des extensions installées le montre sans
  * interroger quoi que ce soit.
+ *
+ * Les modpacks installés par l'écran du moteur passent par la même veille
+ * (`EngineService.checkPackUpdates`) : même cadence, même notification, et la
+ * mise à jour se propose dans cet écran-là.
  *
  * Elle **n'installe rien** : une mise à jour peut casser un serveur, et c'est
  * à son propriétaire de choisir le moment. Elle le prévient, une fois par
@@ -45,6 +50,7 @@ export class MarketplaceUpdateWatcherService implements OnModuleInit, OnModuleDe
   constructor(
     @Inject(MarketplaceService) private readonly marketplace: MarketplaceService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(EngineService) private readonly engine: EngineService,
   ) {}
 
   onModuleInit(): void {
@@ -72,6 +78,16 @@ export class MarketplaceUpdateWatcherService implements OnModuleInit, OnModuleDe
           level: "info",
         });
       }
+
+      const packs = await this.engine.checkPackUpdates(BATCH, RECHECK_AFTER);
+      for (const [serverId, updates] of packs) {
+        await this.notifications.notifyServerOwner(serverId, {
+          type: "marketplace.update_available",
+          title: packUpdateTitle(updates),
+          body: packUpdateBody(updates),
+          level: "info",
+        });
+      }
     } finally {
       this.running = false;
     }
@@ -89,4 +105,16 @@ export function updatesBody(updates: UpdateFound[]): string {
   const shown = updates.slice(0, 5).map((u) => `${u.name} ${u.version}`);
   const more = updates.length - shown.length;
   return `${shown.join(", ")}${more > 0 ? ` et ${more} autre(s)` : ""}. À installer depuis la page Extensions du serveur.`;
+}
+
+export function packUpdateTitle(updates: UpdateFound[]): string {
+  return updates.length === 1
+    ? "Une mise à jour du modpack est disponible"
+    : `${updates.length} mises à jour de modpack sont disponibles`;
+}
+
+/** Un serveur n'a qu'un modpack : le nom et la version suffisent. */
+export function packUpdateBody(updates: UpdateFound[]): string {
+  const shown = updates.slice(0, 3).map((u) => `${u.name} ${u.version}`);
+  return `${shown.join(", ")}. À installer depuis la page Moteur du serveur, sauvegarde proposée avant.`;
 }

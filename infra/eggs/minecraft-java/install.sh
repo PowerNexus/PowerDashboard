@@ -35,12 +35,19 @@ echo "== Préparation"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 apt-get install -y -qq curl jq unzip ca-certificates >/dev/null
-mkdir -p /mnt/server
-cd /mnt/server
+# `GD_RACINE_ESSAI` ne sert qu'aux tests du panel, qui jouent ce script dans un
+# dossier jetable ; aucun egg ne déclare cette variable, Wings ne la pose donc
+# jamais.
+RACINE="${GD_RACINE_ESSAI:-/mnt/server}"
+mkdir -p "$RACINE"
+cd "$RACINE"
 
 LOADER="$(echo "${LOADER:-paper}" | tr '[:upper:]' '[:lower:]')"
 SERVER_JARFILE="${SERVER_JARFILE:-server.jar}"
 LOADER_VERSION="${LOADER_VERSION:-latest}"
+# Fichier d'arguments de Forge et NeoForge ≥ 1.17, posé par leur branche
+# ci-dessous pour la version **installée**. Vide pour tous les autres.
+ARGS=""
 
 MANIFESTE="https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 
@@ -158,7 +165,7 @@ case "$LOADER" in
       "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/${version}/quilt-installer-${version}.jar" \
       quilt-installer.jar
     java -jar quilt-installer.jar install server "$MINECRAFT_VERSION" \
-      --download-server --install-dir=/mnt/server || fatal "l'installeur Quilt a échoué."
+      --download-server --install-dir="$RACINE" || fatal "l'installeur Quilt a échoué."
     rm -f quilt-installer.jar
     if [ -f quilt-server-launch.jar ]; then SERVER_JARFILE="quilt-server-launch.jar"; fi
     ;;
@@ -181,6 +188,9 @@ case "$LOADER" in
     fi
     [ -n "$version" ] || fatal "Forge ne publie rien pour ${MINECRAFT_VERSION}."
 
+    # `LOADER_VERSION` porte, pour les plus anciennes, le suffixe que Forge
+    # ajoutait à ses artefacts (« 10.13.4.1614-1.7.10 ») : le panel le lit dans
+    # l'index du dépôt, il ne se devine pas.
     complet="${MINECRAFT_VERSION}-${version}"
     telecharger \
       "https://maven.minecraftforge.net/net/minecraftforge/forge/${complet}/forge-${complet}-installer.jar" \
@@ -188,38 +198,59 @@ case "$LOADER" in
     echo "   exécution de l'installeur Forge (il télécharge ses bibliothèques)"
     java -jar forge-installer.jar --installServer >/dev/null || fatal "l'installeur Forge a échoué."
     rm -f forge-installer.jar forge-installer.jar.log
-    # ≤ 1.16 : un jar universel. ≥ 1.17 : rien de lançable, seulement un
-    # fichier d'arguments — c'est `ecrire_run` qui tranche.
-    if [ -f "forge-${complet}.jar" ]; then SERVER_JARFILE="forge-${complet}.jar"; fi
+    # ≥ 1.17 : rien de lançable, un fichier d'arguments rangé sous la version.
+    # 1.13 à 1.16 : `forge-<complet>.jar`. ≤ 1.12 : souvent suffixé
+    # `-universal`. C'est `ecrire_run` qui tranche.
+    ARGS="libraries/net/minecraftforge/forge/${complet}/unix_args.txt"
+    if [ -f "forge-${complet}.jar" ]; then
+      SERVER_JARFILE="forge-${complet}.jar"
+    elif [ -f "forge-${complet}-universal.jar" ]; then
+      SERVER_JARFILE="forge-${complet}-universal.jar"
+    fi
     ;;
 
   neoforge)
     # NeoForge numérote d'après la version du jeu : 1.21.1 donne 21.1.x.
     # Cette correspondance est une convention de l'éditeur, pas une règle
     # dérivable — la relever ici évite de la redécouvrir à chaque version.
-    court="$(echo "$MINECRAFT_VERSION" | cut -d. -f2)"
-    patch="$(echo "$MINECRAFT_VERSION" | cut -d. -f3)"
-    if [ -z "$patch" ]; then patch=0; fi
-    prefixe="${court}.${patch}."
+    #
+    # Exception : NeoForge 1.20.1, publié sous l'ancien artefact `forge` de son
+    # dépôt et préfixé par la version du jeu (« 1.20.1-47.1.106 »).
+    if [ "$MINECRAFT_VERSION" = "1.20.1" ]; then
+      artefact="net/neoforged/forge"
+      nom="forge"
+      prefixe="1.20.1-"
+    else
+      artefact="net/neoforged/neoforge"
+      nom="neoforge"
+      court="$(echo "$MINECRAFT_VERSION" | cut -d. -f2)"
+      patch="$(echo "$MINECRAFT_VERSION" | cut -d. -f3)"
+      if [ -z "$patch" ]; then patch=0; fi
+      prefixe="${court}.${patch}."
+    fi
+    index="https://maven.neoforged.net/releases/${artefact}/maven-metadata.xml"
 
     version="$LOADER_VERSION"
     if [ "$version" = "latest" ]; then
-      version="$(interroger "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml" \
+      version="$(interroger "$index" \
         | grep -oE '<version>[^<]+</version>' | sed 's/<[^>]*>//g' \
-        | grep "^${prefixe}" | grep -v -- '-beta' | tail -1)"
+        | grep "^${prefixe}" | grep -v -- '-beta' | tail -1 || true)"
       if [ -z "$version" ]; then
-        version="$(interroger "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml" \
-          | grep -oE '<version>[^<]+</version>' | sed 's/<[^>]*>//g' | grep "^${prefixe}" | tail -1)"
+        version="$(interroger "$index" \
+          | grep -oE '<version>[^<]+</version>' | sed 's/<[^>]*>//g' | grep "^${prefixe}" | tail -1 || true)"
       fi
+      if [ "$nom" = "forge" ]; then version="${version#1.20.1-}"; fi
     fi
     [ -n "$version" ] || fatal "NeoForge ne publie rien pour ${MINECRAFT_VERSION}."
 
+    if [ "$nom" = "forge" ]; then complet="1.20.1-${version}"; else complet="${version}"; fi
     telecharger \
-      "https://maven.neoforged.net/releases/net/neoforged/neoforge/${version}/neoforge-${version}-installer.jar" \
+      "https://maven.neoforged.net/releases/${artefact}/${complet}/${nom}-${complet}-installer.jar" \
       neoforge-installer.jar
     echo "   exécution de l'installeur NeoForge"
     java -jar neoforge-installer.jar --installServer >/dev/null || fatal "l'installeur NeoForge a échoué."
     rm -f neoforge-installer.jar neoforge-installer.jar.log
+    ARGS="libraries/${artefact}/${complet}/unix_args.txt"
     ;;
 
   spigot)
@@ -230,16 +261,16 @@ case "$LOADER" in
     # une panne du panel.
     echo "   BuildTools compile Spigot : comptez dix à trente minutes."
     apt-get install -y -qq git >/dev/null
-    mkdir -p /mnt/server/.buildtools
-    cd /mnt/server/.buildtools
+    mkdir -p "${RACINE}/.buildtools"
+    cd "${RACINE}/.buildtools"
     telecharger \
       "https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar" \
       BuildTools.jar
     java -jar BuildTools.jar --rev "$MINECRAFT_VERSION" >/dev/null || fatal "BuildTools a échoué."
-    cp -f "spigot-${MINECRAFT_VERSION}.jar" "/mnt/server/${SERVER_JARFILE}" 2>/dev/null \
-      || cp -f spigot-*.jar "/mnt/server/${SERVER_JARFILE}"
-    cd /mnt/server
-    rm -rf /mnt/server/.buildtools
+    cp -f "spigot-${MINECRAFT_VERSION}.jar" "${RACINE}/${SERVER_JARFILE}" 2>/dev/null \
+      || cp -f spigot-*.jar "${RACINE}/${SERVER_JARFILE}"
+    cd "$RACINE"
+    rm -rf "${RACINE}/.buildtools"
     ;;
 
   *)
@@ -258,10 +289,12 @@ fi
 # --- La commande de démarrage, écrite pour ce qui vient d'être installé -----
 ecrire_run() {
   # Forge et NeoForge 1.17+ : pas de jar lançable, un fichier d'arguments que
-  # Java lit avec `@`. Le chemin contient la version, on le cherche donc au
-  # lieu de le composer.
-  local args
-  args="$(find libraries -name unix_args.txt 2>/dev/null | head -1 || true)"
+  # Java lit avec `@`. Celui de la version **qui vient d'être installée**, et
+  # jamais le premier trouvé : une mise à jour de pack laisse les bibliothèques
+  # de l'ancienne version en place, et un serveur revenu à Paper garde celles
+  # de Forge — le premier `unix_args.txt` venu relançait alors l'ancien moteur.
+  local args=""
+  if [ -n "$ARGS" ] && [ -f "$ARGS" ]; then args="$ARGS"; fi
 
   {
     echo '#!/bin/bash'

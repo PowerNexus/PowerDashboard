@@ -9,6 +9,7 @@ import {
   eggs,
   eggVariables,
   mounts,
+  serverEngines,
   serverMounts,
   servers,
   serverVariables,
@@ -16,6 +17,7 @@ import {
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
+import { packLoaderStillInstalled } from "../marketplace/forge-loader";
 import { NotificationsService } from "../notifications/notifications.service";
 import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 
@@ -28,6 +30,8 @@ import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
  * dicter notre schéma, et hériter de ses contraintes à chacune de ses
  * versions.
  */
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 @Injectable()
 export class RemoteServerService {
   constructor(
@@ -146,22 +150,47 @@ export class RemoteServerService {
   }
 
   async markInstalled(nodeId: string, uuid: string, status: WingsInstallStatus): Promise<void> {
-    const touched = await this.db
-      .update(servers)
-      .set({
-        state: status.successful ? null : "install_failed",
-        // La date d'installation ne se réécrit qu'en cas de succès : un échec
-        // de réinstallation ne doit pas effacer la trace de la première.
-        ...(status.successful ? { installedAt: new Date().toISOString() } : {}),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(servers.id, uuid), eq(servers.nodeId, nodeId)))
-      .returning({ id: servers.id });
+    /*
+     * L'état et le moteur retenu changent d'un seul tenant. L'installation d'un
+     * modpack Forge relance l'egg et guette cet état : sans transaction, elle
+     * pouvait voir l'état levé, enregistrer le suivi du pack, puis le voir
+     * effacé par la suppression qui suivait ici.
+     */
+    const touched = await this.db.transaction(async (tx) => {
+      const rows = await tx
+        .update(servers)
+        .set({
+          state: status.successful ? null : "install_failed",
+          // La date d'installation ne se réécrit qu'en cas de succès : un échec
+          // de réinstallation ne doit pas effacer la trace de la première.
+          ...(status.successful ? { installedAt: new Date().toISOString() } : {}),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(and(eq(servers.id, uuid), eq(servers.nodeId, nodeId)))
+        .returning({ id: servers.id });
+      if (rows.length === 0) return false;
+
+      /*
+       * Le moteur retenu par le panel n'est plus vrai.
+       *
+       * Le script de l'egg vient de reposer le serveur : ce qu'il exécute est ce
+       * que ce script a installé, que le panel ne connaît pas. Garder la ligne
+       * ferait afficher « Paper 1.21.1 » sur un serveur revenu à l'egg, et
+       * proposer la mise à jour d'un pack que le script vient peut-être
+       * d'écraser. Seulement sur une réussite : un échec n'a rien remplacé.
+       *
+       * Sauf quand les variables nomment exactement le Forge ou le NeoForge du
+       * pack retenu (`packLoaderStillInstalled`) : le script de l'egg a reposé
+       * ce chargeur-là sans toucher aux mods, et le suivi reste vrai.
+       */
+      if (status.successful) await this.forgetEngine(tx, uuid);
+      return true;
+    });
 
     // Un serveur qui n'est pas sur ce node : rien n'a changé, et rien ne part.
     // Sans cette garde, un node pouvait faire sonner « installation échouée »
     // chez n'importe quel client et prévenir la facturation pour lui.
-    if (touched.length === 0) return;
+    if (!touched) return;
 
     /**
      * Le propriétaire est prévenu.
@@ -195,6 +224,31 @@ export class RemoteServerService {
       serverId: uuid,
       reinstall: status.reinstall,
     });
+  }
+
+  /** Oublie le moteur retenu, sauf si l'installation de l'egg l'a reposé à l'identique. */
+  private async forgetEngine(tx: Transaction, serverId: string): Promise<void> {
+    const [row] = await tx
+      .select({
+        kind: serverEngines.kind,
+        loader: serverEngines.loader,
+        gameVersion: serverEngines.gameVersion,
+      })
+      .from(serverEngines)
+      .where(eq(serverEngines.serverId, serverId))
+      .for("update")
+      .limit(1);
+    if (!row) return;
+
+    const declared = await tx
+      .select({ name: eggVariables.envVariable, value: serverVariables.value })
+      .from(serverVariables)
+      .innerJoin(eggVariables, eq(serverVariables.eggVariableId, eggVariables.id))
+      .where(eq(serverVariables.serverId, serverId));
+    const variables = Object.fromEntries(declared.map((v) => [v.name, v.value]));
+    if (packLoaderStillInstalled(row, variables)) return;
+
+    await tx.delete(serverEngines).where(eq(serverEngines.serverId, serverId));
   }
 
   /**

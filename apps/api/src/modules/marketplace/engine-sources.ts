@@ -15,11 +15,12 @@ import { Injectable, Logger } from "@nestjs/common";
  * panel n'héberge aucun jar et n'en relaie aucun octet — il résout une adresse,
  * et le daemon va chercher le fichier lui-même.
  *
- * **Forge et NeoForge sont volontairement absents.** Ils ne distribuent pas un
+ * **Forge et NeoForge sont absents de cette liste.** Ils ne distribuent pas un
  * serveur prêt à l'emploi mais un installeur, qui doit s'exécuter dans le
  * conteneur pour fabriquer le serveur. Cela relève de la réinstallation de
- * l'egg, pas du remplacement d'un fichier — et prétendre le contraire poserait
- * un jar qui ne démarre pas.
+ * l'egg, pas du remplacement d'un fichier : ils sont posés avec le modpack qui
+ * les demande, par `ForgeInstallService`, qui règle les variables de l'egg
+ * « Minecraft Java » et relance son installation.
  */
 
 const TIMEOUT_MS = 8000;
@@ -188,6 +189,26 @@ export class EngineSourcesService {
     return null;
   }
 
+  /** Nom lisible d'une plateforme, pour le suivi de ce qui est installé. */
+  labelOf(optionId: string): string {
+    return PLATFORMS.find((platform) => platform.id === optionId)?.label ?? optionId;
+  }
+
+  /**
+   * Le serveur Fabric d'un modpack, **au chargeur qu'il demande**.
+   *
+   * Un pack déclare la version de Fabric Loader avec laquelle ses mods ont été
+   * éprouvés ; prendre la plus récente à la place peut suffire, ou non. Sans
+   * version demandée (pack serveur CurseForge, qui ne la dit pas), la plus
+   * récente pour cette version du jeu.
+   */
+  fabricServer(
+    gameVersion: string,
+    loaderVersion = "",
+  ): Promise<{ url: string; fileName: string } | null> {
+    return this.fabricDownload(gameVersion, loaderVersion);
+  }
+
   /* --- PaperMC : paper, folia, velocity ------------------------------------ */
 
   private async paperVersions(project: string): Promise<EngineVersion[]> {
@@ -287,11 +308,17 @@ export class EngineSourcesService {
    */
   private async fabricDownload(
     gameVersion: string,
+    wanted = "",
   ): Promise<{ url: string; fileName: string } | null> {
     const loaders = await this.get<
       { loader: { version: string }; intermediary: { stable: boolean } }[]
     >(`${FABRIC_API}/versions/loader/${encodeURIComponent(gameVersion)}`);
-    const loader = loaders[0]?.loader.version;
+    // La version demandée doit exister chez Fabric pour ce jeu : une adresse
+    // composée avec une version inconnue rendrait une erreur au daemon.
+    const loader =
+      wanted === ""
+        ? loaders[0]?.loader.version
+        : loaders.find((entry) => entry.loader.version === wanted)?.loader.version;
 
     const installers = await this.get<{ version: string; stable: boolean }[]>(
       `${FABRIC_API}/versions/installer`,
@@ -301,7 +328,7 @@ export class EngineSourcesService {
     if (!loader || !installer) return null;
 
     return {
-      url: `${FABRIC_API}/versions/loader/${encodeURIComponent(gameVersion)}/${loader}/${installer}/server/jar`,
+      url: `${FABRIC_API}/versions/loader/${encodeURIComponent(gameVersion)}/${encodeURIComponent(loader)}/${installer}/server/jar`,
       fileName: `fabric-server-${gameVersion}-${loader}.jar`,
     };
   }

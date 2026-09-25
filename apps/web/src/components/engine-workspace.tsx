@@ -1,17 +1,12 @@
 "use client";
 
-import {
-  ENGINE_EXCLUSIONS,
-  type EngineOption,
-  overwritesServerFiles,
-} from "@gamedashboard/contracts";
+import { ENGINE_EXCLUSIONS, type EngineOption } from "@gamedashboard/contracts";
 import {
   AlertBanner,
   Badge,
   Button,
   Card,
   CardBody,
-  ConfirmDialog,
   EmptyState,
   Input,
   PageHeader,
@@ -23,6 +18,8 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
 import { type EngineState, type EulaState, installEngine } from "@/server/api/engine";
+import { EngineCurrent, EngineInstallState } from "./engine-current";
+import { EngineInstallDialog } from "./engine-install-dialog";
 import { ServerBlockBanner, useServerBlock } from "./server-block-context";
 
 /**
@@ -52,7 +49,9 @@ function EngineCard({
         <div className="flex items-start justify-between gap-3">
           <p className="min-w-0 truncate font-semibold text-fg">{option.label}</p>
           <Badge variant={option.kind === "pack" ? "warning" : "accent"}>
-            {option.kind === "pack" ? t("kindPack") : t("kindJar")}
+            {option.kind === "pack"
+              ? `${t("kindPack")}${option.source ? ` · ${sourceName(option.source)}` : ""}`
+              : t("kindJar")}
           </Badge>
         </div>
 
@@ -93,12 +92,15 @@ export function EngineWorkspace({
   serverId,
   initial,
   eula,
+  canBackup,
   query: initialQuery,
 }: {
   serverId: string;
   initial: EngineState;
   /** Contrat de licence Minecraft, quand ce serveur est concerné. */
   eula: EulaState | null;
+  /** Une sauvegarde préalable est possible (droit et quota). */
+  canBackup: boolean;
   query: string;
 }) {
   const t = useTranslations("engine");
@@ -116,20 +118,47 @@ export function EngineWorkspace({
    */
   const bloc = useServerBlock();
   /** Le choix en attente de confirmation : rien ne part sans passer par là. */
-  const [toInstall, setToInstall] = useState<{ option: EngineOption; versionId: string } | null>(
-    null,
-  );
+  const [toInstall, setToInstall] = useState<{
+    optionId: string;
+    kind: "jar" | "pack";
+    label: string;
+    versionId: string;
+    versionLabel: string;
+    update: boolean;
+  } | null>(null);
+  /*
+   * Une installation en cours (en tâche de fond, côté API) : rien d'autre ne
+   * se lance, et les catalogues ne sont pas relus — l'écran se rafraîchit
+   * jusqu'à sa fin (`EngineInstallState`).
+   */
+  const installing = initial.install?.status === "running";
+  const busy = pending || bloc !== null || installing;
 
-  const confirm = () =>
-    startTransition(async () => {
-      if (!toInstall) return;
-      const result = await installEngine(serverId, toInstall.option.id, toInstall.versionId);
-      setError(result.error);
-      setToInstall(null);
-      if (!result.error) router.refresh();
+  const choose = (option: EngineOption, versionId: string) =>
+    setToInstall({
+      optionId: option.id,
+      kind: option.kind,
+      label: option.label,
+      versionId,
+      versionLabel: option.versions.find((v) => v.id === versionId)?.label ?? "",
+      // Le même pack par-dessus lui-même est une mise à jour : les fichiers
+      // modifiés depuis sont gardés, ceux du pack précédent remplacés.
+      update: initial.current?.kind === "pack" && initial.current.optionId === option.id,
     });
 
-  const version = toInstall?.option.versions.find((v) => v.id === toInstall.versionId);
+  const confirm = (backupFirst: boolean) =>
+    startTransition(async () => {
+      if (!toInstall) return;
+      const outcome = await installEngine(
+        serverId,
+        toInstall.optionId,
+        toInstall.versionId,
+        backupFirst,
+      );
+      setError(outcome.error);
+      setToInstall(null);
+      if (!outcome.error) router.refresh();
+    });
 
   return (
     <PageTemplate
@@ -141,8 +170,25 @@ export function EngineWorkspace({
           {error}
         </AlertBanner>
       ) : null}
+      <EngineInstallState install={initial.install} />
 
-      {initial.runtime === null ? (
+      <EngineCurrent
+        current={initial.current}
+        busy={busy}
+        onUpdate={(versionId, versionLabel) =>
+          initial.current &&
+          setToInstall({
+            optionId: initial.current.optionId,
+            kind: "pack",
+            label: initial.current.label,
+            versionId,
+            versionLabel,
+            update: true,
+          })
+        }
+      />
+
+      {installing ? null : initial.runtime === null ? (
         <AlertBanner variant="warning" title={t("unavailable")}>
           {initial.unavailableReason}
         </AlertBanner>
@@ -170,8 +216,8 @@ export function EngineWorkspace({
                   <EngineCard
                     key={option.id}
                     option={option}
-                    busy={pending || bloc !== null}
-                    onInstall={(versionId) => setToInstall({ option, versionId })}
+                    busy={busy}
+                    onInstall={(versionId) => choose(option, versionId)}
                   />
                 ))}
               </div>
@@ -180,14 +226,15 @@ export function EngineWorkspace({
             {/*
               Les plateformes connues mais absentes, et pourquoi.
 
-              Sans cette liste, « Forge n'est pas proposé » se lit comme une
+              Sans cette liste, « Quilt n'est pas proposé » se lit comme une
               panne du panel : on cherche un bouton, on recharge, on finit par
-              demander au support. Ce sont des faits sur l'outil — Forge et
-              NeoForge ne publient qu'un installeur, Quilt qu'un profil de
-              lancement — et les dire coûte trois lignes.
+              demander au support. Ce sont des faits sur l'outil — Quilt ne
+              publie qu'un profil de lancement — et les dire coûte trois lignes.
+              Forge et NeoForge n'y sont plus : ils arrivent avec leur modpack,
+              dont la section le dit.
 
               Affichées seulement quand des plateformes le sont aussi : sur un
-              jeu qui n'est pas Minecraft-Java, expliquer l'absence de Forge
+              jeu qui n'est pas Minecraft-Java, expliquer l'absence de Quilt
               n'apprendrait rien à personne.
             */}
             {initial.platforms.length > 0 ? (
@@ -210,6 +257,15 @@ export function EngineWorkspace({
             <section className="flex flex-col gap-3">
               <h2 className="font-semibold text-fg text-lg">{t("packs")}</h2>
               <p className="text-muted text-sm">{t("packsHint")}</p>
+              {/* Un catalogue muet le dit : sans clé, CurseForge ne rend rien,
+                  et une liste plus courte ne l'expliquerait pas. */}
+              {initial.packSources
+                .filter((s) => s.error !== null)
+                .map((s) => (
+                  <p key={s.source} className="text-muted text-xs">
+                    {t("packSourceDown", { source: sourceName(s.source), reason: s.error ?? "" })}
+                  </p>
+                ))}
 
               <form
                 className="flex flex-wrap gap-3"
@@ -241,8 +297,8 @@ export function EngineWorkspace({
                     <EngineCard
                       key={option.id}
                       option={option}
-                      busy={pending || bloc !== null}
-                      onInstall={(versionId) => setToInstall({ option, versionId })}
+                      busy={busy}
+                      onInstall={(versionId) => choose(option, versionId)}
                     />
                   ))}
                 </div>
@@ -252,39 +308,29 @@ export function EngineWorkspace({
         </>
       )}
 
-      {/*
-       * La confirmation dit ce qui va être écrasé, et ce n'est pas le même
-       * texte selon la nature du moteur : un jar remplace un fichier, un
-       * modpack déverse une arborescence par-dessus l'existante. La différence
-       * ne se rattrape pas après coup.
-       */}
-      <ConfirmDialog
+      <EngineInstallDialog
         open={toInstall !== null}
-        onOpenChange={(open) => !open && setToInstall(null)}
-        title={t("confirmTitle", {
-          name: toInstall?.option.label ?? "",
-          version: version?.label ?? "",
-        })}
-        description={[
-          toInstall && overwritesServerFiles(toInstall.option.kind)
-            ? t("confirmPackBody")
-            : t("confirmJarBody"),
-          /*
-           * Le retrait de l'acceptation est annoncé **avant** le geste.
-           *
-           * Un serveur qui refuse de démarrer après une installation réussie
-           * est le genre de surprise qu'on met vingt minutes à comprendre. Le
-           * dire ici coûte une phrase et l'évite entièrement.
-           */
-          eula?.applicable ? t("confirmEulaReset") : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        confirmLabel={t("install")}
-        destructive
-        loading={pending}
+        title={
+          toInstall?.update
+            ? t("confirmUpdateTitle", { name: toInstall.label, version: toInstall.versionLabel })
+            : t("confirmTitle", {
+                name: toInstall?.label ?? "",
+                version: toInstall?.versionLabel ?? "",
+              })
+        }
+        kind={toInstall?.kind ?? "jar"}
+        update={toInstall?.update ?? false}
+        eulaApplicable={eula?.applicable === true}
+        canBackup={canBackup}
+        pending={pending}
+        onCancel={() => setToInstall(null)}
         onConfirm={confirm}
       />
     </PageTemplate>
   );
+}
+
+/** Nom lisible d'un catalogue de modpacks. */
+function sourceName(source: string): string {
+  return source === "curseforge" ? "CurseForge" : source === "modrinth" ? "Modrinth" : source;
 }
