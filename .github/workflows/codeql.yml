@@ -1,0 +1,108 @@
+name: CodeQL
+
+# Analyse statique du TypeScript et des workflows, publiée dans l'onglet
+# Security › Code scanning du dépôt.
+#
+# Remplace la « configuration par défaut » de GitHub, qui réclame un runner
+# hébergé : elle n'a jamais tourné ici (runners hébergés suspendus). Elle doit
+# être **désactivée** dans Settings › Code security › CodeQL analysis, sinon
+# GitHub refuse les résultats de ce workflow. L'analyse tourne dans le
+# conteneur Linux du job (infra/ci/codeql.sh) ; le runner ne fait que
+# téléverser les fichiers SARIF.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Une fois par semaine : les requêtes s'enrichissent, et une faille connue
+  # dans du code qui ne bouge plus doit finir par se voir.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+# Par événement aussi : l'analyse de la semaine et un push sur main ne
+# s'annulent pas l'une l'autre.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  analyse:
+    name: Analyse CodeQL
+    # Jamais le code d'une PR venue d'un fork sur nos machines : voir
+    # docs/runner-auto-heberge.md.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}
+    # Le premier passage télécharge le CLI (700 Mo) ; ensuite, deux minutes
+    # et demie (l'archive est revérifiée et extraite à chaque job).
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Téléverser les résultats dans Code scanning.
+      security-events: write
+      # Exigé par le téléversement sur un dépôt privé : il lit l'exécution.
+      actions: read
+
+    steps:
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
+      # Sans jeton dans .git/config : le dépôt est copié tel quel dans le
+      # conteneur, où tournent des scripts que la PR peut changer, et le jeton
+      # de ce job peut écrire dans Code scanning. upload-sarif prend le sien.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Conteneur Linux
+        run: bash infra/ci/linux.sh ouvrir --codeql
+
+      - name: Analyser
+        run: bash infra/ci/linux.sh lancer 'bash infra/ci/codeql.sh codeql-resultats'
+
+      - name: Rapatrier les résultats
+        run: bash infra/ci/linux.sh rapatrier codeql-resultats
+
+      # Un envoi par langage, chacun sous sa catégorie : GitHub refuse deux
+      # analyses du même outil et de la même catégorie dans un seul envoi.
+      - name: Téléverser (TypeScript)
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: codeql-resultats/javascript.sarif
+          category: /language:javascript
+
+      - name: Téléverser (workflows)
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: codeql-resultats/actions.sarif
+          category: /language:actions
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer

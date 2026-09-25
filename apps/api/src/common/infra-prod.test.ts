@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -484,7 +485,7 @@ describe("sauvegarde d'exploitation (app.sh backup)", () => {
  */
 describe("actions GitHub des workflows", () => {
   const dossier = join(RACINE, ".github", "workflows");
-  const workflows = ["ci.yml", "release.yml", "captures.yml"].map((nom) =>
+  const workflows = ["ci.yml", "release.yml", "captures.yml", "codeql.yml"].map((nom) =>
     readFileSync(join(dossier, nom), "utf8"),
   );
   const actions = workflows.flatMap((texte) =>
@@ -503,7 +504,7 @@ describe("actions GitHub des workflows", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
-    expect(cibles.length).toBe(5);
+    expect(cibles.length).toBe(6);
     for (const cible of cibles) {
       expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '"self-hosted"') }}`);
     }
@@ -524,7 +525,7 @@ describe("actions GitHub des workflows", () => {
         .map(([bloc]) => bloc)
         .filter((bloc) => bloc.includes("runs-on:")),
     );
-    expect(jobs.length).toBe(5);
+    expect(jobs.length).toBe(6);
     for (const bloc of jobs) {
       // Régression : le service du runner ne trouvait pas bash (« bash:
       // command not found » dès la première étape). Le bash de Git est posé
@@ -614,7 +615,7 @@ describe("actions GitHub des workflows", () => {
    * en tête ; un job qui a besoin de plus le déclare lui-même, avec sa raison.
    */
   it("ne donnent au jeton que la lecture du dépôt, en tête de chaque workflow", () => {
-    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml"].map(
+    for (const [nom, texte] of ["ci.yml", "release.yml", "captures.yml", "codeql.yml"].map(
       (fichier, rang) => [fichier, workflows[rang] ?? ""] as const,
     )) {
       expect(texte, nom).toMatch(/^permissions:\n {2}contents: read\n\n/m);
@@ -654,6 +655,129 @@ describe("actions GitHub des workflows", () => {
     for (const script of scripts) {
       expect(script).not.toMatch(/\$\{\{\s*github\.(ref|head_ref|ref_name|event)\b/);
     }
+  });
+
+  /*
+   * Régression : la « configuration par défaut » de CodeQL réclamait un
+   * runner hébergé (`ubuntu-latest`) et n'a jamais tourné ; aucun scanner ne
+   * lisait le TypeScript. codeql.yml l'analyse sur notre runner, dans le
+   * conteneur du job, avec un CLI épinglé par empreinte.
+   */
+  it("analysent le TypeScript et les workflows avec CodeQL, sur notre runner", () => {
+    const codeql = workflows[3] as string;
+    expect(codeql).toContain(
+      "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
+    );
+    expect(codeql).toMatch(/^ {6}security-events: write$/m);
+    expect(codeql).toContain(
+      "run: bash infra/ci/linux.sh lancer 'bash infra/ci/codeql.sh codeql-resultats'",
+    );
+    // Un envoi par langage : deux analyses de même catégorie dans un envoi
+    // sont refusées.
+    for (const langage of ["javascript", "actions"]) {
+      expect(codeql).toContain(`sarif_file: codeql-resultats/${langage}.sarif`);
+      expect(codeql).toContain(`category: /language:${langage}`);
+    }
+    // Jamais `init`/`analyze`, qui tourneraient directement sur Windows.
+    expect(codeql).not.toMatch(/codeql-action\/(init|analyze|autobuild)@/);
+
+    const outils = readFileSync(join(RACINE, "infra", "ci", "outils.env"), "utf8");
+    expect(outils).toMatch(/^CODEQL_VERSION=\d+\.\d+\.\d+$/m);
+    expect(outils).toMatch(/^CODEQL_SHA256=[0-9a-f]{64} # codeql-bundle-linux64\.tar\.gz$/m);
+    const script = readFileSync(join(RACINE, "infra", "ci", "codeql.sh"), "utf8");
+    // L'archive est vérifiée avant d'être extraite.
+    expect(script.indexOf("sha256sum -c")).toBeGreaterThan(0);
+    expect(script.indexOf("tar -xzf")).toBeGreaterThan(script.indexOf("sha256sum -c"));
+    expect(script).toContain("--build-mode=none");
+    expect(script).toContain("langages=(javascript-typescript actions)");
+  });
+
+  /*
+   * Régression (revue de #50) : le cache de CodeQL était monté en écriture
+   * dans le conteneur de tous les jobs, y compris ceux qui exécutent le code
+   * des dépendances, et le CLI extrait n'était vérifié qu'au téléchargement ;
+   * le checkout laissait le jeton du job (security-events: write) dans
+   * .git/config, copié dans le conteneur avec le dépôt.
+   */
+  it("ne laissent au job CodeQL rien qu'un autre job aurait pu changer", () => {
+    const codeql = workflows[3] as string;
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    // Le volume n'est monté que sur demande, et seul codeql.yml la fait.
+    expect(linux).toContain('if [ "$codeql" = 1 ]; then options+=(-v gd-ci-codeql:/codeql); fi');
+    expect(linux.match(/gd-ci-codeql/g)?.length).toBe(1);
+    expect(codeql).toContain("run: bash infra/ci/linux.sh ouvrir --codeql\n");
+    for (const texte of workflows.slice(0, 3)) {
+      expect(texte).not.toContain("--codeql");
+    }
+    // Aucun CLI gardé tout prêt : l'archive du cache est revérifiée à chaque
+    // job, puis extraite hors du cache, dans le conteneur.
+    const script = readFileSync(join(RACINE, "infra", "ci", "codeql.sh"), "utf8");
+    const code = script.replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^if ! verifier "\$archive"; then$/m);
+    expect(code).toMatch(/^outils=\$\(mktemp -d\)\ntar -xzf "\$archive" -C "\$outils"$/m);
+    expect(code).toContain("codeql=$outils/codeql/codeql");
+    expect(code).not.toMatch(/-x "\$racine|mv [^\n]*\/codeql\/[0-9]/);
+    // Pas de jeton dans le dépôt copié.
+    expect(codeql).toMatch(
+      /- uses: actions\/checkout@[0-9a-f]{40} # v[\d.]+\n {8}with:\n {10}persist-credentials: false\n/,
+    );
+  });
+
+  /*
+   * Régression (#50, runner) : « Query evaluation ran out of Java heap (Java
+   * heap (and arrays) maximum: 673 MiB) », code 99. Sans `--ram`, le CLI part
+   * du tas par défaut de sa JVM, le quart de la mémoire vue, relevé à 2 Gio :
+   * dans la machine virtuelle de Docker Desktop, 1,1 Go de tas pour 24 fils.
+   * L'évaluateur reçoit désormais la mémoire du conteneur, moins la réserve
+   * de l'action officielle de CodeQL ; le calcul est rendu par bash à partir
+   * du script, sur des machines d'essai.
+   */
+  it("donnent à l'évaluateur de CodeQL la mémoire du conteneur", () => {
+    const chemin = join(RACINE, "infra", "ci", "codeql.sh");
+    const code = readFileSync(chemin, "utf8").replace(/^\s*#.*$/gm, "");
+    expect(code).toMatch(/^ram=\$\(memoire_evaluateur ""\)$/m);
+    const analyses = code.match(/database analyze .*$/gm) ?? [];
+    expect(analyses.length).toBe(1);
+    expect(analyses[0]).toContain('--ram="$ram"');
+
+    const memoire = (meminfoKo: number, cgroup: { v2?: string; v1?: string } = {}) => {
+      const racine = mkdtempSync(join(tmpdir(), "gd-memoire-"));
+      try {
+        const sys = join(racine, "sys", "fs", "cgroup");
+        mkdirSync(join(racine, "proc"));
+        mkdirSync(join(sys, "memory"), { recursive: true });
+        writeFileSync(join(racine, "proc", "meminfo"), `MemTotal:       ${meminfoKo} kB\n`);
+        if (cgroup.v2) writeFileSync(join(sys, "memory.max"), `${cgroup.v2}\n`);
+        if (cgroup.v1) {
+          writeFileSync(join(sys, "memory", "memory.limit_in_bytes"), `${cgroup.v1}\n`);
+        }
+        const sortie = execFileSync(
+          "bash",
+          [
+            "-c",
+            `set -euo pipefail; source <(sed -n '/^memoire_evaluateur()/,/^}$/p' "$1"); memoire_evaluateur "$2"`,
+            "rendu",
+            chemin,
+            racine,
+          ],
+          { encoding: "utf8" },
+        );
+        return Number(sortie.trim());
+      } finally {
+        rmSync(racine, { recursive: true, force: true });
+      }
+    };
+    const gio = 1024 * 1024;
+    // Machine virtuelle de 8 Gio sans limite : 1 Gio pour le système, et non
+    // plus le plancher de 2 Gio du CLI.
+    expect(memoire(8 * gio, { v2: "max" })).toBe(7168);
+    // Au-delà de 8 Gio, 5 % de l'excédent en plus.
+    expect(memoire(16 * gio, { v2: "max" })).toBe(16384 - 1024 - 409);
+    // La limite du conteneur l'emporte sur la machine (cgroup v2, puis v1).
+    expect(memoire(16 * gio, { v2: String(4 * 1024 ** 3) })).toBe(3072);
+    expect(memoire(16 * gio, { v1: String(6 * 1024 ** 3) })).toBe(5120);
+    // « Pas de limite » en v1 est un nombre géant : la machine compte.
+    expect(memoire(8 * gio, { v1: "9223372036854771712" })).toBe(7168);
   });
 
   // Un conteneur laissé par un job tué empêchait Docker de se mettre en veille.
