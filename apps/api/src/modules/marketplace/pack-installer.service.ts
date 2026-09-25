@@ -12,6 +12,8 @@ import {
   gameVersionOf,
   parseManifest,
 } from "./curseforge-pack";
+import type { LoaderResult } from "./forge-install.service";
+import { loaderName } from "./forge-loader";
 import { isTrustedDownload, ModpackSourceService } from "./modpack-source";
 import { nomSur, planifier, suiviApres } from "./pack-files";
 import { PackWorkspace } from "./pack-workspace";
@@ -57,8 +59,10 @@ export interface PackOutcome {
   kept: string[];
   /** Fichiers de la version précédente retirés. */
   removed: number;
-  /** Ce qui reste à faire à la main, dit en clair (chargeur Forge, fichiers du client). */
+  /** Ce qui reste à faire à la main, dit en clair (chargeur non posé, fichiers du client). */
   notice: string | null;
+  /** Le chargeur posé avec le pack (« Forge 47.3.0 pour Minecraft 1.20.1 »), `null` si aucun. */
+  loader: string | null;
 }
 
 /** Une installation préparée : tout ce qui pouvait être refusé l'a été. */
@@ -89,11 +93,14 @@ interface Incoming {
   notices: string[];
 }
 
-/** Le chargeur de serveur à poser, résolu par l'appelant (`EngineService`). */
+/**
+ * Le chargeur de serveur à poser, résolu par l'appelant (`EngineService`) :
+ * Fabric par un jar, Forge et NeoForge par une réinstallation de l'egg.
+ */
 export type LoaderInstaller = (
   loader: { loader: PackLoader; version: string } | null,
   gameVersion: string,
-) => Promise<string | null>;
+) => Promise<LoaderResult>;
 
 @Injectable()
 export class PackInstallerService {
@@ -245,12 +252,12 @@ export class PackInstallerService {
        * du pack pour neufs — écrasant ceux que l'utilisateur avait modifiés,
        * et laissant ceux que la nouvelle version retire.
        */
-      let loaderNotice: string | null;
+      let loaderResult: LoaderResult;
       try {
-        loaderNotice = await installLoader(incoming.loader, gameVersion);
+        loaderResult = await installLoader(incoming.loader, gameVersion);
       } catch (error) {
         this.logger.warn(`Chargeur non posé sur ${serverId} : ${describe(error)}`);
-        loaderNotice = echecChargeur(incoming.loader);
+        loaderResult = { notice: echecChargeur(incoming.loader), installed: null };
       }
 
       const missing = [...failedMoves, ...failedPulls];
@@ -274,7 +281,8 @@ export class PackInstallerService {
         missing,
         kept: plan.garder,
         removed: plan.retirer.length,
-        notice: [...incoming.notices, loaderNotice].filter(Boolean).join(" ") || null,
+        notice: [...incoming.notices, loaderResult.notice].filter(Boolean).join(" ") || null,
+        loader: loaderResult.installed,
       };
     } finally {
       await ws.cleanup();
@@ -450,9 +458,7 @@ function describe(error: unknown): string {
 
 /** Ce que l'écran dit quand le chargeur n'a pas pu être posé après les fichiers. */
 function echecChargeur(loader: { loader: PackLoader; version: string } | null): string {
-  const name = loader
-    ? `${loader.loader === "fabric" ? "Fabric Loader" : loader.loader} ${loader.version}`.trim()
-    : "le chargeur";
+  const name = loader ? `${loaderName(loader.loader)} ${loader.version}`.trim() : "le chargeur";
   return `Les fichiers du pack sont posés, mais la pose de ${name} a échoué : le serveur peut ne pas démarrer. Relancez l'installation de cette version pour reposer le chargeur.`;
 }
 

@@ -84,8 +84,8 @@ const INSTALL_REFRESH_MS = 5_000;
  *
  * Elle se déroule en tâche de fond : tant qu'elle est en cours, l'écran se
  * relit de lui-même (`AutoRefresh`), puis montre son compte rendu — fichiers
- * manquants, fichiers gardés parce que modifiés, ce qui reste à faire à la
- * main — ou la raison de son échec.
+ * manquants, fichiers gardés parce que modifiés, chargeur posé (Fabric, Forge
+ * ou NeoForge), ce qui reste à faire à la main — ou la raison de son échec.
  */
 export function EngineInstallState({ install }: { install: EngineInstallRun | null }) {
   const t = useTranslations("engine");
@@ -144,6 +144,7 @@ export function EngineInstallState({ install }: { install: EngineInstallRun | nu
         {result.kept.length > 0 ? (
           <span>{t("reportKept", { files: shown(result.kept) })}</span>
         ) : null}
+        {result.loader ? <span>{t("reportLoader", { loader: result.loader })}</span> : null}
         {result.notice ? <span>{result.notice}</span> : null}
         {finished}
       </span>

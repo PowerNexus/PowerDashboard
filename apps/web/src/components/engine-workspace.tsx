@@ -226,14 +226,15 @@ export function EngineWorkspace({
             {/*
               Les plateformes connues mais absentes, et pourquoi.
 
-              Sans cette liste, « Forge n'est pas proposé » se lit comme une
+              Sans cette liste, « Quilt n'est pas proposé » se lit comme une
               panne du panel : on cherche un bouton, on recharge, on finit par
-              demander au support. Ce sont des faits sur l'outil — Forge et
-              NeoForge ne publient qu'un installeur, Quilt qu'un profil de
-              lancement — et les dire coûte trois lignes.
+              demander au support. Ce sont des faits sur l'outil — Quilt ne
+              publie qu'un profil de lancement — et les dire coûte trois lignes.
+              Forge et NeoForge n'y sont plus : ils arrivent avec leur modpack,
+              dont la section le dit.
 
               Affichées seulement quand des plateformes le sont aussi : sur un
-              jeu qui n'est pas Minecraft-Java, expliquer l'absence de Forge
+              jeu qui n'est pas Minecraft-Java, expliquer l'absence de Quilt
               n'apprendrait rien à personne.
             */}
             {initial.platforms.length > 0 ? (

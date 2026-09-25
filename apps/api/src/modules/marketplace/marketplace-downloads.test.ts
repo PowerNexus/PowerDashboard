@@ -12,6 +12,7 @@ import type { CurseForgePackService } from "./curseforge-pack";
 import { EngineService } from "./engine.service";
 import type { EngineSourcesService } from "./engine-sources";
 import type { EulaService } from "./eula.service";
+import type { ForgeInstallService } from "./forge-install.service";
 import { MarketplaceService } from "./marketplace.service";
 import type { ModpackSourceService } from "./modpack-source";
 import type { ModrinthClient } from "./modrinth.client";
@@ -159,6 +160,7 @@ describe("modpack : archive rendue par Modrinth", () => {
       { reset: vi.fn(async () => false) } as unknown as EulaService,
       installer,
       {} as CurseForgePackService,
+      {} as ForgeInstallService,
     );
     vi.spyOn(svc as unknown as { runtimeOf: () => unknown }, "runtimeOf").mockResolvedValue({
       ...RUNTIME,

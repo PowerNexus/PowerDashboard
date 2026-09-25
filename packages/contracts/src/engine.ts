@@ -101,8 +101,14 @@ export const EngineInstallReport = z.object({
   kept: z.array(z.string()),
   /** Fichiers de la version précédente du pack retirés. */
   removed: z.number().int().nonnegative(),
-  /** Ce qui reste à faire à la main, en clair (chargeur Forge, fichiers du client…). */
+  /** Ce qui reste à faire à la main, en clair (chargeur non posé, fichiers du client…). */
   notice: z.string().nullable(),
+  /**
+   * Chargeur posé avec le pack (« Forge 47.3.0 pour Minecraft 1.20.1 ») :
+   * Fabric par son jar, Forge et NeoForge par leur installeur, que lance une
+   * réinstallation de l'egg « Minecraft Java ». `null` quand aucun ne l'a été.
+   */
+  loader: z.string().nullable(),
   /** L'acceptation du contrat de licence a été retirée (nouveau moteur). */
   eulaReset: z.boolean(),
 });
@@ -208,27 +214,18 @@ export interface EngineExclusion {
 /**
  * Pourquoi certaines plateformes ne sont pas proposées.
  *
- * Dire « Forge n'est pas là » sans dire pourquoi ferait chercher une panne.
- * Ces raisons sont des **faits sur l'outil**, relevés chez l'éditeur, et non
- * des limites du panel :
+ * Dire « Quilt n'est pas là » sans dire pourquoi ferait chercher une panne.
+ * La raison est un **fait sur l'outil**, relevé chez l'éditeur : la méta de
+ * Quilt rend un **profil de lancement JSON** là où celle de Fabric rend un
+ * `application/java-archive`. Poser ce fichier à la place du serveur donnerait
+ * un jar qui ne démarre pas.
  *
- * - le maven de NeoForge publie `installer`, `universal`, `sources` et
- *   `userdev` — aucun serveur lançable tel quel ;
- * - Forge distribue de même un installeur, listé par ses promotions ;
- * - la méta de Quilt rend un **profil de lancement JSON** là où celle de
- *   Fabric rend un `application/java-archive`. C'est cette différence-là qui
- *   fait que Fabric est proposé et Quilt non.
- *
- * Poser l'un de ces fichiers à la place du serveur donnerait un jar qui ne
- * démarre pas — une panne au redémarrage suivant, pour un écran qui avait dit
- * « installé ».
+ * Forge et NeoForge n'y figurent plus : ils ne publient qu'un installeur, mais
+ * le panel le fait exécuter par l'egg « Minecraft Java » (réinstallation, mondes
+ * et mods conservés) quand un modpack les demande. Ils arrivent donc avec leur
+ * pack, et l'écran des modpacks le dit.
  */
 export const ENGINE_EXCLUSIONS: EngineExclusion[] = [
-  {
-    label: "Forge et NeoForge",
-    reason:
-      "Ils ne distribuent pas un serveur prêt à l'emploi mais un installeur, qui doit s'exécuter dans le conteneur pour fabriquer le serveur et télécharger ses bibliothèques. Cela relève du changement de jeu, pas du remplacement d'un fichier : demandez à votre hébergeur de basculer ce serveur sur un egg Forge ou NeoForge, avec réinstallation.",
-  },
   {
     label: "Quilt",
     reason:

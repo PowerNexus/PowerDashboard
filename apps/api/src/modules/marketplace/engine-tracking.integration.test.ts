@@ -16,6 +16,7 @@ import type { CurseForgePackService } from "./curseforge-pack";
 import { EngineService, INSTALL_INTERRUPTED } from "./engine.service";
 import type { EngineSourcesService } from "./engine-sources";
 import type { EulaService } from "./eula.service";
+import type { ForgeInstallService } from "./forge-install.service";
 import type { ModpackSourceService } from "./modpack-source";
 import type { PackInstallerService, PackOutcome, PreparedPack } from "./pack-installer.service";
 import type { DetectedRuntime } from "./server-runtime";
@@ -65,6 +66,7 @@ function outcome(versionId: string, files: Record<string, string>): PackOutcome 
     kept: [],
     removed: 0,
     notice: null,
+    loader: null,
   };
 }
 
@@ -134,6 +136,7 @@ describe.skipIf(!HAS_DATABASE)("suivi du moteur installé (intégration)", () =>
       { reset: vi.fn(async () => false) } as unknown as EulaService,
       installer as unknown as PackInstallerService,
       { search: vi.fn(async () => []), newerVersion: vi.fn() } as unknown as CurseForgePackService,
+      {} as ForgeInstallService,
     );
     const priv = service as unknown as Record<string, () => unknown>;
     vi.spyOn(priv, "runtimeOf" as never).mockResolvedValue(FABRIC as never);

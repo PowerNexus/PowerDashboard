@@ -39,6 +39,8 @@ import {
 import { CurseForgePackService } from "./curseforge-pack";
 import { EngineSourcesService } from "./engine-sources";
 import { EulaService } from "./eula.service";
+import { ForgeInstallService, type LoaderResult } from "./forge-install.service";
+import { loaderName } from "./forge-loader";
 import type { UpdateFound } from "./marketplace.service";
 import { ModpackSourceService } from "./modpack-source";
 import {
@@ -148,6 +150,7 @@ export class EngineService implements OnApplicationBootstrap {
     @Inject(EulaService) private readonly eula: EulaService,
     @Inject(PackInstallerService) private readonly installer: PackInstallerService,
     @Inject(CurseForgePackService) private readonly curseforge: CurseForgePackService,
+    @Inject(ForgeInstallService) private readonly forge: ForgeInstallService,
   ) {}
 
   /**
@@ -235,7 +238,7 @@ export class EngineService implements OnApplicationBootstrap {
       label: row.label,
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,
-      report: (row.report as EngineInstallReport | null) ?? null,
+      report: reportOf(row.report),
       error: row.error,
     };
   }
@@ -595,6 +598,7 @@ export class EngineService implements OnApplicationBootstrap {
           kept: outcome.kept,
           removed: outcome.removed,
           notice: outcome.notice,
+          loader: outcome.loader,
         };
       } else {
         installed = await this.installJar(
@@ -711,26 +715,43 @@ export class EngineService implements OnApplicationBootstrap {
    * demande, sous le nom que l'egg attend — c'était la marche manquante, le
    * pack se déballait sur le chargeur en place quelle que soit sa version.
    * **Forge et NeoForge** : ils ne publient qu'un installeur, qui doit tourner
-   * dans le conteneur (`ENGINE_EXCLUSIONS`) ; le panel ne le lance pas, et le
-   * dit plutôt que de laisser croire que c'est fait. Rend ce message, ou `null`.
+   * dans le conteneur ; `ForgeInstallService` règle les variables de l'egg
+   * « Minecraft Java » et relance son installation, qui l'exécute. Rend ce qui
+   * a été posé, et ce qui reste à faire.
    */
   private async installLoader(
     serverId: string,
     loader: { loader: PackLoader; version: string } | null,
     gameVersion: string,
-  ): Promise<string | null> {
-    if (!loader) return null;
+  ): Promise<LoaderResult> {
+    if (!loader) return { notice: null, installed: null };
     if (loader.loader === "fabric") {
-      if (gameVersion === "") return null;
+      if (gameVersion === "") return { notice: null, installed: null };
       const jar = await this.sources.fabricServer(gameVersion, loader.version).catch(() => null);
       if (!jar) {
-        return `Fabric Loader ${loader.version} pour Minecraft ${gameVersion} est introuvable chez Fabric : le chargeur en place a été gardé.`;
+        return {
+          notice: `Fabric Loader ${loader.version} pour Minecraft ${gameVersion} est introuvable chez Fabric : le chargeur en place a été gardé.`,
+          installed: null,
+        };
       }
       await this.placeJar(serverId, jar);
-      return null;
+      return {
+        notice: null,
+        installed: `${`Fabric Loader ${loader.version}`.trim()} pour Minecraft ${gameVersion}`,
+      };
     }
-    const name = loader.loader === "neoforge" ? "NeoForge" : "Forge";
-    return `Ce pack demande ${name}${loader.version ? ` ${loader.version}` : ""}${gameVersion ? ` pour Minecraft ${gameVersion}` : ""}. Le panel ne lance pas l'installeur de ${name} : vérifiez que l'egg de ce serveur installe cette version, et réinstallez-le depuis les paramètres si besoin.`;
+    if (loader.loader === "forge" || loader.loader === "neoforge") {
+      return this.forge.install(serverId, {
+        family: loader.loader,
+        version: loader.version,
+        gameVersion,
+      });
+    }
+    const name = loaderName(loader.loader);
+    return {
+      notice: `Ce pack demande ${name}${loader.version ? ` ${loader.version}` : ""}${gameVersion ? ` pour Minecraft ${gameVersion}` : ""}. Le panel ne sait pas poser ce chargeur : installez-le à la main.`,
+      installed: null,
+    };
   }
 
   /**
@@ -790,6 +811,7 @@ export class EngineService implements OnApplicationBootstrap {
       kept: [],
       removed: 0,
       notice: null,
+      loader: null,
     };
   }
 
@@ -947,6 +969,16 @@ export function reasonOf(error: unknown): string {
   }
   if (error instanceof HttpException) return error.message;
   return "L'installation a échoué sur une erreur interne du panel : l'exploitant en trouvera la cause dans le journal de l'API.";
+}
+
+/**
+ * Le compte rendu retenu en base. Ceux écrits avant l'ajout de `loader` ne
+ * l'ont pas : ils le prennent nul plutôt que de le laisser indéfini à l'écran.
+ */
+function reportOf(value: unknown): EngineInstallReport | null {
+  if (!value || typeof value !== "object") return null;
+  const report = value as EngineInstallReport;
+  return { ...report, loader: report.loader ?? null };
 }
 
 function isPackSource(value: string): value is PackSource {

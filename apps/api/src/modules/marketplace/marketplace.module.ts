@@ -7,6 +7,7 @@ import { CurseForgePackService } from "./curseforge-pack";
 import { EngineService } from "./engine.service";
 import { EngineSourcesService } from "./engine-sources";
 import { EulaService } from "./eula.service";
+import { ForgeInstallService } from "./forge-install.service";
 import { MarketplaceService } from "./marketplace.service";
 import { ModpackSourceService } from "./modpack-source";
 import { ModrinthClient } from "./modrinth.client";
@@ -50,6 +51,7 @@ import { SpigetClient } from "./spiget.client";
     ModpackSourceService,
     CurseForgePackService,
     PackInstallerService,
+    ForgeInstallService,
     EulaService,
   ],
   exports: [MarketplaceService, EngineService, EulaService],

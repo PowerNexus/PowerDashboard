@@ -52,6 +52,20 @@ export class FauxWings {
 
   syncServer = async () => {};
 
+  /**
+   * `POST /api/servers/:id/reinstall` : Wings répond 202 et mène le script de
+   * l'egg en tâche de fond, puis rend compte au panel (`POST …/install`).
+   * `onReinstall` joue ce compte rendu ; sans lui, l'installation ne finit
+   * jamais, comme un node qui ne rappelle pas.
+   */
+  onReinstall: ((server: string) => Promise<void>) | null = null;
+
+  reinstallServer = async (server: string) => {
+    this.events.push("reinstall");
+    const report = this.onReinstall;
+    if (report) setTimeout(() => void report(server), 1);
+  };
+
   pullFile = async (_server: string, root: string, url: string, fileName: string) => {
     this.active += 1;
     try {

@@ -59,6 +59,7 @@ function monter() {
                     kept: ["config/a.toml"],
                     removed: 1,
                     notice: null,
+                    loader: null,
                   },
                 }
               : { error: "La sauvegarde préalable a échoué : rien n'a été modifié." },

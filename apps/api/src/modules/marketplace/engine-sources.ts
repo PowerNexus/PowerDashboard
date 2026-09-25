@@ -15,11 +15,12 @@ import { Injectable, Logger } from "@nestjs/common";
  * panel n'héberge aucun jar et n'en relaie aucun octet — il résout une adresse,
  * et le daemon va chercher le fichier lui-même.
  *
- * **Forge et NeoForge sont volontairement absents.** Ils ne distribuent pas un
+ * **Forge et NeoForge sont absents de cette liste.** Ils ne distribuent pas un
  * serveur prêt à l'emploi mais un installeur, qui doit s'exécuter dans le
  * conteneur pour fabriquer le serveur. Cela relève de la réinstallation de
- * l'egg, pas du remplacement d'un fichier — et prétendre le contraire poserait
- * un jar qui ne démarre pas.
+ * l'egg, pas du remplacement d'un fichier : ils sont posés avec le modpack qui
+ * les demande, par `ForgeInstallService`, qui règle les variables de l'egg
+ * « Minecraft Java » et relance son installation.
  */
 
 const TIMEOUT_MS = 8000;

@@ -4,6 +4,7 @@ import { FauxWings } from "../../test/faux-wings";
 import type { WingsClientService } from "../wings/wings-client.service";
 import type { CurseForgeClient } from "./curseforge.client";
 import { CurseForgePackService } from "./curseforge-pack";
+import type { LoaderResult } from "./forge-install.service";
 import { ModpackSourceService, type PackVersion } from "./modpack-source";
 import { PackInstallerService, type PackOutcome } from "./pack-installer.service";
 import { STAGING } from "./pack-workspace";
@@ -80,7 +81,7 @@ async function poser(
   versionId: string,
   runtime: DetectedRuntime,
   previous: Record<string, string> = {},
-  loader = vi.fn(async () => null as string | null),
+  loader = vi.fn(async (): Promise<LoaderResult> => ({ notice: null, installed: null })),
 ): Promise<PackOutcome> {
   const prepared = await svc.prepare(optionId, versionId, runtime);
   return svc.run(SERVER, prepared, runtime, previous, loader);
@@ -110,7 +111,7 @@ describe("modpack Modrinth : installation", () => {
         },
       ),
     });
-    const loader = vi.fn(async () => null as string | null);
+    const loader = vi.fn(async (): Promise<LoaderResult> => ({ notice: null, installed: null }));
 
     const outcome = await poser(
       installer(daemon, source),
@@ -290,7 +291,9 @@ describe("modpack CurseForge", () => {
       "/mods/42/files/101": serverPack,
       "/mods/42": { id: 42, name: "Create Above", summary: "" },
     });
-    const loader = vi.fn(async () => "Forge à régler" as string | null);
+    const loader = vi.fn(
+      async (): Promise<LoaderResult> => ({ notice: "Forge à régler", installed: null }),
+    );
 
     const outcome = await poser(
       installer(daemon, new ModpackSourceService(), cf),
@@ -309,6 +312,7 @@ describe("modpack CurseForge", () => {
     expect(daemon.under(STAGING)).toEqual([]);
     expect(loader).toHaveBeenCalledWith({ loader: "forge", version: "" }, "1.20.1");
     expect(outcome.notice).toBe("Forge à régler");
+    expect(outcome.loader).toBeNull();
     expect(outcome.record).toMatchObject({
       source: "curseforge",
       projectId: "42",
@@ -362,7 +366,7 @@ describe("modpack CurseForge", () => {
 
   it("sans pack serveur : résout le manifeste, tire les mods et applique les surcharges", async () => {
     const { daemon, svc } = manifestPack({ downloadUrl: `${EDGE}/22/b.jar` });
-    const loader = vi.fn(async () => null as string | null);
+    const loader = vi.fn(async (): Promise<LoaderResult> => ({ notice: null, installed: null }));
 
     const outcome = await poser(svc, "curseforge-pack:42", "100", FORGE, {}, loader);
 
@@ -567,7 +571,7 @@ describe("défauts relevés en revue", () => {
     const source = modrinth(daemon, {
       v1: mrpack([mod("a.jar")], { "overrides/config/a.toml": "a=1" }),
     });
-    const loader = vi.fn(async (): Promise<string | null> => {
+    const loader = vi.fn(async (): Promise<LoaderResult> => {
       throw new Error("Fabric injoignable");
     });
 
@@ -585,5 +589,30 @@ describe("défauts relevés en revue", () => {
     expect(Object.keys(outcome.record.files).sort()).toEqual(["config/a.toml", "mods/a.jar"]);
     expect(outcome.notice).toMatch(/la pose de Fabric Loader 0\.16\.10 a échoué/);
     expect(daemon.under(STAGING)).toEqual([]);
+  });
+  it("le compte rendu dit le chargeur posé avec le pack", async () => {
+    const daemon = new FauxWings();
+    const source = modrinth(daemon, {
+      v1: mrpack([mod("a.jar")], { "overrides/config/a.toml": "a=1" }),
+    });
+    const loader = vi.fn(
+      async (): Promise<LoaderResult> => ({
+        notice: null,
+        installed: "Fabric Loader 0.16.10 pour Minecraft 1.21.1",
+      }),
+    );
+
+    const outcome = await poser(
+      installer(daemon, source),
+      "modpack:pack",
+      "v1",
+      FABRIC,
+      {},
+      loader,
+    );
+
+    expect(outcome.loader).toBe("Fabric Loader 0.16.10 pour Minecraft 1.21.1");
+    expect(outcome.notice).toBeNull();
+    expect(Object.keys(outcome.record.files).sort()).toEqual(["config/a.toml", "mods/a.jar"]);
   });
 });

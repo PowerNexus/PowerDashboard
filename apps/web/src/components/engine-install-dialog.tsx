@@ -69,6 +69,7 @@ export function EngineInstallDialog({
       >
         <div className="flex flex-col gap-3 text-sm">
           {kind === "pack" ? <p className="text-muted">{t("preservedBody")}</p> : null}
+          {kind === "pack" ? <p className="text-muted">{t("loaderBody")}</p> : null}
           {canBackup ? (
             <SettingToggle
               label={t("backupFirst")}
