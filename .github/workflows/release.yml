@@ -91,9 +91,15 @@ jobs:
       - name: Fins de ligne du dépôt
         run: git config --global core.autocrlf false
 
+      # Sans jeton dans .git/config : le dépôt est copié tel quel dans le
+      # conteneur, où tournent l'installation et la compilation (code des
+      # dépendances compris), et ce jeton peut écrire dans le dépôt et ses
+      # releases. Rien n'en a besoin : `gh` reçoit le sien à l'étape Publier,
+      # les attestations prennent le leur.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ inputs.version || github.ref }}
+          persist-credentials: false
 
       - name: Contrôler l'étiquette
         run: |
