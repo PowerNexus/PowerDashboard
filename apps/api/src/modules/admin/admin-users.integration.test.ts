@@ -90,6 +90,9 @@ describe.skipIf(!HAS_DATABASE)("suspension et modification d'un compte (intégra
         new NotificationPreferencesRepository(db),
         mailer as unknown as MailerService,
         { emit: async () => {} } as unknown as ClientWebhookEmitterService,
+        {
+          forReseller: async () => ({ branding: { name: "Panel", replyTo: null }, domain: null }),
+        } as unknown as BrandingService,
       ),
       mailer as unknown as MailerService,
       new ActivityService(db),

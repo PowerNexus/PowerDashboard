@@ -215,6 +215,19 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
             )}
           </FormField>
 
+          <FormField label={t("replyTo")} description={t("replyToHint")}>
+            {(id) => (
+              <Input
+                id={id}
+                type="email"
+                value={form.replyTo}
+                disabled={pending}
+                placeholder="support@exemple.fr"
+                onChange={(event) => field("replyTo")(event.target.value)}
+              />
+            )}
+          </FormField>
+
           <FormField label={t("footer")} description={t("footerHint")}>
             {(id) => (
               <Input

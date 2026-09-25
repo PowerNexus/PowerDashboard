@@ -10,6 +10,8 @@ export interface Passkey {
   transports: string[];
   createdAt: string;
   lastUsedAt: string | null;
+  /** Domaine d'un revendeur où la clé a été créée : elle ne sert que là. `null` : la plateforme. */
+  domain: string | null;
 }
 
 export async function listPasskeys(): Promise<Passkey[]> {

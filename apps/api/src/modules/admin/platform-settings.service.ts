@@ -2,6 +2,7 @@ import {
   FEATURE_FLAGS,
   featureFlagDefault,
   isSafeBrandUrl,
+  isValidReplyTo,
   normalizeHex,
   PLATFORM_SETTINGS,
   ROLE_PRESETS_SETTING_KEY,
@@ -435,6 +436,11 @@ export class PlatformSettingsService {
       if (descriptor.format === "hex" && text !== "" && normalizeHex(text) === null) {
         throw new BadRequestException(
           `« ${descriptor.label} » doit être une couleur hexadécimale, comme #0ea5e9.`,
+        );
+      }
+      if (descriptor.format === "email" && !isValidReplyTo(text)) {
+        throw new BadRequestException(
+          `« ${descriptor.label} » doit être une seule adresse e-mail, comme support@exemple.fr.`,
         );
       }
       if (descriptor.format === "outbound" && text !== "") {

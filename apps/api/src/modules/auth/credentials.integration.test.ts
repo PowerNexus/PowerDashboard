@@ -150,9 +150,15 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
     twoFactor = new TwoFactorRepository(db);
     alerts = new SecurityAlertService(
       new SecurityAlertRepository(db),
-      new NotificationsService(db, new NotificationPreferencesRepository(db), mailer, {
-        emit: async () => {},
-      } as unknown as ClientWebhookEmitterService),
+      new NotificationsService(
+        db,
+        new NotificationPreferencesRepository(db),
+        mailer,
+        { emit: async () => {} } as unknown as ClientWebhookEmitterService,
+        {
+          forReseller: async () => ({ branding: { name: "Panel", replyTo: null }, domain: null }),
+        } as unknown as BrandingService,
+      ),
       mailer,
       activity,
       branding,
@@ -188,6 +194,9 @@ describe.skipIf(!HAS_DATABASE)("Authentifiants (intégration)", () => {
       {} as never,
       {} as never,
       confirmation,
+      {
+        forHost: async () => ({ name: "GameDashboard", resellerId: null }),
+      } as unknown as BrandingService,
     );
     account_ = new AccountController(apiKeys as never, {} as never, confirmation);
   });

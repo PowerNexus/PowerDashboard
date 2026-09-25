@@ -175,6 +175,13 @@ export const userPasskeys = pgTable(
     counter: integer("counter").notNull().default(0),
     transports: text("transports").array().notNull().default([]),
     label: varchar("label", { length: 100 }).notNull(),
+    /**
+     * Domaine relais de la clé, quand c'est celui d'un revendeur. `null` : le
+     * domaine de la plateforme (`PANEL_ORIGIN`). Une clé est liée au domaine
+     * où elle a été créée — l'authentifiant signe ce nom — et ne sert pas
+     * ailleurs : il faut le savoir pour ne la proposer qu'au bon endroit.
+     */
+    rpId: varchar("rp_id", { length: 255 }),
     lastUsedAt: moment("last_used_at"),
     ...timestamps,
   },
@@ -681,6 +688,8 @@ export const resellerBrandings = pgTable(
     termsUrl: text("terms_url").notNull().default(""),
     footerText: varchar("footer_text", { length: 255 }).notNull().default(""),
     loginTagline: varchar("login_tagline", { length: 255 }).notNull().default(""),
+    /** Adresse de réponse des courriels (`Reply-To`) : voir `mailSender`. */
+    replyTo: varchar("reply_to", { length: 254 }).notNull().default(""),
     /** Domaine propre. Unique : deux revendeurs ne peuvent pas le revendiquer. */
     domain: varchar("domain", { length: 255 }).unique(),
     /** Preuve de possession, publiée en TXT sur `_gamedashboard.<domaine>`. */

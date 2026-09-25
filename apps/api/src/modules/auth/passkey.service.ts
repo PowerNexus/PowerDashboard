@@ -40,6 +40,12 @@ export interface RelyingParty {
   id: string;
   /** L'origine complète, schéma et port compris. */
   origin: string;
+  /**
+   * Portée rangée avec la clé : `null` pour le domaine de la plateforme, le
+   * domaine du revendeur sinon (`user_passkeys.rp_id`). Une clé n'est proposée
+   * et vérifiée que dans sa portée.
+   */
+  scope: string | null;
 }
 
 @Injectable()
@@ -58,7 +64,7 @@ export class PasskeyService {
     rp: RelyingParty,
     user: { id: string; email: string; name: string },
   ): Promise<PublicKeyCredentialCreationOptionsJSON> {
-    const existing = await this.passkeys.credentialsForUser(user.id);
+    const existing = await this.passkeys.credentialsForUser(user.id, rp.scope);
 
     return generateRegistrationOptions({
       rpName: rp.name,
@@ -125,6 +131,7 @@ export class PasskeyService {
       counter: credential.counter,
       transports: credential.transports ?? [],
       label,
+      rpId: rp.scope,
     });
 
     return true;
@@ -141,7 +148,7 @@ export class PasskeyService {
     rp: RelyingParty,
     userId: string,
   ): Promise<PublicKeyCredentialRequestOptionsJSON> {
-    const credentials = await this.passkeys.credentialsForUser(userId);
+    const credentials = await this.passkeys.credentialsForUser(userId, rp.scope);
 
     return generateAuthenticationOptions({
       rpID: rp.id,
@@ -168,7 +175,7 @@ export class PasskeyService {
     expectedChallenge: string,
     response: AuthenticationResponseJSON,
   ): Promise<boolean> {
-    const stored = await this.passkeys.findCredential(userId, response.id);
+    const stored = await this.passkeys.findCredential(userId, response.id, rp.scope);
     if (!stored) return false;
 
     let verification: Awaited<ReturnType<typeof verifyAuthenticationResponse>>;

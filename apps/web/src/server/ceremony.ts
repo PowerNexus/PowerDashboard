@@ -10,6 +10,7 @@ import {
 import {
   CEREMONY_COOKIE,
   type Ceremony,
+  ceremonyOrigin,
   ceremonyPath,
   ceremonyRedirectUri,
   completeCeremony,
@@ -52,7 +53,9 @@ export async function beginCeremony(ceremony: Ceremony): Promise<NextResponse> {
     // Réglage incomplet ou fournisseur injoignable : on repart sur la page de
     // connexion, qui dira ce qui manque, plutôt que d'afficher une page
     // d'erreur brute.
-    return NextResponse.redirect(new URL("/login?sso=failed", ceremonyRedirectUri(ceremony)));
+    return NextResponse.redirect(
+      new URL("/login?sso=failed", ceremonyRedirectUri(ceremony, await ceremonyOrigin())),
+    );
   }
 
   const response = NextResponse.redirect(started.url);

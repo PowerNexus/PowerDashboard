@@ -1,9 +1,15 @@
-import { type NotificationTarget, resolveNotificationHref } from "@gamedashboard/contracts";
+import {
+  isExternalHref,
+  mailSender,
+  type NotificationTarget,
+  resolveNotificationHref,
+} from "@gamedashboard/contracts";
 import { type Database, notifications, servers, users } from "@gamedashboard/db";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { MailerService } from "../mail/mailer.service";
+import { BrandingService } from "../reseller/branding.service";
 import { ClientWebhookEmitterService } from "../webhooks/client-webhook-emitter.service";
 import { NotificationPreferencesRepository } from "./notification-preferences.repository";
 
@@ -54,6 +60,7 @@ export class NotificationsService {
     @Inject(MailerService) private readonly mail: MailerService,
     @Inject(ClientWebhookEmitterService)
     private readonly clientWebhooks: ClientWebhookEmitterService,
+    @Inject(BrandingService) private readonly branding: BrandingService,
   ) {}
 
   async forUser(userId: string): Promise<{ items: ClientNotification[]; unread: number }> {
@@ -189,6 +196,8 @@ export class NotificationsService {
     type: string;
     title: string;
     body: string;
+    serverId?: string;
+    href?: string;
   }): Promise<void> {
     try {
       const channels = await this.preferences.channelsFor(input.userId, input.type);
@@ -202,15 +211,31 @@ export class NotificationsService {
 
       if (!account?.verifiedAt) return;
 
+      const { branding, domain } = await this.branding.forReseller(
+        await this.resellerOf(input.serverId),
+      );
+      const link = emailLink(
+        resolveNotificationHref(input.type, { serverId: input.serverId, href: input.href }),
+        domain,
+      );
+
       await this.mail.send({
         to: account.email,
         subject: input.title,
-        // Le corps du courriel est celui de la cloche, suivi de l'endroit où
-        // couper l'envoi : une notification qu'on ne sait pas arrêter finit en
-        // filtre de messagerie, et les suivantes sont perdues avec.
-        text: [input.body, "", "Vous réglez ces envois dans votre compte, onglet Profil.", ""].join(
-          "\n",
-        ),
+        // Le corps du courriel est celui de la cloche, suivi de où aller voir,
+        // puis de l'endroit où couper l'envoi : une notification qu'on ne sait
+        // pas arrêter finit en filtre de messagerie, et les suivantes sont
+        // perdues avec.
+        text: [
+          input.body,
+          "",
+          ...(link ? ["Voir dans le panel :", link, ""] : []),
+          "Vous réglez ces envois dans votre compte, onglet Profil.",
+          "",
+        ].join("\n"),
+        // La marque du serveur quand son revendeur a un domaine vérifié :
+        // c'est là que son client la voit déjà (`BrandingService.forReseller`).
+        ...mailSender(branding),
       });
     } catch (error) {
       // Comme la cloche : prévenir est utile, faire échouer une sauvegarde
@@ -221,6 +246,17 @@ export class NotificationsService {
         }`,
       );
     }
+  }
+
+  /** Revendeur d'un serveur, `null` sans serveur ou pour un serveur de la plateforme. */
+  private async resellerOf(serverId: string | undefined): Promise<string | null> {
+    if (!serverId) return null;
+    const [row] = await this.db
+      .select({ resellerId: servers.resellerId })
+      .from(servers)
+      .where(eq(servers.id, serverId))
+      .limit(1);
+    return row?.resellerId ?? null;
   }
 
   /**
@@ -264,4 +300,18 @@ export class NotificationsService {
 function readLevel(data: unknown): NotificationLevel {
   const level = (data as { level?: unknown })?.level;
   return level === "success" || level === "warning" || level === "danger" ? level : "info";
+}
+
+/**
+ * Lien absolu à mettre dans un courriel, ou `null`.
+ *
+ * Un chemin interne n'a de sens qu'avec un domaine : sans `brand.domain`
+ * réglé, mieux vaut ne pas mettre de lien qu'en mettre un qui ne mène nulle
+ * part. Une adresse externe (l'espace client du facturier) passe telle quelle.
+ */
+export function emailLink(href: string | null, domain: string | null): string | null {
+  if (!href) return null;
+  if (isExternalHref(href)) return href;
+  if (!href.startsWith("/") || href.startsWith("//") || !domain) return null;
+  return `https://${domain}${href}`;
 }

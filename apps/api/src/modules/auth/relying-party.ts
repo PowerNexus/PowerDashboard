@@ -1,3 +1,4 @@
+import type { Branding } from "@gamedashboard/contracts";
 import type { RelyingParty } from "./passkey.service";
 
 /** Nom affiché par les applications d'authentification et par le navigateur. */
@@ -37,5 +38,46 @@ export function relyingPartyFromEnv(env: NodeJS.ProcessEnv = process.env): Relyi
     throw new MissingPanelOriginError(raw);
   }
 
-  return { name: PANEL_NAME, id: url.hostname, origin: url.origin };
+  return { name: PANEL_NAME, id: url.hostname, origin: url.origin, scope: null };
+}
+
+/**
+ * Le domaine relais d'une cérémonie, selon le domaine d'arrivée.
+ *
+ * L'hôte vient d'un en-tête que l'appelant pourrait forger ; il n'est retenu
+ * que s'il désigne un revendeur au domaine **vérifié** (`branding.resellerId`
+ * n'est non nul que dans ce cas, voir `BrandingService.forHost`). Tout autre
+ * hôte retombe sur `PANEL_ORIGIN`.
+ *
+ * Ce n'est pas rouvrir la porte que ferme `relyingPartyFromEnv` : le
+ * navigateur inscrit l'origine réelle dans la réponse signée, et la
+ * vérification l'exige égale à celle du domaine retenu. Une page sur
+ * `evil.example` ne produit pas d'assertion pour `panel.revendeur.fr`, quel
+ * que soit l'en-tête. Le seul pouvoir de l'en-tête est de choisir **parmi
+ * les domaines du panel**, qui sont tous servis par lui.
+ */
+export function relyingPartyFor(
+  host: string | null,
+  branding: Pick<Branding, "name" | "resellerId">,
+  env: NodeJS.ProcessEnv = process.env,
+): RelyingParty {
+  const scope = passkeyScope(host, branding);
+  if (scope === null) return relyingPartyFromEnv(env);
+  return { name: branding.name, id: scope, origin: `https://${scope}`, scope };
+}
+
+/**
+ * Portée des clés d'accès pour un domaine d'arrivée : le domaine vérifié d'un
+ * revendeur, ou `null` pour la plateforme.
+ *
+ * Séparée de `relyingPartyFor` parce qu'elle ne lit pas `PANEL_ORIGIN` :
+ * savoir s'il faut proposer une clé à l'écran de connexion ne doit pas
+ * dépendre d'un réglage que seule la cérémonie exige.
+ */
+export function passkeyScope(
+  host: string | null,
+  branding: Pick<Branding, "resellerId">,
+): string | null {
+  const hostname = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
+  return branding.resellerId === null || hostname === "" ? null : hostname;
 }
