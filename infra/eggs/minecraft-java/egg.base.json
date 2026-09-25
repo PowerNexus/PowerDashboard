@@ -117,5 +117,8 @@
     "whitelist_remove": "whitelist remove {player}",
     "op": "op {player}",
     "deop": "deop {player}"
+  },
+  "game_query": {
+    "protocol": "minecraft"
   }
 }

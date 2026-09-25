@@ -17,6 +17,7 @@ export * from "./egg-editor";
 export * from "./egg-rules";
 export * from "./engine";
 export * from "./files";
+export * from "./game-query";
 export * from "./instatus";
 export * from "./marketplace";
 export * from "./metrics-history";

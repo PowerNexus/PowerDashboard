@@ -15,6 +15,7 @@
  */
 
 import { isPlayerName } from "@gamedashboard/contracts";
+import { type GameStatus, PLAYER_SAMPLE_MAX } from "./game-status";
 
 /*
  * Il vit dans l'API et non dans `@gamedashboard/contracts` : `Buffer` est propre à
@@ -110,23 +111,10 @@ export function buildStatusRequest(host: string, port: number): Buffer {
   ]);
 }
 
-/** Ce qu'un serveur Minecraft dit de lui-même. */
-export interface MinecraftStatus {
-  /** Joueurs connectés. Jamais deviné : absent du JSON, le champ vaut `null`. */
-  playersOnline: number | null;
-  playersMax: number | null;
-  /** Version annoncée, telle quelle — « Paper 1.21.11 », « 1.20.4 »… */
-  version: string | null;
-  /**
-   * Noms tirés de `players.sample`. C'est un **échantillon** : le serveur en
-   * choisit une douzaine au plus, et peut n'en donner aucun. `null` quand le
-   * champ manque, pour ne pas le confondre avec « personne ».
-   */
-  sample: string[] | null;
-}
+/** Ce qu'un serveur Minecraft dit de lui-même : la forme commune à tous les jeux. */
+export type MinecraftStatus = GameStatus;
 
-/** Plafond des noms retenus : au-delà, un serveur modifié gonflerait la base à chaque sonde. */
-export const PLAYER_SAMPLE_MAX = 100;
+export { PLAYER_SAMPLE_MAX };
 
 /** Identifiant nul que les serveurs donnent aux lignes décoratives de l'échantillon. */
 const DECORATIVE_ID = "00000000-0000-0000-0000-000000000000";

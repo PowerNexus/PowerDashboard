@@ -11,6 +11,7 @@
  * de ce qu'on en accepte doit pouvoir être éprouvé sans les deux.
  */
 
+import { type GameQuery, readGameQuery } from "./game-query";
 import { type PlayerCommands, readPlayerCommands } from "./player-commands";
 
 /** Versions du format qu'on sait lire. */
@@ -48,6 +49,8 @@ export interface ParsedEgg {
   variables: ParsedEggVariable[];
   /** Extension propre à GameDashboard : commandes de la vue joueurs (`player_commands`). */
   playerCommands: PlayerCommands;
+  /** Extension propre à GameDashboard : sonde de jeu déclarée (`game_query`), `null` sinon. */
+  gameQuery: GameQuery | null;
 }
 
 /** Ce qu'on reproche à un fichier, dit de façon à pouvoir le corriger. */
@@ -186,6 +189,7 @@ export function parsePterodactylEgg(input: unknown): ParsedEgg {
     consoleCommands: readStringArray(raw.console_commands),
     variables: readVariables(raw.variables),
     playerCommands: readPlayerCommands(raw.player_commands),
+    gameQuery: readGameQuery(raw.game_query),
   };
 }
 
@@ -257,6 +261,8 @@ export interface PterodactylEggExport {
    * Pterodactyl ignore les clés qu'il ne connaît pas : l'export reste lisible.
    */
   player_commands?: PlayerCommands;
+  /** Même règle : sonde de jeu déclarée, absente quand l'egg n'en déclare pas. */
+  game_query?: GameQuery;
 }
 
 /**
@@ -311,6 +317,7 @@ export function exportPterodactylEgg(
     ...(Object.keys(egg.playerCommands).length > 0
       ? { player_commands: { ...egg.playerCommands } }
       : {}),
+    ...(egg.gameQuery ? { game_query: { ...egg.gameQuery } } : {}),
   };
 }
 
