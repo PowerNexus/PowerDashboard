@@ -31,6 +31,7 @@ import { IMPERSONATION_TTL_MS, impersonationReturnCookie } from "../auth/imperso
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { authCookieOptions, SessionGuard, sessionCookie } from "../auth/session.guard";
 import { SessionRepository } from "../auth/session.repository";
+import { BillingService } from "../billing/billing.service";
 import { ServerResizeService } from "../client/server-resize.service";
 import { MailerService } from "../mail/mailer.service";
 import { BrandingService } from "../reseller/branding.service";
@@ -205,6 +206,7 @@ export class AdminController {
     // La troisième porte du redimensionnement, la même que la boutique et
     // l.espace revendeur empruntent.
     @Inject(ServerResizeService) private readonly resize: ServerResizeService,
+    @Inject(BillingService) private readonly billing: BillingService,
   ) {}
 
   @Get("overview")
@@ -318,6 +320,37 @@ export class AdminController {
     });
 
     return { data: { ok, error, sentTo: ok ? destinataire : null } };
+  }
+
+  /**
+   * Essai de la liaison avec le facturier.
+   *
+   * Enregistrer ne prouve rien : une adresse d'API WHMCS saisie avec « HostBill »
+   * choisi, ou une adresse IP non autorisée chez le facturier, ne se voyait
+   * qu'en « facturation injoignable » sur l'accueil de chaque client. L'essai
+   * fait un vrai appel — la recherche de l'adresse de l'administrateur qui le
+   * demande — et rend la phrase du facturier. Aucun service n'est lu : l'essai
+   * ne montre rien d'un client.
+   */
+  @Post("settings/billing/test")
+  @UseGuards(AdminWriteGuard)
+  async testBilling(@Req() request: AdminRequest) {
+    const probe = await this.billing.probe(request.user.email);
+
+    await this.activityLog.record({
+      event: "admin.billing_tested",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      userAgent: headerValue(request.headers?.["user-agent"]),
+      // L'issue, pas la phrase du facturier : elle peut nommer une adresse IP
+      // ou un hôte, qui n'ont rien à faire dans un journal lu à plusieurs.
+      properties: { ok: probe.ok, provider: probe.provider },
+    });
+
+    return { data: probe };
   }
 
   /**

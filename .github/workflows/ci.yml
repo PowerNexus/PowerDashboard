@@ -22,11 +22,22 @@ concurrency:
 permissions:
   contents: read
 
-# Les jobs tournent sur un runner auto-hébergé (docs/runner-auto-heberge.md).
-# La variable de dépôt CI_RUNNER, en JSON, choisit une autre cible sans
-# toucher aux workflows : '"ubuntu-latest"' pour revenir aux runners de GitHub.
+# Les jobs tournent sur un runner auto-hébergé **Windows** avec Docker
+# (docs/runner-auto-heberge.md). La variable de dépôt CI_RUNNER, en JSON,
+# choisit une autre cible sans toucher aux workflows : '"ubuntu-latest"' pour
+# revenir aux runners de GitHub.
+#
+# Chaque job lance ses commandes dans un conteneur Linux (infra/ci/linux.sh) :
+# GitHub Actions ne lance ni `services:` ni action conteneur sur un runner
+# Windows, et le projet suppose Linux partout. Le runner ne fait que piloter,
+# depuis Git Bash — d'où `shell: bash`, qui ne doit pas trouver le bash de WSL.
+
+defaults:
+  run:
+    shell: bash
 
 env:
+  CI: "true"
   # Turbo télémétrie désactivée : rien ne sort de la CI sans raison.
   TURBO_TELEMETRY_DISABLED: 1
   NEXT_TELEMETRY_DISABLED: 1
@@ -37,46 +48,65 @@ jobs:
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
-    timeout-minutes: 15
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    # Plus large qu'avant : l'installation et les tests passent par Docker.
+    timeout-minutes: 30
 
     steps:
+      # Sans cela, Git pour Windows extrait en CRLF, et le lint, les scripts
+      # bash et l'empreinte d'openapi.json voient d'autres fichiers que le
+      # dépôt (.gitattributes l'impose aussi).
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version-file: .nvmrc
-          # Cache distant réservé aux runners de GitHub : sur une machine à
-          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
-          # chaque job coûtait plus de deux minutes.
-          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+      - name: Conteneur Linux
+        run: bash infra/ci/linux.sh ouvrir
 
       # --frozen-lockfile : la CI échoue si le lockfile ne correspond pas au
       # package.json, plutôt que de résoudre silencieusement d'autres versions.
       - name: Installer les dépendances
-        run: pnpm install --frozen-lockfile
+        run: bash infra/ci/linux.sh lancer 'pnpm install --frozen-lockfile'
 
       - name: Lint
-        run: pnpm lint
+        run: bash infra/ci/linux.sh lancer 'pnpm lint'
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: bash infra/ci/linux.sh lancer 'pnpm typecheck'
 
       - name: Tests
-        run: pnpm test
+        run: bash infra/ci/linux.sh lancer 'pnpm test'
 
       # Le build a besoin des variables d'environnement, mais aucun secret
       # n'est requis pour compiler : les clés ne sont lues qu'à l'exécution.
       - name: Build
-        run: pnpm build
+        run: bash infra/ci/linux.sh lancer 'pnpm build'
 
       # Storybook est la référence visuelle de l'équipe : une histoire qui ne
       # compile plus doit se voir ici, pas le jour où quelqu'un veut consulter
       # un composant.
       - name: Build Storybook
-        run: pnpm --filter @gamedashboard/ui build-storybook
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/ui build-storybook'
 
       # Le schéma Drizzle et les migrations doivent rester en phase. Sans cette
       # vérification, une colonne ajoutée au schéma sans migration ne se verrait
@@ -86,7 +116,7 @@ jobs:
       # packages/db/scripts/check-migrations.mjs).
       - name: Migrations à jour
         run: |
-          pnpm db:check \
+          bash infra/ci/linux.sh lancer 'pnpm db:check' \
             || { echo "::error::Schéma et migrations désaccordés. Lancez pnpm db:generate et relisez la migration produite."; exit 1; }
 
       # Même raison, pour l'autre contrat : une route ajoutée au catalogue sans
@@ -95,109 +125,106 @@ jobs:
       # ils obtiendraient simplement un client sans la nouvelle route.
       - name: Spécification OpenAPI à jour
         run: |
-          pnpm openapi
-          git diff --exit-code openapi.json \
+          bash infra/ci/linux.sh lancer 'pnpm openapi && git diff --exit-code openapi.json' \
             || { echo "::error::Catalogue de routes modifié sans régénérer la spécification. Lancez pnpm openapi."; exit 1; }
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer
 
   audit:
     name: Audit de sécurité des dépendances
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
-    timeout-minutes: 10
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
+    timeout-minutes: 20
 
     steps:
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version-file: .nvmrc
-          # Cache distant réservé aux runners de GitHub : sur une machine à
-          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
-          # chaque job coûtait plus de deux minutes.
-          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+
+      - name: Conteneur Linux
+        run: bash infra/ci/linux.sh ouvrir
 
       - name: Installer les dépendances
-        run: pnpm install --frozen-lockfile
+        run: bash infra/ci/linux.sh lancer 'pnpm install --frozen-lockfile'
 
       # Bloquant dès le niveau « low » : le projet part propre, autant le
       # garder ainsi plutôt que d'accumuler une dette qu'on cessera de lire.
       - name: pnpm audit
-        run: pnpm audit --audit-level low
+        run: bash infra/ci/linux.sh lancer 'pnpm audit --audit-level low'
 
       # Informe sans bloquer : une nouvelle version sortie le matin même ne
       # doit pas empêcher de livrer, mais elle doit se voir.
       - name: Versions en retard
         continue-on-error: true
-        run: pnpm outdated -r
+        run: bash infra/ci/linux.sh lancer 'pnpm outdated -r'
 
       # Trivy lit le système de fichiers : dépendances **et** fichiers de
       # configuration. `pnpm audit` ne connaît que le registre npm — il ne voit
       # ni un Dockerfile qui tourne en root, ni un secret laissé dans un
       # fichier d'exemple, ni une image de base périmée.
-      # Épinglée par empreinte : en mars 2026, les tags de trivy-action ont été
-      # réécrits vers un voleur de secrets (corrigé en 0.35.0). Vaut pour toutes
-      # les actions tierces, vérifié par infra-prod.test.ts.
+      # Image épinglée par empreinte (voir IMAGE_TRIVY dans infra/ci/outils.env) :
+      # en mars 2026, les tags de trivy-action ont été réécrits vers un voleur
+      # de secrets. L'action elle-même ne tourne pas sous Windows.
       - name: Trivy — dépendances et configuration
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,secret,misconfig
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          ignore-unfixed: true
-          skip-dirs: node_modules,.next,.turbo
+        run: |
+          source infra/ci/outils.env
+          bash infra/ci/linux.sh outil "$IMAGE_TRIVY" fs \
+            --scanners vuln,secret,misconfig --severity CRITICAL,HIGH \
+            --exit-code 1 --ignore-unfixed \
+            --skip-dirs node_modules --skip-dirs .next --skip-dirs .turbo /w
 
       # Semgrep cherche des motifs dans **notre** code, là où les deux autres
       # regardent ce qu'on importe. C'est le seul des trois qui puisse voir une
       # requête concaténée ou une comparaison de secret non constante.
       - name: Semgrep
-        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
-        with:
-          config: p/typescript p/nodejs p/secrets p/owasp-top-ten
-
-      # L'action Semgrep tourne dans un conteneur, en root, et écrit dans
-      # l'espace de travail (objets git de sa comparaison avec la base). Sur
-      # un runner auto-hébergé, ces fichiers survivent au job : le checkout
-      # suivant, lancé par l'utilisateur du runner, échouait sur
-      # « insufficient permission for adding an object to repository
-      # database .git/objects ». On les lui rend, même si le job a échoué,
-      # avec le dossier temporaire que le conteneur a aussi reçu.
-      - name: Rendre l'espace de travail au runner
-        if: always()
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/w" -v "$RUNNER_TEMP:/t" \
-            alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 \
-            chown -R "$(id -u):$(id -g)" /w /t
+          source infra/ci/outils.env
+          bash infra/ci/linux.sh outil "$IMAGE_SEMGREP" semgrep scan --error --metrics off \
+            --config p/typescript --config p/nodejs --config p/secrets --config p/owasp-top-ten \
+            --exclude node_modules /w
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer
 
   e2e:
     name: Parcours critiques et accessibilité
     # Jamais le code d'une PR venue d'un fork sur nos machines : voir
     # docs/runner-auto-heberge.md.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
     # Cinq minutes de plus pour le scan ZAP, dont le premier passage télécharge
     # l'image (1,5 Go) sur la machine du runner.
     timeout-minutes: 30
 
     # Une vraie base : l'interface est éprouvée contre l'API réelle, qui parle
     # à PostgreSQL. Une API simulée validerait le panel contre une fiction.
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: gamedashboard
-          POSTGRES_PASSWORD: gamedashboard
-          POSTGRES_DB: gamedashboard
-          TZ: UTC
-        # Port choisi par Docker : un PostgreSQL déjà présent sur la machine
-        # du runner garde le 5432, et deux runners voisins ne se gênent pas.
-        ports: ["5432"]
-        options: >-
-          --health-cmd "pg_isready -U gamedashboard"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+    # Elle tourne dans un conteneur à côté de celui du job, sur un réseau
+    # propre au job (infra/ci/linux.sh ouvrir --postgres).
 
     env:
       # Clé d'essai, valable pour cette exécution seule. Elle ne déchiffre rien
@@ -207,48 +234,53 @@ jobs:
       E2E_PASSWORD: Essai-E2E-2026!motdepasse
 
     steps:
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version-file: .nvmrc
-          # Cache distant réservé aux runners de GitHub : sur une machine à
-          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
-          # chaque job coûtait plus de deux minutes.
-          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+
+      - name: Conteneur Linux et base
+        run: bash infra/ci/linux.sh ouvrir --postgres
 
       - name: Installer les dépendances
-        run: pnpm install --frozen-lockfile
+        run: bash infra/ci/linux.sh lancer 'pnpm install --frozen-lockfile'
 
-      # Le contexte `job` n'existe pas au niveau du job : l'adresse de la base,
-      # qui dépend du port attribué, est donc posée ici pour la suite.
-      - name: Adresse de la base
-        run: echo "DATABASE_URL=postgres://gamedashboard:gamedashboard@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gamedashboard" >> "$GITHUB_ENV"
-
-      # Les bibliothèques système de Chromium demandent apt, donc root. Un
-      # runner auto-hébergé sans sudo sans mot de passe les a reçues à son
-      # installation (docs/runner-auto-heberge.md) : on ne pose que le
-      # navigateur.
+      # Le conteneur tourne en root : Playwright y pose lui-même les
+      # bibliothèques système de Chromium.
       - name: Installer le navigateur
-        run: |
-          if sudo -n true 2>/dev/null; then
-            pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
-          else
-            pnpm --filter @gamedashboard/web exec playwright install chromium
-          fi
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium'
 
       - name: Migrations
-        run: pnpm --filter @gamedashboard/db db:migrate
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/db db:migrate'
 
       # Le compte d'essai est créé par le **vrai** chemin de création : c'est
       # le code de l'application qui hache le mot de passe, et non un condensat
       # fabriqué à côté qui pourrait diverger de ce que la connexion attend.
       - name: Compte d'essai
         run: |
-          pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
-            "$E2E_EMAIL" Essai CI
-          GD_PASSWORD="$E2E_PASSWORD" \
-            pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
+          bash infra/ci/linux.sh lancer '
+            pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts "$E2E_EMAIL" Essai CI
+            GD_PASSWORD="$E2E_PASSWORD" \
+              pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"'
 
       # La seconde preuve du personnel est exigée par défaut (rapport ASVS,
       # NC-10), et le compte d'essai est administrateur : la suite, qui visite
@@ -260,23 +292,28 @@ jobs:
       # et `platform-settings.test.ts` le tiennent.
       - name: Seconde preuve du personnel levée pour la base d'essai
         run: |
-          docker exec ${{ job.services.postgres.id }} \
-            psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c \
+          bash infra/ci/linux.sh psql \
             "insert into settings (key, value) values ('security.staffRequires2fa', 'false'::jsonb)
              on conflict (key) do update set value = excluded.value"
 
       - name: Construire
-        run: pnpm build
+        run: bash infra/ci/linux.sh lancer 'pnpm build'
 
       - name: Parcours et accessibilité
-        run: pnpm e2e
+        run: bash infra/ci/linux.sh lancer 'pnpm e2e'
 
       # Scan passif de l'application compilée : en-têtes, CSP, cookies,
       # formulaires (PLAN §5.4). Une alerte nouvelle fait échouer le job ; les
       # exceptions acceptées sont dans infra/ci/zap-regles.tsv, chacune avec sa
-      # raison.
+      # raison. Le panel démarre dans le conteneur du job, et ZAP partage son
+      # réseau.
       - name: Scan ZAP
-        run: bash infra/ci/zap-baseline.sh zap-rapport
+        run: ZAP_CONTENEUR="$(bash infra/ci/linux.sh nom)" bash infra/ci/zap-baseline.sh zap-rapport
+
+      - name: Rapatrier les rapports
+        if: failure()
+        continue-on-error: true
+        run: bash infra/ci/linux.sh rapatrier apps/web/playwright-report
 
       - name: Rapport ZAP
         if: failure()
@@ -299,3 +336,7 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report
           retention-days: 7
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer

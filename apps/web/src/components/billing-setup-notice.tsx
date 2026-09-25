@@ -1,3 +1,4 @@
+import { settingsAnchor } from "@gamedashboard/contracts";
 import { AlertBanner } from "@gamedashboard/ui";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -6,7 +7,7 @@ import { getTranslations } from "next-intl/server";
 /**
  * Ce qui manquerait à l'accueil tant que la facturation n'est pas reliée.
  *
- * Le bloc des services ne s'affiche pas sans HostBill, et c'est voulu — mais
+ * Le bloc des services ne s'affiche pas sans facturier relié, et c'est voulu — mais
  * l'absence est muette : l'exploitant qui découvre l'accueil ne peut pas
  * distinguer « rien à facturer » de « rien n'est branché ». Ce bandeau décrit
  * donc ce que la page **montrerait** une fois la facturation reliée, avec le
@@ -38,7 +39,7 @@ export async function BillingSetupNotice({ show }: { show: boolean }) {
       </ul>
       <p className="mt-3">
         <Link
-          href="/admin/settings#reglages-hostbill"
+          href={`/admin/settings#${settingsAnchor("billing")}`}
           className="inline-flex items-center gap-1.5 font-semibold text-sm"
         >
           {t("billingSetupAction")} <ArrowRight className="size-4" />

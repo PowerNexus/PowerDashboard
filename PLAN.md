@@ -710,7 +710,7 @@ Marque blanche : un revendeur peut surcharger `--gd-accent-*`, logo, nom, favico
 - Console avancée : recherche, filtres, liens, autocomplete, historique persistant.
 - Vue joueurs (liste, kick/ban via commandes d'egg déclaratives).
 - Marque blanche revendeurs (domaine custom, logo, couleurs, emails).
-- **Facturation WHMCS et ClientXCms**, à côté de HostBill. Même contrat pour
+- **Facturation WHMCS et ClientXCms**, à côté de HostBill — **livré** (`apps/api/src/modules/billing` : façade `BillingService`, un `BillingProvider` par système, choisi par `billing.provider`). Même contrat pour
   les trois : le panel **lit** les services et leurs échéances pour les montrer
   au client, et n'écrit rien — c'est le tiers qui pilote le panel par l'API
   applicative.

@@ -483,23 +483,53 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
-  it("tournent sur le runner auto-hébergé, sauf choix contraire dans CI_RUNNER", () => {
+  it("tournent sur le runner auto-hébergé Windows, sauf choix contraire dans CI_RUNNER", () => {
     const cibles = workflows.flatMap((texte) =>
       [...texte.matchAll(/^\s*runs-on:\s*(.+)$/gm)].map((m) => m[1]),
     );
     expect(cibles.length).toBe(5);
     for (const cible of cibles) {
-      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}`);
+      expect(cible).toBe(`\${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}`);
+    }
+    // Git Bash, et non PowerShell, le shell par défaut de Windows.
+    for (const texte of workflows) {
+      expect(texte).toMatch(/^defaults:\n {2}run:\n {4}shell: bash\n/m);
     }
   });
 
-  it("ne téléversent le cache pnpm que depuis un runner de GitHub", () => {
-    const caches = workflows.flatMap((texte) =>
-      [...texte.matchAll(/^\s*cache:\s*(.+)$/gm)].map((m) => m[1]),
+  /*
+   * GitHub Actions ne lance ni `services:` ni action conteneur sur un runner
+   * Windows : chaque job travaille dans son conteneur Linux
+   * (infra/ci/linux.sh), qu'il ouvre et qu'il rend, même en échec.
+   */
+  it("travaillent dans un conteneur Linux qu'ils rendent toujours", () => {
+    const jobs = workflows.flatMap((texte) =>
+      [...texte.matchAll(/^ {2}(\w+):\n(?: {4}.*\n|\n)*/gm)]
+        .map(([bloc]) => bloc)
+        .filter((bloc) => bloc.includes("runs-on:")),
     );
-    expect(caches.length).toBe(5);
-    for (const cache of caches) {
-      expect(cache).toBe(`\${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}`);
+    expect(jobs.length).toBe(5);
+    for (const bloc of jobs) {
+      // Régression : le service du runner ne trouvait pas bash (« bash:
+      // command not found » dès la première étape). Le bash de Git est posé
+      // dans le PATH, en PowerShell, avant toute étape en bash.
+      const premiere = bloc.indexOf("    steps:\n") + "    steps:\n".length;
+      const chemin = bloc.indexOf("- name: Bash de Git et Docker");
+      expect(chemin).toBeGreaterThan(0);
+      expect(bloc.slice(premiere, chemin)).not.toMatch(/^ {6}- /m);
+      // Régression : la stratégie d'exécution refusait le script (« l'exécution
+      // de scripts est désactivée sur ce système »).
+      expect(bloc.slice(chemin)).toMatch(
+        /^ {8}shell: powershell .*-ExecutionPolicy Bypass .*\{0\}/m,
+      );
+      expect(bloc).toContain("$env:GITHUB_PATH");
+      expect(bloc).toContain("run: git config --global core.autocrlf false");
+      expect(bloc).toMatch(/run: bash infra\/ci\/linux\.sh ouvrir/);
+      expect(bloc).toMatch(
+        /- name: Rendre la machine du runner\n {8}if: always\(\)\n {8}run: bash infra\/ci\/linux\.sh fermer/,
+      );
+      expect(bloc).not.toMatch(/^ {4}(services|container):/m);
+      expect(bloc).not.toContain("actions/setup-node@");
     }
   });
 
@@ -513,17 +543,6 @@ describe("actions GitHub des workflows", () => {
     for (const etape of envois) {
       expect(etape).toContain("continue-on-error: true");
     }
-  });
-
-  it("rendent l'espace de travail au runner après une action conteneur", () => {
-    const [ci] = workflows as [string];
-    const semgrep = ci.indexOf("semgrep/semgrep-action@");
-    const rendu = ci.indexOf("name: Rendre l'espace de travail au runner");
-    expect(semgrep).toBeGreaterThan(0);
-    expect(rendu).toBeGreaterThan(semgrep);
-    const etape = ci.slice(rendu, ci.indexOf("\n\n", rendu));
-    expect(etape).toContain("if: always()");
-    expect(etape).toMatch(/chown -R "\$\(id -u\):\$\(id -g\)" \/w \/t/);
   });
 
   it("ne lancent jamais le code d'une PR venue d'un fork", () => {
@@ -549,7 +568,7 @@ describe("actions GitHub des workflows", () => {
       ["captures.yml", captures],
     ] as const) {
       const levee = texte.indexOf("values ('security.staffRequires2fa', 'false'::jsonb)");
-      const suite = texte.search(/run: pnpm e2e|playwright test/);
+      const suite = texte.search(/'pnpm e2e'|playwright test/);
       expect(levee, nom).toBeGreaterThan(0);
       expect(suite, nom).toBeGreaterThan(levee);
     }
@@ -569,13 +588,25 @@ describe("actions GitHub des workflows", () => {
     }
   });
 
-  it("ne reprennent pas une trivy-action antérieure au correctif 0.35.0", () => {
-    const texte = workflows.join("\n");
-    const versions = [...texte.matchAll(/aquasecurity\/trivy-action@\S+ # v?(\d+)\.(\d+)/g)];
-    expect(versions.length).toBeGreaterThan(0);
-    for (const [, majeure, mineure] of versions) {
-      expect(Number(majeure) > 0 || Number(mineure) >= 35).toBe(true);
+  /*
+   * Les outils tournent en conteneur, d'images épinglées par empreinte : un
+   * tag se réécrit (trivy-action, mars 2026), une empreinte non.
+   */
+  it("n'emploient que des images épinglées par empreinte", () => {
+    const outils = readFileSync(join(RACINE, "infra", "ci", "outils.env"), "utf8");
+    const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
+    const images = [...`${outils}\n${linux}`.matchAll(/^IMAGE_\w+=(.+)$/gm)].map((m) => m[1]);
+    expect(images.length).toBe(4);
+    for (const image of images) {
+      expect(image).toMatch(/^[\w./-]+@sha256:[0-9a-f]{64} # \S+$/);
     }
+    // Trivy 0.74 et au-delà : bien après le correctif de l'incident (0.35.0).
+    expect(outils).toMatch(
+      /^IMAGE_TRIVY=aquasec\/trivy@sha256:[0-9a-f]{64} # 0\.(7[4-9]|[89]\d)\./m,
+    );
+    const texte = workflows.join("\n");
+    expect(texte).not.toContain("trivy-action@");
+    expect(texte).not.toContain("semgrep-action@");
   });
 });
 
@@ -594,9 +625,11 @@ describe("inventaire des dépendances des releases", () => {
 
   it("est produit au format CycloneDX, dans les fichiers publiés", () => {
     const { texte } = etape("Inventaire des dépendances (SBOM)");
-    expect(texte).toContain("uses: aquasecurity/trivy-action@");
-    expect(texte).toContain("format: cyclonedx");
-    expect(texte).toContain(`output: ${inventaire}`);
+    expect(texte).toContain('linux.sh outil "$IMAGE_TRIVY" fs --format cyclonedx');
+    expect(texte).toContain('--output "dist/gamedashboard-$VERSION.cdx.json"');
+    expect(release.indexOf("- name: Rapatrier l'archive")).toBeGreaterThan(
+      release.indexOf("- name: Inventaire des dépendances (SBOM)"),
+    );
     // Les licences se lisent dans node_modules : l'exclure les ferait disparaître.
     expect(texte).not.toMatch(/skip-dirs:.*node_modules/);
   });
@@ -630,7 +663,7 @@ describe("scan ZAP de la CI", () => {
     expect(parcours).toBeGreaterThan(0);
     expect(scan).toBeGreaterThan(parcours);
     expect(ci.slice(scan, ci.indexOf("\n\n", scan))).toContain(
-      "run: bash infra/ci/zap-baseline.sh",
+      'run: ZAP_CONTENEUR="$(bash infra/ci/linux.sh nom)" bash infra/ci/zap-baseline.sh',
     );
   });
 
@@ -653,13 +686,16 @@ describe("scan ZAP de la CI", () => {
   it("ne confond pas un Docker absent avec une alerte", () => {
     const controle = script.indexOf("docker info >/dev/null 2>&1 ||");
     expect(controle).toBeGreaterThan(0);
-    expect(controle).toBeLessThan(script.indexOf("docker run --rm"));
+    expect(controle).toBeLessThan(script.indexOf("docker create"));
     expect(script.slice(controle, script.indexOf("\n", controle))).toContain("exit 3");
   });
 
   it("n'écrit pas dans l'espace de travail depuis le conteneur", () => {
+    // Aucun montage : le dossier de travail est copié dans le conteneur de
+    // ZAP, et le rapport recopié. Rien de ce que ZAP écrit ne reste dans _work.
     expect(script).toContain("TRAVAIL=$(mktemp -d)");
-    expect(script).toContain('-v "$TRAVAIL:/zap/wrk:rw"');
+    expect(script).toContain('| docker cp - "$ZAP:/zap"');
+    expect(script).not.toMatch(/docker (run|create)[^\n]* -v /);
   });
 
   it("justifie chaque exception", () => {

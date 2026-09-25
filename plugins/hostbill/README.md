@@ -61,6 +61,19 @@ Si vos clients ont déjà un compte sur le panel, le module les **rattache** au
 lieu d'en créer un second : il cherche d'abord votre identifiant client, puis
 l'adresse e-mail, et n'en crée un que s'il ne trouve rien.
 
+## Échéances sur l'accueil du panel (facultatif)
+
+Le panel peut aussi **lire** les services de chaque client et leurs échéances,
+pour les montrer sur son accueil et prévenir dans la cloche avant une
+suspension. Il n'écrit jamais rien chez vous.
+
+1. **Settings → Security → API access** : créez un accès limité à
+   `getClients`, `getClientDetails` et `getClientAccounts`, restreint à
+   l'adresse IP du panel.
+2. Dans le panel, **Réglages → Facturation et connexion des clients** :
+   adresse de l'API `https://votre-hostbill/admin/api.php`, identifiant et
+   clé, puis **Tester la liaison**.
+
 ## Ce qui a été éprouvé
 
 Le client d'API (`includes/GameDashboardClient.php`) a été exécuté contre un

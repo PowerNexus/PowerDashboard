@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysUntil, readServiceState } from "./hostbill";
+import { daysUntil, readableBillingProvider, readServiceState } from "./billing";
 
 describe("daysUntil", () => {
   const today = new Date("2026-03-10T23:30:00Z");
@@ -51,11 +51,34 @@ describe("readServiceState", () => {
     expect(readServiceState("canceled")).toBe("cancelled");
   });
 
+  it("reconnaît les fins de service de WHMCS et de ClientXCMS", () => {
+    expect(readServiceState("Terminated")).toBe("cancelled");
+    expect(readServiceState("Completed")).toBe("cancelled");
+    expect(readServiceState("expired")).toBe("cancelled");
+  });
+
   it("rend « unknown » plutôt que d'inventer un état", () => {
     // Un état inconnu affiché comme « actif » ferait croire à un service en
     // service alors qu'il vient d'être fermé.
     expect(readServiceState("fraud")).toBe("unknown");
     expect(readServiceState(undefined)).toBe("unknown");
     expect(readServiceState(42)).toBe("unknown");
+  });
+});
+
+describe("readableBillingProvider", () => {
+  it("reconnaît les trois facturiers lisibles", () => {
+    expect(readableBillingProvider("hostbill")).toBe("hostbill");
+    expect(readableBillingProvider("whmcs")).toBe("whmcs");
+    expect(readableBillingProvider("clientxcms")).toBe("clientxcms");
+  });
+
+  it("écarte « aucun », « sur mesure » et tout le reste", () => {
+    // Une boutique sur mesure n'a pas d'API de lecture connue : l'interroger
+    // comme si c'était HostBill serait précisément le défaut corrigé ici.
+    expect(readableBillingProvider("none")).toBeNull();
+    expect(readableBillingProvider("custom")).toBeNull();
+    expect(readableBillingProvider("")).toBeNull();
+    expect(readableBillingProvider(undefined)).toBeNull();
   });
 });

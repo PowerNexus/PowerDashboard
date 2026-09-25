@@ -88,6 +88,18 @@ Le changement de mot de passe, les options additionnelles et l'import de
 services existants ne sont pas surchargés : ils gardent le comportement par
 défaut de ClientXCMS.
 
+## Échéances sur l'accueil du panel (facultatif)
+
+Le panel peut aussi **lire** les services de chaque client et leurs échéances,
+pour les montrer sur son accueil et prévenir dans la cloche avant une
+suspension. Il n'écrit jamais rien chez vous.
+
+1. Dans l'administration de ClientXCMS, créez une clé d'API limitée aux
+   capacités `customers:index`, `customers:show` et `services:index`.
+2. Dans le panel, **Réglages → Facturation et connexion des clients** :
+   adresse de l'API = l'adresse de votre site ClientXCMS, identifiant laissé
+   vide, clé = le jeton, puis **Tester la liaison**.
+
 ## Ce qui a été éprouvé
 
 Le module tourne dans un banc (`modules/gamedashboard/tests/module-logic.php`)
