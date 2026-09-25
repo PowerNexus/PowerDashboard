@@ -323,6 +323,20 @@
       "when": 1790339589478,
       "tag": "0045_marketplace_update_check",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1790348221405,
+      "tag": "0046_server_unreachable_since",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790348507137,
+      "tag": "0047_node_outages",
+      "breakpoints": true
     }
   ]
 }

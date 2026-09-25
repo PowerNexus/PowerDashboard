@@ -32,6 +32,8 @@
  */
 export const CLIENT_WEBHOOK_EVENTS = [
   "server.installed",
+  "server.unreachable",
+  "server.recovered",
   "server.transferred",
   "server.transfer_failed",
   "server.quota_stopped",
@@ -56,6 +58,16 @@ export const CLIENT_WEBHOOK_CATALOGUE: readonly ClientWebhookEventDescriptor[] =
     event: "server.installed",
     label: "Installation terminée",
     description: "Le serveur est prêt à démarrer pour la première fois.",
+  },
+  {
+    event: "server.unreachable",
+    label: "Serveur injoignable",
+    description: "Le serveur tourne mais ne répond plus aux joueurs depuis trois minutes.",
+  },
+  {
+    event: "server.recovered",
+    label: "Serveur rétabli",
+    description: "Le serveur répond de nouveau aux joueurs.",
   },
   {
     event: "server.transferred",

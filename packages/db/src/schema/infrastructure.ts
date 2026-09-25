@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   boolean,
@@ -205,6 +205,15 @@ export const nodes = pgTable(
      * du seuil, et la durée rendue au retour serait fausse d'autant.
      */
     unreachableSince: moment("unreachable_since"),
+    /**
+     * Début de l'historique des pannes (`node_outages`) pour ce node.
+     *
+     * La disponibilité publiée ne se calcule que sur la période où les pannes
+     * ont été consignées. Les nodes antérieurs à cette consignation la
+     * commencent à la migration qui l'a introduite, pas à leur création :
+     * compter leur passé comme sans panne gonflerait le chiffre.
+     */
+    uptimeTrackedSince: moment("uptime_tracked_since").notNull().default(sql`now()`),
     ...timestamps,
   },
   (table) => [
@@ -215,6 +224,31 @@ export const nodes = pgTable(
     index("node_location_idx").on(table.locationId),
     index("node_category_idx").on(table.category, table.subcategory),
   ],
+);
+
+/**
+ * Pannes des nodes, une ligne par interruption.
+ *
+ * Écrite par le seul `NodeHealthWatcherService`, aux mêmes transitions que
+ * `nodes.unreachable_since` : ouverte au dernier heartbeat reçu, close au
+ * retour. C'est l'historique qui permet de publier une disponibilité sur la
+ * page de statut sans l'inventer.
+ */
+export const nodeOutages = pgTable(
+  "node_outages",
+  {
+    id: id(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    startedAt: moment("started_at").notNull(),
+    /** `null` : la panne dure encore. */
+    endedAt: moment("ended_at"),
+    /** Le node était en maintenance déclarée quand il s'est tu. */
+    maintenance: boolean("maintenance").notNull().default(false),
+    ...timestamps,
+  },
+  (table) => [index("node_outage_node_started_idx").on(table.nodeId, table.startedAt)],
 );
 
 export const allocations = pgTable(

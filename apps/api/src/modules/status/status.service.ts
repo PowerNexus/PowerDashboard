@@ -6,10 +6,13 @@ import {
   NODE_HEARTBEAT_LOST_MS,
   type PlatformState,
   platformState,
+  UPTIME_WINDOW_DAYS,
+  uptimeRatio,
+  uptimeWindowStart,
 } from "@gamedashboard/contracts";
-import { type Database, incidents, locations, nodes } from "@gamedashboard/db";
+import { type Database, incidents, locations, nodeOutages, nodes } from "@gamedashboard/db";
 import { Inject, Injectable } from "@nestjs/common";
-import { desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 
 /**
@@ -26,6 +29,11 @@ export interface StatusComponent {
   name: string;
   location: string;
   state: PlatformState;
+  /**
+   * Disponibilité sur la fenêtre publiée, de 0 à 1, et le début de cette
+   * fenêtre. `ratio` nul : trop peu d'historique pour conclure.
+   */
+  uptime: { ratio: number | null; since: string };
 }
 
 export interface StatusIncident {
@@ -62,9 +70,9 @@ const HISTORY_LIMIT = 10;
  * raconter ce que la machine ne sait pas dire — la cause, l'échéance, ce qu'on
  * fait.
  *
- * Aucune disponibilité chiffrée n'est calculée : elle demanderait un historique
- * d'états que le panel ne conserve pas. Un « 99,98 % » plausible mais faux sur
- * une page de statut coûte plus cher que son absence.
+ * La disponibilité chiffrée vient des pannes consignées par la veille des
+ * nodes, sur `UPTIME_WINDOW_DAYS` jours au plus, et seulement depuis que la
+ * consignation existe pour ce node : la page dit depuis quand elle compte.
  */
 @Injectable()
 export class StatusService {
@@ -105,13 +113,20 @@ export class StatusService {
         location: locations.long,
         maintenance: nodes.maintenanceMode,
         lastHeartbeatAt: nodes.lastHeartbeatAt,
+        trackedSince: nodes.uptimeTrackedSince,
       })
       .from(nodes)
       .innerJoin(locations, eq(nodes.locationId, locations.id))
       .where(isNull(nodes.ownerId))
       .orderBy(locations.long, nodes.name);
 
-    const now = Date.now();
+    const instant = new Date();
+    const now = instant.getTime();
+    const outages = await this.outagesOf(
+      rows.map((row) => row.id),
+      new Date(now - UPTIME_WINDOW_DAYS * 86_400_000),
+    );
+
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -122,7 +137,42 @@ export class StatusService {
         lostAfterMs: NODE_HEARTBEAT_LOST_MS,
         now,
       }),
+      uptime: (() => {
+        const since = uptimeWindowStart(row.trackedSince, instant);
+        return {
+          ratio: uptimeRatio(outages.get(row.id) ?? [], since, instant),
+          since: since.toISOString(),
+        };
+      })(),
     }));
+  }
+
+  /** Pannes touchant la fenêtre, par node : closes après son début, ou en cours. */
+  private async outagesOf(
+    nodeIds: string[],
+    from: Date,
+  ): Promise<Map<string, { startedAt: string; endedAt: string | null }[]>> {
+    const found = new Map<string, { startedAt: string; endedAt: string | null }[]>();
+    if (nodeIds.length === 0) return found;
+
+    const rows = await this.db
+      .select({
+        nodeId: nodeOutages.nodeId,
+        startedAt: nodeOutages.startedAt,
+        endedAt: nodeOutages.endedAt,
+      })
+      .from(nodeOutages)
+      .where(
+        and(
+          inArray(nodeOutages.nodeId, nodeIds),
+          or(isNull(nodeOutages.endedAt), gt(nodeOutages.endedAt, from.toISOString())),
+        ),
+      );
+
+    for (const row of rows) {
+      found.set(row.nodeId, [...(found.get(row.nodeId) ?? []), row]);
+    }
+    return found;
   }
 
   private async incidents(filter: { open: boolean }): Promise<StatusIncident[]> {

@@ -1,5 +1,5 @@
-import { NODE_HEARTBEAT_LOST_MS } from "@gamedashboard/contracts";
-import { type Database, nodes, servers } from "@gamedashboard/db";
+import { NODE_HEARTBEAT_LOST_MS, outageDuration } from "@gamedashboard/contracts";
+import { type Database, nodeOutages, nodes, servers, users } from "@gamedashboard/db";
 import {
   Inject,
   Injectable,
@@ -10,6 +10,10 @@ import {
 import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
+import {
+  type NotificationLevel,
+  NotificationsService,
+} from "../notifications/notifications.service";
 import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 
 /**
@@ -48,6 +52,7 @@ export class NodeHealthWatcherService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(WebhookEmitterService) private readonly webhooks: WebhookEmitterService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   onModuleInit(): void {
@@ -133,6 +138,14 @@ export class NodeHealthWatcherService implements OnModuleInit, OnModuleDestroy {
         .update(nodes)
         .set({ unreachableSince: node.lastHeartbeatAt })
         .where(eq(nodes.id, node.id));
+      // L'historique de la page de statut, ouvert au même instant.
+      if (node.lastHeartbeatAt !== null) {
+        await this.db.insert(nodeOutages).values({
+          nodeId: node.id,
+          startedAt: node.lastHeartbeatAt,
+          maintenance: node.maintenance,
+        });
+      }
 
       const affected = await this.affectedServers(node.id);
 
@@ -160,6 +173,15 @@ export class NodeHealthWatcherService implements OnModuleInit, OnModuleDestroy {
         // tombé » ne permet pas de décider s'il faut réveiller quelqu'un.
         affectedServers: affected,
       });
+
+      await this.notifyOperators(node.ownerId, {
+        type: "node.unreachable",
+        title: `Machine « ${node.name} » injoignable`,
+        body: `${node.fqdn} ne donne plus signe de vie. ${affected} serveur(s) coupé(s).${
+          node.maintenance ? " La machine était en maintenance déclarée." : ""
+        }`,
+        level: node.maintenance ? "warning" : "danger",
+      });
     }
   }
 
@@ -186,6 +208,10 @@ export class NodeHealthWatcherService implements OnModuleInit, OnModuleDestroy {
 
     for (const node of back) {
       await this.db.update(nodes).set({ unreachableSince: null }).where(eq(nodes.id, node.id));
+      await this.db
+        .update(nodeOutages)
+        .set({ endedAt: now.toISOString(), updatedAt: now.toISOString() })
+        .where(and(eq(nodeOutages.nodeId, node.id), isNull(nodeOutages.endedAt)));
 
       this.logger.log(`Node « ${node.name} » de nouveau joignable.`);
 
@@ -202,6 +228,43 @@ export class NodeHealthWatcherService implements OnModuleInit, OnModuleDestroy {
             ? null
             : Math.round((now.getTime() - new Date(node.unreachableSince).getTime()) / 1000),
       });
+
+      await this.notifyOperators(node.ownerId, {
+        type: "node.recovered",
+        title: `Machine « ${node.name} » rétablie`,
+        body:
+          node.unreachableSince === null
+            ? `${node.fqdn} répond de nouveau.`
+            : `${node.fqdn} répond de nouveau, après ${outageDuration(new Date(node.unreachableSince), now)} d'interruption.`,
+        level: "success",
+      });
+    }
+  }
+
+  /**
+   * Prévient ceux qui exploitent la machine : les administrateurs, et son
+   * revendeur quand elle en a un.
+   *
+   * Le rappel applicatif ne suffisait pas : il ne part que vers un tiers
+   * configuré, et sans lui, une machine tombée la nuit n'était remarquée que
+   * par les clients. Les comptes suspendus sont écartés : ils ne peuvent
+   * rien y faire, et leur écrire serait leur parler d'un parc dont ils sont
+   * exclus.
+   */
+  private async notifyOperators(
+    ownerId: string | null,
+    input: { type: string; title: string; body: string; level: NotificationLevel },
+  ): Promise<void> {
+    const admins = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.role, "admin"), isNull(users.suspendedAt)));
+    // Chacun vers son propre écran des machines.
+    const recipients = new Map(admins.map((admin) => [admin.id, "/admin/nodes"]));
+    if (ownerId && !recipients.has(ownerId)) recipients.set(ownerId, "/reseller/nodes");
+
+    for (const [userId, href] of recipients) {
+      await this.notifications.notify({ ...input, userId, href });
     }
   }
 

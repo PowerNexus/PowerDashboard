@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 import {
+  discordWebhookBody,
+  isDiscordWebhookUrl,
   WEBHOOK_DELIVERY_HEADER,
   WEBHOOK_EVENT_HEADER,
   WEBHOOK_MAX_ATTEMPTS,
@@ -106,7 +108,11 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
 
   /** Un envoi, et ce qu'on en fait. */
   private async deliver(queue: WebhookQueue, due: DueDelivery): Promise<void> {
-    const body = JSON.stringify(due.payload);
+    // Un salon Discord n'accepte que son propre format : le corps générique y
+    // était refusé à chaque envoi (`discord-webhook.ts`).
+    const body = JSON.stringify(
+      isDiscordWebhookUrl(due.url) ? discordWebhookBody(due.event, due.payload) : due.payload,
+    );
     const timestamp = Math.floor(Date.now() / 1000);
 
     /**

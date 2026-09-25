@@ -28,7 +28,7 @@ export interface NotificationEventDefinition {
   /** Le `type` écrit en base, tel que l'émetteur le pose. */
   type: string;
   /** Regroupement d'affichage. Sert à l'écran, jamais à la décision. */
-  group: "server" | "backup" | "billing" | "reseller";
+  group: "server" | "backup" | "billing" | "reseller" | "infrastructure";
   /**
    * Moyens retenus **quand l'utilisateur n'a rien dit**.
    *
@@ -52,6 +52,11 @@ export interface NotificationEventDefinition {
 
 export const NOTIFICATION_EVENTS: readonly NotificationEventDefinition[] = [
   { type: "server.installed", group: "server", defaults: ["inapp"] },
+  // Le courriel par défaut : une panne arrive quand personne ne regarde le
+  // panel, et ce sont les joueurs qui la découvriraient sinon.
+  { type: "server.unreachable", group: "server", defaults: ["inapp", "email"] },
+  // La cloche seule : le retour se constate, il ne réclame rien.
+  { type: "server.recovered", group: "server", defaults: ["inapp"] },
   // Le courriel par défaut : sans lui, une invitation attend qu'on ouvre le
   // panel — ce que fait rarement quelqu'un qui n'y a encore aucun serveur.
   { type: "subuser.invited", group: "server", defaults: ["inapp", "email"] },
@@ -74,6 +79,9 @@ export const NOTIFICATION_EVENTS: readonly NotificationEventDefinition[] = [
   // La cloche seule : une extension en retard d'une version n'a rien
   // d'urgent, et la veille repasse chaque jour.
   { type: "marketplace.update_available", group: "server", defaults: ["inapp"] },
+  // Pour qui exploite les machines : administrateurs et revendeur du node.
+  { type: "node.unreachable", group: "infrastructure", defaults: ["inapp", "email"] },
+  { type: "node.recovered", group: "infrastructure", defaults: ["inapp"] },
   { type: "reseller.quota_enforced", group: "reseller", defaults: ["inapp", "email"] },
   { type: "billing.due_soon", group: "billing", defaults: ["inapp", "email"] },
   { type: "billing.overdue", group: "billing", defaults: ["inapp", "email"] },

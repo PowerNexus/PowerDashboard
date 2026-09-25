@@ -11,10 +11,11 @@
  * lorsqu'on n'en a pas besoin.
  *
  * **Elle n'invente rien.** Ce qui est affiché vient du heartbeat des nodes ou
- * d'un incident rédigé par l'exploitant. Il n'y a ni pourcentage de
- * disponibilité, ni historique de trente jours : le panel ne conserve pas
- * l'historique qu'il faudrait pour les calculer, et un chiffre plausible mais
- * faux sur une page de statut coûte plus cher que son absence.
+ * d'un incident rédigé par l'exploitant. La disponibilité chiffrée se calcule
+ * sur les pannes consignées (`node_outages`), et **seulement depuis qu'elles
+ * le sont** : la page dit « depuis le … » plutôt que de compter comme sans
+ * panne une période dont le panel ne sait rien. Un chiffre plausible mais faux
+ * sur une page de statut coûte plus cher que son absence.
  */
 
 /** Gravité d'un incident, de la moins grave à la plus grave. */
@@ -124,4 +125,54 @@ export function componentStateOf(node: {
   // Le fait l'emporte sur l'intention : la maintenance ne se lit qu'une fois le
   // node joignable, sans quoi une panne serait maquillée en intervention.
   return node.maintenance ? "maintenance" : "operational";
+}
+
+/** Fenêtre de la disponibilité publiée. */
+export const UPTIME_WINDOW_DAYS = 90;
+
+/** En deçà, la période observée est trop courte pour qu'un pourcentage dise quelque chose. */
+export const UPTIME_MIN_OBSERVED_MS = 60 * 60_000;
+
+export interface OutageSpan {
+  startedAt: string;
+  /** `null` : la panne dure encore. */
+  endedAt: string | null;
+}
+
+/**
+ * Part du temps où le composant était joignable entre `from` et `to`, de 0 à 1.
+ *
+ * Les pannes sont coupées à la fenêtre, et leurs chevauchements ne comptent
+ * qu'une fois. Rend `null` quand la fenêtre est trop courte : une heure
+ * d'observation ne fonde pas un « 100 % ».
+ */
+export function uptimeRatio(outages: readonly OutageSpan[], from: Date, to: Date): number | null {
+  const start = from.getTime();
+  const end = to.getTime();
+  if (end - start < UPTIME_MIN_OBSERVED_MS) return null;
+
+  const spans = outages
+    .map((outage) => [
+      Math.max(start, new Date(outage.startedAt).getTime()),
+      Math.min(end, outage.endedAt === null ? end : new Date(outage.endedAt).getTime()),
+    ])
+    .filter(([a, b]) => (b as number) > (a as number))
+    .sort((x, y) => (x[0] as number) - (y[0] as number)) as [number, number][];
+
+  let down = 0;
+  let cursor = start;
+  for (const [a, b] of spans) {
+    const from_ = Math.max(a, cursor);
+    if (b > from_) {
+      down += b - from_;
+      cursor = b;
+    }
+  }
+  return 1 - down / (end - start);
+}
+
+/** Début de la fenêtre publiée : 90 jours, ou moins si la consignation est plus récente. */
+export function uptimeWindowStart(trackedSince: string, now: Date): Date {
+  const window = now.getTime() - UPTIME_WINDOW_DAYS * 86_400_000;
+  return new Date(Math.max(window, new Date(trackedSince).getTime()));
 }

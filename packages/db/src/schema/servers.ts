@@ -91,6 +91,15 @@ export const servers = pgTable(
     allocationLimit: integer("allocation_limit").notNull().default(0),
 
     installedAt: moment("installed_at"),
+    /**
+     * Depuis quand le serveur, censé tourner, ne répond plus à ses joueurs.
+     * `null` : il répond, ou il n'est pas censé tourner.
+     *
+     * Un seul écrivain, la sonde de jeu (`game-probe.service.ts`) : c'est la
+     * transition de cette colonne qui déclenche l'alerte, et deux plumes
+     * finiraient par prévenir deux fois, ou jamais.
+     */
+    unreachableSince: moment("unreachable_since"),
     ...timestamps,
   },
   (table) => [

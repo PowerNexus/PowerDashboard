@@ -1,8 +1,8 @@
 import { NODE_HEARTBEAT_LOST_MS, type WebhookPayload } from "@gamedashboard/contracts";
-import { applicationWebhookDeliveries, type Database, nodes } from "@gamedashboard/db";
+import { applicationWebhookDeliveries, type Database, nodes, users } from "@gamedashboard/db";
 import { Logger } from "@nestjs/common";
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seedLocation, seedNode, seedServer, seedUser, seedWebhook } from "../../test/fixtures";
 import {
   createThrowawayDatabase,
@@ -10,6 +10,7 @@ import {
   NO_DATABASE_REASON,
   type ThrowawayDatabase,
 } from "../../test/throwaway-database";
+import type { NotificationsService } from "../notifications/notifications.service";
 import { WebhookEmitterService } from "../webhooks/webhook-emitter.service";
 import { NodeHealthWatcherService } from "./node-health-watcher.service";
 
@@ -33,6 +34,7 @@ describe.skipIf(!HAS_DATABASE)("NodeHealthWatcherService (intégration)", () => 
   let db: Database;
   let watcher: NodeHealthWatcherService;
   let locationId: string;
+  const notify = vi.fn(async (_input: { userId: string; type: string; href?: string }) => {});
 
   /** Un instant fixe : les dates du test se lisent alors comme des écarts. */
   const NOW = new Date("2026-03-01T12:00:00.000Z");
@@ -51,7 +53,9 @@ describe.skipIf(!HAS_DATABASE)("NodeHealthWatcherService (intégration)", () => 
     db = throwaway.db;
     // Le vrai émetteur, pas une doublure : le filtrage par événement abonné
     // fait partie de ce qu'on veut voir marcher.
-    watcher = new NodeHealthWatcherService(db, new WebhookEmitterService(db));
+    watcher = new NodeHealthWatcherService(db, new WebhookEmitterService(db), {
+      notify,
+    } as unknown as NotificationsService);
   }, 60_000);
 
   afterAll(async () => {
@@ -75,6 +79,7 @@ describe.skipIf(!HAS_DATABASE)("NodeHealthWatcherService (intégration)", () => 
       ),
     );
     locationId = await seedLocation(db);
+    notify.mockClear();
   });
 
   /** Les livraisons inscrites, de la plus ancienne à la plus récente. */
@@ -318,6 +323,52 @@ describe.skipIf(!HAS_DATABASE)("NodeHealthWatcherService (intégration)", () => 
 
       expect(await delivered()).toEqual([]);
       expect(await markOf(nodeId)).not.toBeNull();
+    });
+  });
+  describe("notifications des exploitants", () => {
+    it("prévient les administrateurs actifs et le revendeur, chacun vers son écran", async () => {
+      const admin = await seedUser(db);
+      const suspendu = await seedUser(db);
+      const revendeur = await seedUser(db);
+      const client = await seedUser(db);
+      await db.update(users).set({ role: "admin" }).where(eq(users.id, admin));
+      await db
+        .update(users)
+        .set({ role: "admin", suspendedAt: NOW.toISOString() })
+        .where(eq(users.id, suspendu));
+      const nodeId = await seedNode(db, { locationId, lastHeartbeatAt: ago(LONG_SILENCE) });
+      await db.update(nodes).set({ ownerId: revendeur }).where(eq(nodes.id, nodeId));
+
+      await watcher.tick(NOW);
+
+      const envois = notify.mock.calls.map(([input]) => [input.userId, input.type, input.href]);
+      expect(envois).toEqual(
+        expect.arrayContaining([
+          [admin, "node.unreachable", "/admin/nodes"],
+          [revendeur, "node.unreachable", "/reseller/nodes"],
+        ]),
+      );
+      expect(envois).toHaveLength(2);
+      expect(envois.map(([id]) => id)).not.toContain(client);
+    });
+
+    it("annonce le retour une seule fois", async () => {
+      const admin = await seedUser(db);
+      await db.update(users).set({ role: "admin" }).where(eq(users.id, admin));
+      const nodeId = await seedNode(db, { locationId, lastHeartbeatAt: ago(LONG_SILENCE) });
+      await watcher.tick(NOW);
+      await db
+        .update(nodes)
+        .set({ lastHeartbeatAt: NOW.toISOString() })
+        .where(eq(nodes.id, nodeId));
+
+      await watcher.tick(NOW);
+      await watcher.tick(NOW);
+
+      expect(notify.mock.calls.map(([input]) => input.type)).toEqual([
+        "node.unreachable",
+        "node.recovered",
+      ]);
     });
   });
 });

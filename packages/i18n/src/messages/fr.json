@@ -80,14 +80,17 @@
       "server": "Vos serveurs",
       "backup": "Sauvegardes",
       "billing": "Facturation",
-      "reseller": "Revente"
+      "reseller": "Revente",
+      "infrastructure": "Machines"
     },
     "event": {
       "server": {
         "installed": "Installation terminée",
         "transferred": "Serveur déplacé sur une autre machine",
         "transfer_failed": "Déplacement interrompu",
-        "quota_stopped": "Serveur arrêté faute de quota"
+        "quota_stopped": "Serveur arrêté faute de quota",
+        "unreachable": "Serveur injoignable",
+        "recovered": "Serveur rétabli"
       },
       "subuser": {
         "invited": "Invitation à gérer un serveur"
@@ -108,6 +111,10 @@
       },
       "marketplace": {
         "update_available": "Mise à jour d'extension disponible"
+      },
+      "node": {
+        "unreachable": "Machine injoignable",
+        "recovered": "Machine rétablie"
       }
     },
     "mandatoryHint": "Toujours envoyé : cela se décide sans vous, et vous devez pouvoir le savoir autrement que par le silence de vos joueurs.",
@@ -1731,7 +1738,10 @@
       "identified": "Cause identifiée",
       "monitoring": "Sous surveillance",
       "resolved": "Résolu"
-    }
+    },
+    "uptimeWindow": "{value} de disponibilité sur {days} jours",
+    "uptimeSince": "{value} de disponibilité depuis le {date}",
+    "uptimeTooEarly": "Disponibilité mesurée depuis moins d'une heure"
   },
   "subusers": {
     "title": "Sous-utilisateurs",
