@@ -46,6 +46,14 @@ ouvrir() {
   local postgres=0
   [ "${1:-}" = "--postgres" ] && postgres=1
 
+  # Un refus d'accès au moteur est un réglage de la machine, pas du dépôt :
+  # le dire tel quel plutôt que laisser « permission denied » sans suite.
+  if ! docker info >/dev/null 2>&1; then
+    echo "::error::Docker refuse l'accès à l'utilisateur du runner ($(whoami)). Sous Windows : l'ajouter au groupe local docker-users et vérifier que Docker Desktop tourne, puis redémarrer le service du runner (docs/runner-auto-heberge.md)." >&2
+    docker info >&2 || true
+    return 1
+  fi
+
   docker network create "$RESEAU" >/dev/null
   docker volume create "$VOLUME" >/dev/null
 
