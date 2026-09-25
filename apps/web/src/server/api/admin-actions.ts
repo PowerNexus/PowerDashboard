@@ -65,6 +65,33 @@ export async function testSmtp(): Promise<{
   }
 }
 
+/**
+ * Essai de la liaison avec le facturier.
+ *
+ * Même forme que l'essai SMTP, et pour la même raison : un refus du facturier
+ * n'est pas une action refusée, et sa phrase est ce que l'exploitant doit lire.
+ */
+export async function testBilling(): Promise<{
+  ok: boolean;
+  provider: string | null;
+  knowsCaller: boolean;
+  error: string | null;
+}> {
+  try {
+    const { data } = await apiSendFor<{
+      data: { ok: boolean; provider: string | null; knowsCaller: boolean; error: string | null };
+    }>("/api/v1/admin/settings/billing/test", {});
+    return data;
+  } catch (error) {
+    return {
+      ok: false,
+      provider: null,
+      knowsCaller: false,
+      error: error instanceof Error ? error.message : "Essai impossible.",
+    };
+  }
+}
+
 export async function setFeatureFlag(
   key: string,
   enabled: boolean,

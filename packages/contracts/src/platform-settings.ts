@@ -483,21 +483,24 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         kind: "text",
         label: "Adresse de l'API",
         description:
-          "Facultative, et **en lecture seule** : elle sert au panel à montrer à chaque client ses services et ses échéances. Le sens inverse — créer, suspendre, supprimer — passe par le plugin.",
+          "Facultative, et **en lecture seule** : elle sert au panel à montrer à chaque client ses services et ses échéances. Le sens inverse — créer, suspendre, supprimer — passe par le plugin. " +
+          "HostBill : « …/admin/api.php ». WHMCS : « …/includes/api.php », en autorisant l'adresse IP du panel dans ses restrictions d'API. ClientXCMS : l'adresse du site.",
         placeholder: "https://facturation.exemple.fr/admin/api.php",
       },
       {
         key: "billing.apiId",
         kind: "text",
         label: "Identifiant d'API",
-        description: "Chez HostBill, créé sous « API access ».",
+        description:
+          "HostBill : créé sous « API access ». WHMCS : l'identifiant des « API Credentials ». ClientXCMS : à laisser vide, la clé suffit.",
       },
       {
         key: "billing.apiKey",
         kind: "secret",
         label: "Clé d'API",
         description:
-          "Donne accès à l'ensemble des clients de la facturation : à réserver à un compte d'API en lecture.",
+          "Donne accès à l'ensemble des clients de la facturation : à réserver à un compte d'API en lecture. " +
+          "ClientXCMS : un jeton limité aux capacités « customers:index », « customers:show » et « services:index ».",
       },
     ],
   },

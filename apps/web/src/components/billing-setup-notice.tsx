@@ -7,7 +7,7 @@ import { getTranslations } from "next-intl/server";
 /**
  * Ce qui manquerait à l'accueil tant que la facturation n'est pas reliée.
  *
- * Le bloc des services ne s'affiche pas sans HostBill, et c'est voulu — mais
+ * Le bloc des services ne s'affiche pas sans facturier relié, et c'est voulu — mais
  * l'absence est muette : l'exploitant qui découvre l'accueil ne peut pas
  * distinguer « rien à facturer » de « rien n'est branché ». Ce bandeau décrit
  * donc ce que la page **montrerait** une fois la facturation reliée, avec le
