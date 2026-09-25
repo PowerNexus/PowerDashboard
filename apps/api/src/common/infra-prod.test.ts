@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -797,5 +798,86 @@ describe("workflow des captures de référence", () => {
     expect(captures).toContain("git add apps/web/e2e/visuel.spec.ts-snapshots");
     expect(captures).toContain(`BRANCHE: \${{ github.ref_name }}`);
     expect(captures).toContain('git push origin "HEAD:$BRANCHE"');
+  });
+});
+
+/**
+ * Domaine de revendeur vérifié, **avant son certificat**.
+ *
+ * Le bloc de défi (`bloc_acme` de `certificates.sh`) répondait `return 503;` à
+ * tout ce qui n'était pas le défi ACME : le client du revendeur qui ouvrait
+ * son adresse trop tôt tombait sur la page d'erreur nue de nginx, avec sa
+ * version. Il doit recevoir une page d'attente claire, sans marque (ni celle
+ * de la plateforme, ni le panel en clair), et le défi doit rester servi.
+ *
+ * Le bloc est **rendu par bash** à partir du script lui-même : c'est ce texte
+ * exact que l'agent pose dans nginx. `domaine` est posé à part : les deux
+ * fonctions le lisent dans la portée de `traiter`, qui les appelle.
+ */
+describe("domaine de revendeur en attente de certificat", () => {
+  const script = join(PROD, "certificates.sh");
+  const rendre = (fonction: string) =>
+    execFileSync(
+      "bash",
+      [
+        "-c",
+        `source <(sed -n '/^PAGE_ATTENTE=/p;/^${fonction}()/,/^EOF$/p' "$1"; echo "}"); WEBROOT=/var/www/html; PANEL_WEB_PORT=3210; domaine=panel.revendeur.fr; ${fonction} "$domaine"`,
+        "rendu",
+        script,
+      ],
+      { encoding: "utf8" },
+    );
+  const acme = rendre("bloc_acme");
+  const servi = rendre("bloc_servi");
+
+  it("sert le défi ACME depuis le répertoire de certbot", () => {
+    expect(acme).toMatch(/server_name panel\.revendeur\.fr;/);
+    expect(acme).toMatch(
+      /location \/\.well-known\/acme-challenge\/ \{\s*root \/var\/www\/html;\s*\}/,
+    );
+  });
+
+  it("répond au reste par une page d'attente, pas par l'erreur nue de nginx", () => {
+    const racine = acme.slice(acme.indexOf("location / {"));
+    expect(racine).toMatch(/return 503 '<!doctype html>.*Mise en service en cours.*<\/html>';/);
+    expect(racine).toMatch(/default_type "text\/html; charset=utf-8";/);
+    expect(racine).toMatch(/add_header Retry-After \d+ always;/);
+    expect(racine).toMatch(/add_header Cache-Control "no-store" always;/);
+    expect(racine).toMatch(/add_header X-Content-Type-Options "nosniff" always;/);
+    // Le panel n'est jamais servi en clair sur le domaine d'un revendeur.
+    expect(acme).not.toMatch(/proxy_pass/);
+  });
+
+  it("écrit une page que nginx sert telle quelle, sans marque ni couleur en dur", () => {
+    const page = /return 503 '([^']*)';/.exec(acme)?.[1] ?? "";
+    expect(page.length).toBeGreaterThan(100);
+    // `$` serait lu par nginx comme une variable ; une apostrophe fermerait la chaîne.
+    expect(page).not.toMatch(/[$']/);
+    expect(page).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(/i);
+    expect(page).not.toMatch(/GameDashboard/i);
+  });
+
+  /**
+   * Non-régression : le domaine servi relayait \`Upgrade $http_upgrade\` et
+   * \`Connection "upgrade"\` sans le filtre de panel.conf, soit la contrebande
+   * h2c que ce vhost-là bloque. Les deux passent par les mêmes \`map\`.
+   */
+  it("ne relaie sur le domaine servi qu'une mise à niveau websocket", () => {
+    const sansCommentaires = servi.replace(/#.*$/gm, "");
+    expect(sansCommentaires).not.toMatch(/proxy_set_header\s+Upgrade\s+\$http_upgrade/);
+    expect(sansCommentaires).not.toMatch(/proxy_set_header\s+Connection\s+"upgrade"/);
+    expect(sansCommentaires).toMatch(/proxy_set_header\s+Upgrade\s+\$gd_upgrade;/);
+    expect(sansCommentaires).toMatch(/proxy_set_header\s+Connection\s+\$gd_connection;/);
+    // Les variables viennent de panel.conf, posé sur le même nginx.
+    expect(vhost).toMatch(/map \$http_upgrade \$gd_upgrade \{/);
+    expect(vhost).toMatch(/map \$http_upgrade \$gd_connection \{/);
+  });
+
+  it("tait la version de nginx sur le domaine du revendeur, avant comme après", () => {
+    for (const bloc of [acme, servi]) {
+      const serveurs = bloc.split(/^server \{/m).slice(1);
+      expect(serveurs.length).toBeGreaterThan(0);
+      for (const serveur of serveurs) expect(serveur).toMatch(/^\s*server_tokens off;/m);
+    }
   });
 });
