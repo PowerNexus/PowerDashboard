@@ -1,6 +1,6 @@
 import { EngineWorkspace } from "@/components/engine-workspace";
 import { pageTitle } from "@/lib/page-title";
-import { fetchEngineState, fetchEulaState } from "@/server/api/engine";
+import { fetchBackupRoom, fetchEngineState, fetchEulaState } from "@/server/api/engine";
 
 export const generateMetadata = pageTitle("engine", "metaTitle");
 
@@ -27,10 +27,19 @@ export default async function EnginePage({
    * vide pas la page : un daemon qui ne répond pas sur un fichier ne doit pas
    * empêcher de consulter les moteurs disponibles.
    */
-  const [initial, eula] = await Promise.all([
+  const [initial, eula, backupRoom] = await Promise.all([
     fetchEngineState(id, query),
     fetchEulaState(id).catch(() => null),
+    fetchBackupRoom(id),
   ]);
 
-  return <EngineWorkspace serverId={id} query={query} initial={initial} eula={eula} />;
+  return (
+    <EngineWorkspace
+      serverId={id}
+      query={query}
+      initial={initial}
+      eula={eula}
+      canBackup={backupRoom === true}
+    />
+  );
 }

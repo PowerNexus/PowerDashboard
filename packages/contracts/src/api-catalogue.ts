@@ -244,6 +244,22 @@ export const CLIENT_ROUTES: ApiRoute[] = [
   },
   {
     method: "GET",
+    path: "/servers/{server}/engine?q={recherche}",
+    summary:
+      "Moteur du serveur : plateformes proposées, modpacks Modrinth et CurseForge, moteur posé par le panel (meta.current) avec la mise à jour de pack relevée par la veille, et sort de chaque catalogue (meta.packSources).",
+    scope: "files.read",
+    group: "Moteur",
+  },
+  {
+    method: "POST",
+    path: "/servers/{server}/engine/install",
+    summary:
+      "Installer une plateforme ou un modpack, ou mettre à jour le pack en place (même optionId, autre versionId) : { optionId, versionId, backupFirst? }. Arrête le serveur ; backupFirst (portée backups.create) prend une sauvegarde ordinaire et l'attend avant toute écriture. Exige aussi files.delete et power.stop. Rend les fichiers posés, manquants et gardés.",
+    scope: "files.write",
+    group: "Moteur",
+  },
+  {
+    method: "GET",
     path: "/servers/{server}/activity",
     summary: "Journal d'audit du serveur, paginé par curseur.",
     scope: "activity.read",
