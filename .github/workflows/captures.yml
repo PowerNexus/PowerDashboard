@@ -76,7 +76,13 @@ jobs:
       - name: Fins de ligne du dépôt
         run: git config --global core.autocrlf false
 
+      # Sans jeton dans .git/config : le dépôt est copié tel quel dans le
+      # conteneur, où tournent l'installation, la compilation et Playwright,
+      # et ce jeton peut pousser. Seule l'étape du commit, sur le runner, le
+      # reçoit.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Conteneur Linux et base
         run: bash infra/ci/linux.sh ouvrir --postgres
@@ -119,10 +125,15 @@ jobs:
 
       # Le contexte `github` passe par l'environnement, jamais interpolé dans
       # le script : un nom de branche est choisi par qui la pousse.
+      # Le jeton n'est donné qu'à cette étape, sur le runner, et à ce seul
+      # `git push` (variables GIT_CONFIG_*, lues par cette commande seule) : en
+      # en-tête, comme le fait actions/checkout, jamais écrit dans .git/config
+      # ni dans l'adresse du dépôt.
       - name: Commiter les captures
         env:
           EXECUTION: ${{ github.run_id }}
           BRANCHE: ${{ github.ref_name }}
+          JETON: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -132,7 +143,11 @@ jobs:
             exit 0
           fi
           git commit -m "Captures de référence, prises sur le runner" -m "Workflow « Captures de référence », exécution $EXECUTION."
-          git push origin "HEAD:$BRANCHE"
+          AUTORISATION=$(printf 'x-access-token:%s' "$JETON" | base64 | tr -d '\n')
+          echo "::add-mask::$AUTORISATION"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTORISATION" \
+            git push origin "HEAD:$BRANCHE"
 
       - name: Rendre la machine du runner
         if: always()
