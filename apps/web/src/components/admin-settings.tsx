@@ -1,6 +1,10 @@
 "use client";
 
-import { PLATFORM_SETTINGS, type SettingDescriptor } from "@gamedashboard/contracts";
+import {
+  PLATFORM_SETTINGS,
+  type SettingDescriptor,
+  settingsAnchor,
+} from "@gamedashboard/contracts";
 import {
   AlertBanner,
   Badge,
@@ -19,7 +23,12 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useCallback, useState, useTransition } from "react";
 import type { PlatformSettings } from "@/server/api/admin";
-import { savePlatformSettings, setFeatureFlag, testSmtp } from "@/server/api/admin-actions";
+import {
+  savePlatformSettings,
+  setFeatureFlag,
+  testBilling,
+  testSmtp,
+} from "@/server/api/admin-actions";
 
 /**
  * Réglages de la plateforme.
@@ -103,6 +112,20 @@ function PlatformSettingsForm({
       startTransition(async () => {
         setSmtpTest(null);
         setSmtpTest(await testSmtp());
+      }),
+    [],
+  );
+
+  /** Issue du dernier essai de la liaison avec le facturier, tenue à part pour la même raison. */
+  const [billingTest, setBillingTest] = useState<Awaited<ReturnType<typeof testBilling>> | null>(
+    null,
+  );
+
+  const runBillingTest = useCallback(
+    () =>
+      startTransition(async () => {
+        setBillingTest(null);
+        setBillingTest(await testBilling());
       }),
     [],
   );
@@ -265,7 +288,7 @@ function PlatformSettingsForm({
         return (
           <SettingsSection
             key={group.key}
-            id={`reglages-${group.key}`}
+            id={settingsAnchor(group.key)}
             title={group.label}
             description={group.description}
             footer={
@@ -281,6 +304,11 @@ function PlatformSettingsForm({
                   {group.key === "smtp" ? (
                     <Button variant="secondary" disabled={pending} onClick={runSmtpTest}>
                       {t("smtpTest")}
+                    </Button>
+                  ) : null}
+                  {group.key === "billing" ? (
+                    <Button variant="secondary" disabled={pending} onClick={runBillingTest}>
+                      {t("billingTest")}
                     </Button>
                   ) : null}
                 </div>
@@ -306,6 +334,19 @@ function PlatformSettingsForm({
                   {smtpTest.ok
                     ? t("smtpTestSent", { email: smtpTest.sentTo ?? "" })
                     : smtpTest.error}
+                </AlertBanner>
+              </div>
+            ) : null}
+            {group.key === "billing" && billingTest ? (
+              <div className="mt-4">
+                <AlertBanner
+                  variant={billingTest.ok ? "success" : "danger"}
+                  title={billingTest.ok ? t("billingTestOk") : t("billingTestFailed")}
+                  dismissible
+                >
+                  {billingTest.ok
+                    ? t(billingTest.knowsCaller ? "billingTestKnown" : "billingTestUnknown")
+                    : billingTest.error}
                 </AlertBanner>
               </div>
             ) : null}

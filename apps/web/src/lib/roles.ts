@@ -25,7 +25,7 @@ export const ADMIN_ROLES: ReadonlySet<string> = new Set(["admin", "support"]);
  *
  * La distinction avec `ADMIN_ROLES` porte tout son sens ici. Le support voit
  * l'espace d'administration — répondre à un client demande de regarder ses
- * serveurs — mais n'y écrit pas. Lui montrer « Relier HostBill » l'enverrait
+ * serveurs — mais n'y écrit pas. Lui montrer « Relier la facturation » l'enverrait
  * vers un formulaire qu'il ne peut pas enregistrer : une invitation à faire
  * quelque chose d'impossible, ce qui est pire que le silence.
  */

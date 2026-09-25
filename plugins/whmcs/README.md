@@ -93,6 +93,21 @@ Si vos clients ont déjà un compte sur le panel, le module les **rattache** au
 lieu d'en créer un second : il cherche d'abord votre identifiant client WHMCS,
 puis l'adresse e-mail, et n'en crée un que s'il ne trouve rien.
 
+## Échéances sur l'accueil du panel (facultatif)
+
+Le panel peut aussi **lire** les services de chaque client et leurs échéances,
+pour les montrer sur son accueil et prévenir dans la cloche avant une
+suspension. Il n'écrit jamais rien chez vous.
+
+1. **Setup → Staff Management → Manage API Credentials** : créez des
+   identifiants liés à un rôle qui n'autorise que `GetClientsDetails` et
+   `GetClientsProducts`.
+2. **Setup → General Settings → Security → API IP Access Restriction** :
+   ajoutez l'adresse IP du panel. Sans elle, WHMCS refuse chaque appel.
+3. Dans le panel, **Réglages → Facturation et connexion des clients** :
+   adresse de l'API `https://votre-whmcs/includes/api.php`, identifiant et
+   secret, puis **Tester la liaison**.
+
 ## Ce qui a été éprouvé
 
 Le module tourne dans un banc (`tests/module-logic.php`) qui le fait dialoguer

@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { databaseProvider } from "../../common/database.provider";
 import { ActivityModule } from "../activity/activity.module";
+import { BillingModule } from "../billing/billing.module";
 import { ClientModule } from "../client/client.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { ResellerModule } from "../reseller/reseller.module";
@@ -38,6 +39,8 @@ import { ScheduleRunnerService } from "./schedule-runner.service";
     NotificationsModule,
     ActivityModule,
     ClientModule,
+    // La veille des échéances lit le facturier relié.
+    BillingModule,
   ],
   providers: [
     databaseProvider,

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Un conteneur Linux par job de CI, piloté depuis le runner.
+#
+#   bash infra/ci/linux.sh ouvrir [--postgres]   crée le conteneur, y copie le dépôt
+#   bash infra/ci/linux.sh lancer '<commande>'   exécute dans /w (bash -euo pipefail)
+#   bash infra/ci/linux.sh outil <image> <args…> lance un outil sur le même /w
+#   bash infra/ci/linux.sh psql '<sql>'          exécute sur la base du job
+#   bash infra/ci/linux.sh rapatrier <chemin>…   recopie des fichiers vers le runner
+#   bash infra/ci/linux.sh fermer                retire tout ce que le job a créé
+#
+# Pourquoi : le runner est une machine Windows avec Docker. GitHub Actions n'y
+# lance ni `services:` ni action conteneur (« Container operations are only
+# supported on Linux runners »), et tout le projet — scripts bash, binaires
+# natifs, captures de référence, archive de l'hébergement — suppose Linux. Les
+# commandes tournent donc dans un conteneur Linux ; le runner ne fait que le
+# piloter, depuis Git Bash.
+#
+# Le dépôt est **copié** dans un volume, jamais monté depuis le disque de
+# Windows : un montage NTFS rend `pnpm install` très lent, et ce qu'un
+# conteneur y écrirait en root survivrait au job (docs/runner-auto-heberge.md).
+# Le volume est partagé avec les outils (Trivy, Semgrep) et retiré à la fin.
+set -euo pipefail
+
+# Git Bash réécrit tout argument qui ressemble à un chemin Unix (« /w » devient
+# « C:/Program Files/Git/w ») avant de le passer à docker.exe.
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+
+# Épinglées par empreinte, comme les actions des workflows : une image qui
+# change sous le même nom changerait le verdict sans que le dépôt bouge.
+IMAGE_NODE=node@sha256:64af3819f9275802414d7cdc38c27e9d82bd564dec4d4da87d008255d36c63b4 # 24.21.0-bookworm
+IMAGE_POSTGRES=postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 # 18.6-alpine
+
+# Un nom par exécution, tentative et job : deux jobs sur la même machine ne se
+# marchent pas dessus, et une relance ne reprend pas les restes de la première.
+NOM=gd-ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-${GITHUB_JOB:-job}
+NOM=${NOM//[^a-zA-Z0-9_.-]/-}
+VOLUME=$NOM-w
+RESEAU=$NOM-reseau
+BASE=$NOM-postgres
+
+# Variables transmises au conteneur, si elles sont posées sur le runner.
+TRANSMISES=(CI APP_SECRET_KEY E2E_EMAIL E2E_PASSWORD TURBO_TELEMETRY_DISABLED NEXT_TELEMETRY_DISABLED
+  GAMEDASHBOARD_AUTONOME VERSION)
+
+ouvrir() {
+  local postgres=0
+  [ "${1:-}" = "--postgres" ] && postgres=1
+
+  docker network create "$RESEAU" >/dev/null
+  docker volume create "$VOLUME" >/dev/null
+
+  local options=(--name "$NOM" --network "$RESEAU" -w /w
+    -v "$VOLUME:/w"
+    # Caches d'une exécution à l'autre, sur la machine du runner : le store
+    # pnpm et le navigateur de Playwright.
+    -v gd-ci-pnpm-store:/root/.local/share/pnpm/store
+    -v gd-ci-playwright:/root/.cache/ms-playwright
+    -e TZ=UTC)
+  local nom
+  for nom in "${TRANSMISES[@]}"; do
+    if [ -n "${!nom+x}" ]; then options+=(-e "$nom"); fi
+  done
+
+  if [ "$postgres" = 1 ]; then
+    docker run -d --name "$BASE" --network "$RESEAU" \
+      -e POSTGRES_USER=gamedashboard -e POSTGRES_PASSWORD=gamedashboard \
+      -e POSTGRES_DB=gamedashboard -e TZ=UTC "$IMAGE_POSTGRES" >/dev/null
+    options+=(-e "DATABASE_URL=postgres://gamedashboard:gamedashboard@$BASE:5432/gamedashboard")
+  fi
+
+  docker run -d "${options[@]}" "$IMAGE_NODE" sleep infinity >/dev/null
+  # « ./. » : le **contenu** du dossier courant, et non le dossier lui-même.
+  docker cp ./. "$NOM:/w"
+
+  # pnpm à la version du dépôt (`packageManager`), posé par npm plutôt que par
+  # corepack, dont les clés de signature retardent parfois sur pnpm.
+  lancer "$(
+    cat <<'PREPARER'
+git config --global --add safe.directory /w
+npm install -g --no-fund --no-audit --loglevel=error "$(node -p 'require("./package.json").packageManager')"
+pnpm --version
+PREPARER
+  )"
+
+  if [ "$postgres" = 1 ]; then
+    local essai
+    for essai in $(seq 30); do
+      docker exec "$BASE" pg_isready -U gamedashboard >/dev/null 2>&1 && return 0
+      sleep 2
+    done
+    echo "::error::PostgreSQL n'a pas démarré en une minute." >&2
+    docker logs "$BASE" >&2 || true
+    return 1
+  fi
+}
+
+lancer() {
+  docker exec -w /w "$NOM" bash -euo pipefail -c "$1"
+}
+
+outil() {
+  local image=$1
+  shift
+  docker run --rm --network "$RESEAU" -v "$VOLUME:/w" -w /w "$image" "$@"
+}
+
+psql() {
+  docker exec "$BASE" psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c "$1"
+}
+
+rapatrier() {
+  local chemin
+  for chemin in "$@"; do
+    if docker exec "$NOM" test -d "/w/$chemin"; then
+      mkdir -p "$chemin"
+      docker cp "$NOM:/w/$chemin/." "$chemin/"
+    elif docker exec "$NOM" test -e "/w/$chemin"; then
+      mkdir -p "$(dirname "$chemin")"
+      docker cp "$NOM:/w/$chemin" "$chemin"
+    fi
+  done
+}
+
+fermer() {
+  docker rm -f "$NOM" "$BASE" >/dev/null 2>&1 || true
+  docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
+  docker network rm "$RESEAU" >/dev/null 2>&1 || true
+}
+
+commande=${1:?"usage : linux.sh ouvrir|lancer|outil|psql|rapatrier|fermer …"}
+shift
+case $commande in
+  ouvrir | lancer | outil | psql | rapatrier | fermer) "$commande" "$@" ;;
+  nom) echo "$NOM" ;;
+  *)
+    echo "Commande inconnue : $commande" >&2
+    exit 2
+    ;;
+esac

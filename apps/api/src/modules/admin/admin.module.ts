@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ActivityModule } from "../activity/activity.module";
 import { AuthModule } from "../auth/auth.module";
+import { BillingModule } from "../billing/billing.module";
 import { ClientModule } from "../client/client.module";
 import { MailerService } from "../mail/mailer.service";
 import { NotificationsModule } from "../notifications/notifications.module";
@@ -54,6 +55,8 @@ import { StaffTwoFactorGuard } from "./staff-2fa.guard";
     SchedulerModule,
     // Supprimer un serveur efface ses archives du compartiment.
     StorageModule,
+    // L'essai de connexion au facturier, depuis les réglages.
+    BillingModule,
   ],
   // La fiche d'un node et la modification d'un compte ont leurs contrôleurs,
   // sous le même préfixe et les mêmes gardes : `AdminController` dépasse déjà

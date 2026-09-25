@@ -1,7 +1,7 @@
 import "server-only";
 import {
-  HOSTBILL_SILENT,
-  type HostbillSummary,
+  BILLING_SILENT,
+  type BillingSummary,
   INSTATUS_SILENT,
   type InstatusSummary,
 } from "@gamedashboard/contracts";
@@ -11,16 +11,16 @@ import { forwardedIdentityHeaders } from "./forwarded";
 /**
  * Lectures des deux systèmes tiers : la facturation et la page de statut.
  *
- * Aucune des deux ne lève. Ni HostBill ni Instatus ne sont sous notre
+ * Aucune des deux ne lève. Ni le facturier ni Instatus ne sont sous notre
  * responsabilité, et une page du panel qui disparaît parce qu'un service
  * extérieur tarde est une panne que nous nous serions infligée. L'absence
  * d'information s'affiche comme telle ; elle n'interrompt rien.
  */
 
-/** Services facturés du client connecté. Silencieux si HostBill n'est pas réglé. */
-export async function fetchBilling(): Promise<HostbillSummary> {
+/** Services facturés du client connecté. Silencieux si aucun facturier lisible n'est relié. */
+export async function fetchBilling(): Promise<BillingSummary> {
   try {
-    const { data } = await apiFetch<{ data: HostbillSummary }>("/api/v1/client/billing");
+    const { data } = await apiFetch<{ data: BillingSummary }>("/api/v1/client/billing");
     return data;
   } catch {
     /*
@@ -32,7 +32,7 @@ export async function fetchBilling(): Promise<HostbillSummary> {
      * d'accueil doit montrer les serveurs même quand la facturation est
      * injoignable.
      */
-    return HOSTBILL_SILENT;
+    return BILLING_SILENT;
   }
 }
 

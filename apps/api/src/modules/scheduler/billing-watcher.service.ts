@@ -1,7 +1,4 @@
-import {
-  type HostbillService as BilledService,
-  HOSTBILL_DUE_SOON_DAYS,
-} from "@gamedashboard/contracts";
+import { BILLING_DUE_SOON_DAYS, type BilledService } from "@gamedashboard/contracts";
 import { type Database, notifications, users } from "@gamedashboard/db";
 import {
   Inject,
@@ -13,13 +10,13 @@ import {
 import { and, eq, gt, sql } from "drizzle-orm";
 import { battre } from "../../common/background-tick";
 import { DATABASE } from "../../common/database.provider";
-import { HostbillService } from "../client/hostbill.service";
+import { BillingService } from "../billing/billing.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
 /**
  * La facturation qui prévient, au lieu d'attendre qu'on regarde.
  *
- * Le panel lit déjà HostBill : l'écran d'accueil montre les échéances de qui
+ * Le panel lit déjà le facturier : l'écran d'accueil montre les échéances de qui
  * s'y rend. C'est exactement le problème — une échéance ne se voit que si l'on
  * vient la voir, et personne n'ouvre son panel la veille d'un impayé. Un
  * service suspendu pour non-paiement se découvre alors par un serveur éteint,
@@ -62,7 +59,7 @@ export class BillingWatcherService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    @Inject(HostbillService) private readonly hostbill: HostbillService,
+    @Inject(BillingService) private readonly billing: BillingService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
@@ -121,7 +118,7 @@ export class BillingWatcherService implements OnModuleInit, OnModuleDestroy {
    * par son inquiétude.
    */
   private async watch(userId: string): Promise<void> {
-    const summary = await this.hostbill.summaryFor(userId);
+    const summary = await this.billing.summaryFor(userId);
     if (!summary.configured || summary.unreachable) return;
 
     for (const service of summary.services) {
@@ -214,7 +211,7 @@ export function alertFor(service: BilledService): BillingAlert | null {
     };
   }
 
-  if (service.daysLeft <= HOSTBILL_DUE_SOON_DAYS) {
+  if (service.daysLeft <= BILLING_DUE_SOON_DAYS) {
     return {
       type: "billing.due_soon",
       title: `Échéance proche : ${service.name}`,

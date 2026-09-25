@@ -25,88 +25,95 @@ concurrency:
 permissions:
   contents: read
 
+# Comme la CI : Git Bash sur le runner Windows, commandes dans un conteneur
+# Linux (infra/ci/linux.sh), le même que celui des parcours : les captures
+# prises ici sont celles que la CI comparera.
+defaults:
+  run:
+    shell: bash
+
 env:
+  CI: "true"
   TURBO_TELEMETRY_DISABLED: 1
   NEXT_TELEMETRY_DISABLED: 1
 
 jobs:
   captures:
     name: Prendre et commiter les captures
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
     timeout-minutes: 30
     permissions:
       # Pousser le commit des captures sur la branche choisie.
       contents: write
 
-    # Même base que le job e2e de la CI : les écrans capturés sont ceux que la
-    # CI comparera ensuite.
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: gamedashboard
-          POSTGRES_PASSWORD: gamedashboard
-          POSTGRES_DB: gamedashboard
-          TZ: UTC
-        ports: ["5432"]
-        options: >-
-          --health-cmd "pg_isready -U gamedashboard"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-
+    # Même base que le job e2e de la CI (infra/ci/linux.sh ouvrir --postgres) :
+    # les écrans capturés sont ceux que la CI comparera ensuite.
     env:
       APP_SECRET_KEY: cle-de-test-ci-0123456789abcdef0123456789abcdef
       E2E_EMAIL: e2e@gamedashboard.test
       E2E_PASSWORD: Essai-E2E-2026!motdepasse
 
     steps:
+      # Le service du runner ne voit pas toujours le PATH de la session : on
+      # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
+      # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      - name: Bash de Git et Docker
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
+            Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
+          if (-not $git) { Write-Output "::error::Git for Windows introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+          Add-Content -Path $env:GITHUB_PATH -Value $git
+          if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $docker = "$env:ProgramFiles\Docker\Docker\resources\bin"
+            if (-not (Test-Path "$docker\docker.exe")) { Write-Output "::error::docker.exe introuvable sur le runner (docs/runner-auto-heberge.md)."; exit 1 }
+            Add-Content -Path $env:GITHUB_PATH -Value $docker
+          }
+
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+
+      - name: Conteneur Linux et base
+        run: bash infra/ci/linux.sh ouvrir --postgres
 
       - name: Installer les dépendances
-        run: pnpm install --frozen-lockfile
-
-      - name: Adresse de la base
-        run: echo "DATABASE_URL=postgres://gamedashboard:gamedashboard@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gamedashboard" >> "$GITHUB_ENV"
+        run: bash infra/ci/linux.sh lancer 'pnpm install --frozen-lockfile'
 
       - name: Installer le navigateur
-        run: |
-          if sudo -n true 2>/dev/null; then
-            pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium
-          else
-            pnpm --filter @gamedashboard/web exec playwright install chromium
-          fi
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/web exec playwright install --with-deps chromium'
 
       - name: Migrations
-        run: pnpm --filter @gamedashboard/db db:migrate
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/db db:migrate'
 
       - name: Compte d'essai
         run: |
-          pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts \
-            "$E2E_EMAIL" Essai CI
-          GD_PASSWORD="$E2E_PASSWORD" \
-            pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"
+          bash infra/ci/linux.sh lancer '
+            pnpm --filter @gamedashboard/api exec tsx scripts/create-admin.mts "$E2E_EMAIL" Essai CI
+            GD_PASSWORD="$E2E_PASSWORD" \
+              pnpm --filter @gamedashboard/api exec tsx scripts/reset-password.mts "$E2E_EMAIL"'
 
       # Comme dans ci.yml : la seconde preuve du personnel, exigée par défaut,
       # est levée pour cette base jetable seule, sans quoi chaque capture de
       # l'administration montrerait « seconde preuve exigée ».
       - name: Seconde preuve du personnel levée pour la base d'essai
         run: |
-          docker exec ${{ job.services.postgres.id }} \
-            psql -U gamedashboard -d gamedashboard -v ON_ERROR_STOP=1 -c \
+          bash infra/ci/linux.sh psql \
             "insert into settings (key, value) values ('security.staffRequires2fa', 'false'::jsonb)
              on conflict (key) do update set value = excluded.value"
 
       - name: Construire
-        run: pnpm build
+        run: bash infra/ci/linux.sh lancer 'pnpm build'
 
       # Toutes les références sont reprises, pas seulement celles qui manquent :
       # c'est le geste qui entérine un changement d'interface voulu.
       - name: Prendre les captures
-        run: pnpm --filter @gamedashboard/web exec playwright test e2e/visuel.spec.ts --update-snapshots=all
+        run: bash infra/ci/linux.sh lancer 'pnpm --filter @gamedashboard/web exec playwright test e2e/visuel.spec.ts --update-snapshots=all'
+
+      - name: Rapatrier les captures
+        run: bash infra/ci/linux.sh rapatrier apps/web/e2e/visuel.spec.ts-snapshots
 
       - name: Commiter les captures
         run: |
@@ -119,3 +126,7 @@ jobs:
           fi
           git commit -m "Captures de référence, prises sur le runner" -m "Workflow « Captures de référence », exécution ${{ github.run_id }}."
           git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer

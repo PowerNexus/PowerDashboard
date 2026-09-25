@@ -1,5 +1,8 @@
-import type { HostbillSummary } from "@gamedashboard/contracts";
-import { HOSTBILL_DUE_SOON_DAYS } from "@gamedashboard/contracts";
+import {
+  BILLING_DUE_SOON_DAYS,
+  BILLING_PROVIDER_LABELS,
+  type BillingSummary,
+} from "@gamedashboard/contracts";
 import { AlertBanner, Badge, Card, CardBody, CardHeader } from "@gamedashboard/ui";
 import { ExternalLink } from "lucide-react";
 import { getTranslations } from "next-intl/server";
@@ -7,11 +10,11 @@ import { getTranslations } from "next-intl/server";
 /**
  * Le bloc de facturation de la page d'accueil.
  *
- * Il ne s'affiche que si HostBill est configuré. Un encart « facturation non
+ * Il ne s'affiche que si un facturier lisible est relié. Un encart « facturation non
  * configurée » n'apprend rien au client — c'est à l'exploitant qu'il
  * s'adresse, et l'exploitant a l'écran des réglages pour cela.
  */
-export async function BillingPanel({ billing }: { billing: HostbillSummary }) {
+export async function BillingPanel({ billing }: { billing: BillingSummary }) {
   if (!billing.configured) return null;
 
   const t = await getTranslations("quickAccess");
@@ -34,14 +37,18 @@ export async function BillingPanel({ billing }: { billing: HostbillSummary }) {
   if (billing.services.length === 0) return null;
 
   const due = billing.services
-    .filter((service) => service.daysLeft !== null && service.daysLeft <= HOSTBILL_DUE_SOON_DAYS)
+    .filter((service) => service.daysLeft !== null && service.daysLeft <= BILLING_DUE_SOON_DAYS)
     .sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
 
   return (
     <Card>
       <CardHeader
         title={t("billingTitle")}
-        description={t("billingSubtitle")}
+        // Le facturier est nommé : le client le connaît sous ce nom, c'est
+        // là qu'il paie.
+        description={t("billingSubtitle", {
+          provider: billing.provider ? BILLING_PROVIDER_LABELS[billing.provider] : "—",
+        })}
         actions={
           billing.clientUrl ? (
             <a
@@ -99,7 +106,7 @@ export async function BillingPanel({ billing }: { billing: HostbillSummary }) {
                         className={
                           service.daysLeft < 0
                             ? "font-semibold text-danger-ink"
-                            : service.daysLeft <= HOSTBILL_DUE_SOON_DAYS
+                            : service.daysLeft <= BILLING_DUE_SOON_DAYS
                               ? "font-semibold text-warning-ink"
                               : "text-fg"
                         }

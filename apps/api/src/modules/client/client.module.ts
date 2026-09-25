@@ -3,6 +3,7 @@ import { ActivityModule } from "../activity/activity.module";
 import { AnnouncementsService } from "../admin/announcements.service";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { AuthModule } from "../auth/auth.module";
+import { BillingModule } from "../billing/billing.module";
 import { MailerService } from "../mail/mailer.service";
 import { MarketplaceModule } from "../marketplace/marketplace.module";
 import { NotificationsModule } from "../notifications/notifications.module";
@@ -21,7 +22,6 @@ import { ClientNodesService } from "./client-nodes.service";
 import { ClientServersService } from "./client-servers.service";
 import { DatabasesService } from "./databases.service";
 import { FileUploadService } from "./file-upload.service";
-import { HostbillService } from "./hostbill.service";
 import { InvitationsController } from "./invitations.controller";
 import { MysqlProvisionerService } from "./mysql-provisioner.service";
 import { NotificationsController } from "./notifications.controller";
@@ -41,6 +41,8 @@ import { SubusersService } from "./subusers.service";
 @Module({
   imports: [
     AuthModule,
+    // Les services facturés du client, pour l'accueil.
+    BillingModule,
     WingsModule,
     ActivityModule,
     MarketplaceModule,
@@ -70,7 +72,6 @@ import { SubusersService } from "./subusers.service";
   ],
   providers: [
     ClientServersService,
-    HostbillService,
     ClientNodesService,
     ServerAccessService,
     ServerMetricsService,
@@ -119,7 +120,6 @@ import { SubusersService } from "./subusers.service";
     // demandeur, sinon le quota se ferait contourner par la porte la moins
     // regardée.
     ServerResizeService,
-    HostbillService,
     BackupsService,
   ],
 })

@@ -363,6 +363,7 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Propriétaire d'un serveur changé",
   },
   "admin.smtp_tested": { category: "settings", label: "Envoi de courrier éprouvé" },
+  "admin.billing_tested": { category: "settings", label: "Liaison avec la facturation éprouvée" },
   "admin.audit_exported": { category: "access", label: "Journal de la plateforme exporté" },
   "admin.subuser_presets_saved": {
     category: "access",
