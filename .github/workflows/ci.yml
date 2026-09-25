@@ -59,9 +59,11 @@ jobs:
       # Le service du runner ne voit pas toujours le PATH de la session : on
       # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
       # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
       - name: Bash de Git et Docker
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
             Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
@@ -142,9 +144,11 @@ jobs:
       # Le service du runner ne voit pas toujours le PATH de la session : on
       # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
       # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
       - name: Bash de Git et Docker
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
             Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
@@ -233,9 +237,11 @@ jobs:
       # Le service du runner ne voit pas toujours le PATH de la session : on
       # pose ici, devant tout le reste (y compris le bash de WSL), le bash de
       # Git for Windows et docker.exe, qu'exigent toutes les étapes suivantes.
+      # La stratégie d'exécution de Windows refuse les scripts par défaut :
+      # levée pour ce seul processus.
       - name: Bash de Git et Docker
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           $git = @("$env:ProgramFiles\Git\bin", "${env:ProgramFiles(x86)}\Git\bin", "$env:LOCALAPPDATA\Programs\Git\bin") |
             Where-Object { Test-Path "$_\bash.exe" } | Select-Object -First 1
