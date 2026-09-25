@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRAND_IMAGE_PATH_PREFIX,
+  brandImageIdOf,
+  brandImagePath,
   composeBranding,
   DEFAULT_BRANDING,
   isSafeBrandUrl,
@@ -9,6 +12,7 @@ import {
   normalizeHex,
   ownershipRecordName,
   SENDER_NAME_MAX_LENGTH,
+  sniffBrandImage,
 } from "./branding";
 
 const PLATFORM = {
@@ -164,5 +168,53 @@ describe("adresse de réponse et expéditeur des courriels", () => {
     expect(mailSender({ name: "x".repeat(200), replyTo: null }).fromName).toHaveLength(
       SENDER_NAME_MAX_LENGTH,
     );
+  });
+});
+
+/**
+ * Type réel d'une image envoyée : lu dans ses octets, jamais dans son nom.
+ *
+ * Un SVG porte du script ; ouvert à son adresse, il s'exécuterait sous le
+ * domaine du panel. Il doit être refusé même renommé en `.png`.
+ */
+describe("images de marque envoyées", () => {
+  const octets = (...valeurs: number[]) => Uint8Array.from(valeurs);
+  const texte = (valeur: string) => new TextEncoder().encode(valeur);
+
+  it("reconnaît PNG, JPEG, WebP et ICO à leur signature", () => {
+    expect(sniffBrandImage(octets(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0))).toBe(
+      "image/png",
+    );
+    expect(sniffBrandImage(octets(0xff, 0xd8, 0xff, 0xe0))).toBe("image/jpeg");
+    expect(sniffBrandImage(texte("RIFF\u0000\u0000\u0000\u0000WEBPVP8 "))).toBe("image/webp");
+    expect(sniffBrandImage(octets(0, 0, 1, 0, 1, 0, 16, 16))).toBe("image/x-icon");
+  });
+
+  it("refuse le SVG, le HTML et ce qui n'est qu'un début de signature", () => {
+    expect(sniffBrandImage(texte('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'))).toBe(
+      null,
+    );
+    expect(sniffBrandImage(texte('<?xml version="1.0"?><svg/>'))).toBe(null);
+    expect(sniffBrandImage(texte("<html><script>alert(1)</script></html>"))).toBe(null);
+    expect(sniffBrandImage(octets(0x89, 0x50, 0x4e, 0x47))).toBe(null);
+    expect(sniffBrandImage(texte("RIFF\u0000\u0000\u0000\u0000WAVE"))).toBe(null);
+    // Un curseur (.cur, type 2) ou un répertoire vide n'est pas une icône.
+    expect(sniffBrandImage(octets(0, 0, 2, 0, 1, 0))).toBe(null);
+    expect(sniffBrandImage(octets(0, 0, 1, 0, 0, 0))).toBe(null);
+    expect(sniffBrandImage(new Uint8Array())).toBe(null);
+  });
+
+  it("sert l'image sous un chemin interne, que la règle des adresses accepte", () => {
+    const id = "0b6f2c1e-4a8d-4c52-9d0e-7a1b2c3d4e5f";
+    const chemin = brandImagePath(id);
+    expect(chemin.startsWith(BRAND_IMAGE_PATH_PREFIX)).toBe(true);
+    expect(isSafeBrandUrl(chemin)).toBe(true);
+    expect(brandImageIdOf(chemin)).toBe(id);
+  });
+
+  it("ne reconnaît comme image envoyée qu'un identifiant complet", () => {
+    expect(brandImageIdOf("https://cdn.exemple.fr/logo.png")).toBe(null);
+    expect(brandImageIdOf(`${BRAND_IMAGE_PATH_PREFIX}../../api/v1/admin`)).toBe(null);
+    expect(brandImageIdOf(`${BRAND_IMAGE_PATH_PREFIX}0b6f2c1e`)).toBe(null);
   });
 });

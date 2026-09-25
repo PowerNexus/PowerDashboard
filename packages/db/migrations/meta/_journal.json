@@ -372,6 +372,13 @@
       "when": 1790354624210,
       "tag": "0052_egg_query_protocol",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1790356826623,
+      "tag": "0053_brand_images",
+      "breakpoints": true
     }
   ]
 }

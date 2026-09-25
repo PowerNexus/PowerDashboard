@@ -23,6 +23,7 @@ import {
   setResellerDomain,
   verifyResellerDomain,
 } from "@/server/api/reseller-branding";
+import { BrandImageUpload } from "./brand-image-upload";
 
 /**
  * Marque blanche du revendeur, et domaine par lequel elle s'applique.
@@ -180,6 +181,12 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
               />
             )}
           </FormField>
+          <BrandImageUpload
+            target="reseller"
+            kind="logo"
+            disabled={pending}
+            onUploaded={field("logoUrl")}
+          />
 
           <FormField label={t("favicon")} description={t("faviconHint")}>
             {(id) => (
@@ -191,6 +198,12 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
               />
             )}
           </FormField>
+          <BrandImageUpload
+            target="reseller"
+            kind="favicon"
+            disabled={pending}
+            onUploaded={field("faviconUrl")}
+          />
 
           <FormField label={t("accent")} description={t("accentHint")}>
             {(id) => (

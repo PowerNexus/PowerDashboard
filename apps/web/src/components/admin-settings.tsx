@@ -29,6 +29,7 @@ import {
   testBilling,
   testSmtp,
 } from "@/server/api/admin-actions";
+import { BrandImageUpload } from "./brand-image-upload";
 
 /**
  * Réglages de la plateforme.
@@ -244,21 +245,34 @@ function PlatformSettingsForm({
               </span>
             </div>
           ) : (
-            <Input
-              id={id}
-              className={descriptor.kind === "number" ? "gd-mono sm:max-w-xs" : undefined}
-              type={descriptor.kind === "number" ? "number" : "text"}
-              value={String(values[descriptor.key] ?? "")}
-              placeholder={descriptor.placeholder}
-              disabled={pending}
-              onChange={(e) =>
-                setValues((current) => ({
-                  ...current,
-                  [descriptor.key]:
-                    descriptor.kind === "number" ? Number(e.target.value) : e.target.value,
-                }))
-              }
-            />
+            <div className="flex flex-col gap-2">
+              <Input
+                id={id}
+                className={descriptor.kind === "number" ? "gd-mono sm:max-w-xs" : undefined}
+                type={descriptor.kind === "number" ? "number" : "text"}
+                value={String(values[descriptor.key] ?? "")}
+                placeholder={descriptor.placeholder}
+                disabled={pending}
+                onChange={(e) =>
+                  setValues((current) => ({
+                    ...current,
+                    [descriptor.key]:
+                      descriptor.kind === "number" ? Number(e.target.value) : e.target.value,
+                  }))
+                }
+              />
+              {/* Logo et favicon : l'adresse, ou un fichier envoyé qui la remplit. */}
+              {descriptor.upload ? (
+                <BrandImageUpload
+                  target="platform"
+                  kind={descriptor.upload}
+                  disabled={pending}
+                  onUploaded={(url) =>
+                    setValues((current) => ({ ...current, [descriptor.key]: url }))
+                  }
+                />
+              ) : null}
+            </div>
           )
         }
       </FormField>
