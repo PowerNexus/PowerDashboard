@@ -3,6 +3,7 @@
 import { nodeOutageBlock, serverBlock } from "@gamedashboard/contracts";
 import {
   AlertBanner,
+  type ConsoleLabels,
   ConsoleView,
   formatMb,
   PageHeader,
@@ -15,7 +16,8 @@ import {
 import { Terminal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useCommandHistory } from "@/lib/command-history";
 import { useServerSocket } from "@/lib/use-server-socket";
 import type { ClientServer } from "@/server/api/client";
 import { ServerBlockNotice } from "./server-block-notice";
@@ -31,8 +33,17 @@ const WINDOW = 60;
  * pendant que le serveur est réellement à l'arrêt est pire qu'un graphe vide,
  * parce qu'il inspire confiance.
  */
-export function ConsoleWorkspace({ server }: { server: ClientServer }) {
+export function ConsoleWorkspace({
+  server,
+  commands = [],
+}: {
+  server: ClientServer;
+  /** Commandes du jeu déclarées par l'egg, pour l'autocomplétion. */
+  commands?: string[];
+}) {
   const t = useTranslations("console");
+  const labels = useConsoleLabels();
+  const [history, setHistory] = useCommandHistory(server.id);
   const tm = useTranslations("metrics");
   const router = useRouter();
   const { phase, state, stats, lines, install, send, power } = useServerSocket(
@@ -153,7 +164,7 @@ export function ConsoleWorkspace({ server }: { server: ClientServer }) {
         {mounted ? (
           // En lecture seule : ni envoi de commande, ni bouton de dépôt. Le
           // daemon parle, on écoute.
-          <ConsoleView lines={lines} disabled />
+          <ConsoleView lines={lines} labels={labels} placeholder={t("placeholder")} disabled />
         ) : (
           <Skeleton className="h-[420px] w-full" />
         )}
@@ -256,6 +267,11 @@ export function ConsoleWorkspace({ server }: { server: ClientServer }) {
       {mounted ? (
         <ConsoleView
           lines={lines}
+          labels={labels}
+          placeholder={t("placeholder")}
+          history={history}
+          onHistoryChange={setHistory}
+          commands={commands}
           // Pendant une installation, la ligne de commande est fermée : ce
           // qu'on y taperait partirait à un programme qui n'existe pas encore.
           disabled={blocage !== null || phase !== "open" || effective !== "running"}
@@ -303,4 +319,29 @@ export function ConsoleWorkspace({ server }: { server: ClientServer }) {
 function slide(data: { t: number; v: number }[], value: number) {
   const next = [...data, { t: (data.at(-1)?.t ?? 0) + 1, v: value }];
   return next.length > WINDOW ? next.slice(next.length - WINDOW) : next;
+}
+
+/** Les textes de la console, dans la langue du compte. */
+function useConsoleLabels(): Partial<ConsoleLabels> {
+  const t = useTranslations("console");
+  return useMemo(
+    () => ({
+      command: t("command"),
+      upload: t("upload"),
+      send: t("send"),
+      waiting: t("waiting"),
+      noMatch: t("noMatch"),
+      source: t("source"),
+      sources: { all: t("sourceAll"), server: t("sourceServer"), system: t("sourceSystem") },
+      levels: t("levels"),
+      levelNames: { error: t("levelError"), warn: t("levelWarn"), info: t("levelInfo") },
+      search: t("search"),
+      clearSearch: t("clearSearch"),
+      suggestions: t("suggestions"),
+      fromHistory: t("fromHistory"),
+      fromEgg: t("fromEgg"),
+      shown: (shown: number, total: number) => t("shown", { shown, total }),
+    }),
+    [t],
+  );
 }

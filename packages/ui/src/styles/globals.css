@@ -38,6 +38,24 @@
 
   --color-console-bg: var(--gd-console-bg);
   --color-console-fg: var(--gd-console-fg);
+  --color-console-match: var(--gd-console-match);
+  --color-console-match-fg: var(--gd-console-match-fg);
+  --color-ansi-black: var(--gd-ansi-black);
+  --color-ansi-red: var(--gd-ansi-red);
+  --color-ansi-green: var(--gd-ansi-green);
+  --color-ansi-yellow: var(--gd-ansi-yellow);
+  --color-ansi-blue: var(--gd-ansi-blue);
+  --color-ansi-magenta: var(--gd-ansi-magenta);
+  --color-ansi-cyan: var(--gd-ansi-cyan);
+  --color-ansi-white: var(--gd-ansi-white);
+  --color-ansi-bright-black: var(--gd-ansi-bright-black);
+  --color-ansi-bright-red: var(--gd-ansi-bright-red);
+  --color-ansi-bright-green: var(--gd-ansi-bright-green);
+  --color-ansi-bright-yellow: var(--gd-ansi-bright-yellow);
+  --color-ansi-bright-blue: var(--gd-ansi-bright-blue);
+  --color-ansi-bright-magenta: var(--gd-ansi-bright-magenta);
+  --color-ansi-bright-cyan: var(--gd-ansi-bright-cyan);
+  --color-ansi-bright-white: var(--gd-ansi-bright-white);
 
   --radius-card: var(--gd-radius);
   --radius-field: var(--gd-radius-sm);

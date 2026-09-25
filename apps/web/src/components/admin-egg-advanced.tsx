@@ -20,6 +20,7 @@ const JSON_BLOCKS = [
 const LISTS = [
   { key: "features", example: "eula" },
   { key: "fileDenylist", example: "*.jar.old" },
+  { key: "consoleCommands", example: "whitelist add <joueur>" },
 ] as const;
 
 /**
@@ -33,11 +34,14 @@ const LISTS = [
 export function AdminEggAdvanced({ state }: { state: EggDraftState }) {
   const t = useTranslations("adminEggEditor");
   const { draft, set, errorFor, pending, problems } = state;
-  const faulty = problems.some((p) => /^(config|features|fileDenylist)/.test(p.path));
+  const faulty = problems.some((p) =>
+    /^(config|features|fileDenylist|consoleCommands)/.test(p.path),
+  );
   const [open, setOpen] = useState(false);
   const [lists, setLists] = useState(() => ({
     features: draft.features.join("\n"),
     fileDenylist: draft.fileDenylist.join("\n"),
+    consoleCommands: draft.consoleCommands.join("\n"),
   }));
   const shown = open || faulty;
 

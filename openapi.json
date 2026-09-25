@@ -1276,6 +1276,56 @@
         }
       }
     },
+    "/api/v1/client/servers/{server}/commands": {
+      "get": {
+        "summary": "Commandes du jeu déclarées par l'egg, pour l'autocomplétion de la console (arguments entre chevrons).",
+        "description": "Clé personnelle. Portée requise : `console.read`.",
+        "tags": [
+          "Serveurs"
+        ],
+        "operationId": "client-get-servers-by-server-commands",
+        "parameters": [
+          {
+            "name": "server",
+            "in": "path",
+            "required": true,
+            "description": "Identifiant du serveur, ou son identifiant court.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "clientKey": [
+              "console.read"
+            ]
+          }
+        ],
+        "x-gd-scope": "console.read",
+        "responses": {
+          "400": {
+            "description": "Demande refusée : la cause est dans le corps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Aucune authentification recevable."
+          },
+          "403": {
+            "description": "Authentifié, mais sans la portée « console.read »."
+          },
+          "2XX": {
+            "description": "Résultat de la lecture."
+          }
+        }
+      }
+    },
     "/api/v1/client/servers/{server}/websocket": {
       "post": {
         "summary": "Obtenir un jeton websocket de dix minutes pour la console.",

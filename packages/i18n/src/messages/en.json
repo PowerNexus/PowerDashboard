@@ -730,7 +730,27 @@
     "interrupted": "Connection lost",
     "interruptedBody": "The live stream stopped. Reload the page to reconnect.",
     "cpuChart": "CPU usage",
-    "memoryChart": "Memory"
+    "memoryChart": "Memory",
+    "placeholder": "Type a command…",
+    "command": "Command",
+    "upload": "Upload",
+    "send": "Send",
+    "waiting": "Waiting for output…",
+    "noMatch": "No line matches the filter.",
+    "source": "Source",
+    "sourceAll": "All",
+    "sourceServer": "Server",
+    "sourceSystem": "System",
+    "levels": "Levels",
+    "levelError": "Errors",
+    "levelWarn": "Warnings",
+    "levelInfo": "Info",
+    "search": "Search the output",
+    "clearSearch": "Clear search",
+    "suggestions": "Suggested commands",
+    "fromHistory": "Typed before",
+    "fromEgg": "Game command",
+    "shown": "{shown} / {total} lines"
   },
   "createServer": {
     "title": "New server",
@@ -2219,7 +2239,9 @@
       "ruleNeedsTwoNumbers": "Rule “between” expects two numbers, for example between:1,10.",
       "ruleInEmpty": "Rule “in” expects a list of values, for example in:yes,no.",
       "ruleRegexInvalid": "Unreadable regular expression. Write it between slashes, for example regex:/^[a-z]+$/."
-    }
+    },
+    "consoleCommandsLabel": "Console commands",
+    "consoleCommandsHint": "One per line, arguments in angle brackets. Suggested while typing in the console; nothing runs unless typed."
   },
   "nodeAdmin": {
     "title": "Machines (nodes)",

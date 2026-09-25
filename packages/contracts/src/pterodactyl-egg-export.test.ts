@@ -35,6 +35,7 @@ const RICHE: ParsedEgg = {
   installEntrypoint: "ash",
   features: ["eula", "java_version"],
   fileDenylist: ["*.jar.old"],
+  consoleCommands: ["say <message>", "whitelist add <joueur>"],
   variables: [
     {
       name: "Fichier du serveur",
@@ -73,6 +74,11 @@ describe("exportPterodactylEgg", () => {
       variables: [],
     };
     expect(parsePterodactylEgg(exportPterodactylEgg(minimal))).toEqual(minimal);
+  });
+
+  it("importe sans commande de console un egg venu de Pterodactyl, qui n'en déclare pas", () => {
+    const { console_commands: _absente, ...pterodactyl } = exportPterodactylEgg(RICHE);
+    expect(parsePterodactylEgg(pterodactyl).consoleCommands).toEqual([]);
   });
 
   it("reste stable : exporter ce qu'on a réimporté redonne le même fichier", () => {

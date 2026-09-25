@@ -33,6 +33,7 @@ export function draftFromEgg(egg: AdminEggDetail): EggDraft {
     installScript: egg.installScript,
     features: egg.features,
     fileDenylist: egg.fileDenylist,
+    consoleCommands: egg.consoleCommands,
     variables: egg.variables.map((variable) => ({
       id: variable.id,
       name: variable.name,

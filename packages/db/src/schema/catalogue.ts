@@ -53,6 +53,12 @@ export const eggs = pgTable(
 
     features: text("features").array().notNull().default([]),
     fileDenylist: text("file_denylist").array().notNull().default([]),
+    /**
+     * Commandes du jeu proposées à la saisie dans la console, une par entrée,
+     * arguments entre chevrons : `whitelist add <joueur>` (PLAN §10.2). Rien
+     * d'exécuté : ce sont des suggestions, la console envoie ce qu'on tape.
+     */
+    consoleCommands: text("console_commands").array().notNull().default([]),
 
     /** Provenance, pour distinguer un egg importé d'un egg écrit à la main (§8.3). */
     sourceId: uuid("source_id").references(() => eggSources.id, { onDelete: "set null" }),

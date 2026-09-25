@@ -1,12 +1,28 @@
 "use client";
 
-import { SendHorizontal, Upload } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { AnsiSegment } from "../lib/ansi";
 import { cn } from "../lib/cn";
+import {
+  type ConsoleFilter,
+  type ConsoleLevel,
+  isFiltering,
+  matchesFilter,
+  NO_FILTER,
+  pushHistory,
+} from "../lib/console-text";
+import { ConsoleInput } from "./console-input";
+import { ConsoleLineView } from "./console-output";
+import { ConsoleToolbar } from "./console-toolbar";
 
 export interface ConsoleLine {
   id: string | number;
+  /** Le texte nu, sans séquence d'échappement : c'est lui qu'on cherche et qu'on filtre. */
   text: string;
+  /** Le même texte découpé par couleur (`parseAnsi`). Absent : `text` sans style. */
+  segments?: AnsiSegment[];
+  /** Niveau lu dans la ligne (`consoleLevel`). Absent : lu à la demande. */
+  level?: ConsoleLevel | null;
   source?: "system" | "server";
   /**
    * Qui parle, pour les lignes qui ne viennent pas du jeu.
@@ -19,24 +35,74 @@ export interface ConsoleLine {
   label?: string;
 }
 
+/** Les textes de la console, pour les applications traduites. */
+export interface ConsoleLabels {
+  command: string;
+  upload: string;
+  send: string;
+  waiting: string;
+  noMatch: string;
+  source: string;
+  sources: Record<ConsoleFilter["source"], string>;
+  levels: string;
+  levelNames: Record<ConsoleLevel, string>;
+  search: string;
+  clearSearch: string;
+  suggestions: string;
+  fromHistory: string;
+  fromEgg: string;
+  shown: (shown: number, total: number) => string;
+}
+
+const DEFAULT_LABELS: ConsoleLabels = {
+  command: "Commande",
+  upload: "Téléverser",
+  send: "Envoyer",
+  waiting: "En attente de sortie…",
+  noMatch: "Aucune ligne ne correspond au filtre.",
+  source: "Source",
+  sources: { all: "Tout", server: "Serveur", system: "Système" },
+  levels: "Niveaux",
+  levelNames: { error: "Erreurs", warn: "Avertissements", info: "Infos" },
+  search: "Rechercher",
+  clearSearch: "Effacer la recherche",
+  suggestions: "Commandes proposées",
+  fromHistory: "Déjà tapée",
+  fromEgg: "Commande du jeu",
+  shown: (shown, total) => `${shown} / ${total} lignes`,
+};
+
 export interface ConsoleViewProps {
   lines: ConsoleLine[];
   onSend?: (command: string) => void;
   onUpload?: () => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Libellés accessibles de la barre de saisie, pour les applications traduites. */
-  commandLabel?: string;
-  uploadLabel?: string;
-  sendLabel?: string;
+  labels?: Partial<ConsoleLabels>;
+  /**
+   * Commandes déjà tapées, la plus récente en tête. Fourni avec
+   * `onHistoryChange`, l'appelant le conserve (d'une visite à l'autre) ; sinon
+   * la console en tient un en mémoire.
+   */
+  history?: string[];
+  onHistoryChange?: (history: string[]) => void;
+  /** Modèles de commandes du jeu, pour l'autocomplétion (`say <message>`). */
+  commands?: string[];
+  /** Masque la barre de filtres : une sortie d'installation n'a ni niveaux ni source. */
+  hideToolbar?: boolean;
   className?: string;
   /** Hauteur de la zone de sortie. */
   height?: number | string;
 }
 
 /**
- * Console : zone de sortie sombre monospace avec autoscroll, champ de commande « $ »,
- * icônes upload et envoi. Sera remplacée par xterm.js en phase 2 en gardant les mêmes props.
+ * Console : barre de filtres, zone de sortie sombre monospace accrochée au bas,
+ * champ de commande « $ » avec historique et autocomplétion.
+ *
+ * Rendue en texte HTML et non dans un terminal peint (xterm) : filtrer, chercher
+ * et surligner reviennent ici à choisir quelles lignes rendre, les liens sont de
+ * vrais liens, un lecteur d'écran lit la sortie, et la CSP à nonce n'a pas à
+ * admettre de styles injectés.
  */
 export function ConsoleView({
   lines,
@@ -44,47 +110,58 @@ export function ConsoleView({
   onUpload,
   disabled,
   placeholder = "Tapez une commande…",
-  commandLabel = "Commande",
-  uploadLabel = "Téléverser",
-  sendLabel = "Envoyer",
+  labels: given,
+  history: givenHistory,
+  onHistoryChange,
+  commands = [],
+  hideToolbar,
   className,
   height = 480,
 }: ConsoleViewProps) {
-  const [value, setValue] = useState("");
-  const [history, setHistory] = useState<string[]>([]);
-  const [cursor, setCursor] = useState(-1);
+  const labels = { ...DEFAULT_LABELS, ...given };
+  const [ownHistory, setOwnHistory] = useState<string[]>([]);
+  const history = givenHistory ?? ownHistory;
+  const send = (command: string) => {
+    onSend?.(command);
+    const next = pushHistory(history, command);
+    if (givenHistory === undefined) setOwnHistory(next);
+    onHistoryChange?.(next);
+  };
+  const [filter, setFilter] = useState<ConsoleFilter>(NO_FILTER);
+  // La frappe dans la recherche reste fluide : le filtrage de deux mille
+  // lignes suit, un cran derrière, plutôt que de bloquer chaque touche.
+  const deferred = useDeferredValue(filter);
   const outRef = useRef<HTMLDivElement>(null);
+
+  const visible = useMemo(
+    () => (isFiltering(deferred) ? lines.filter((l) => matchesFilter(l, deferred)) : lines),
+    [lines, deferred],
+  );
+  const query = deferred.query.trim();
 
   /*
    * La console est **accrochée au bas** tant qu'on ne l'a pas remontée.
    *
    * L'ancienne règle — « ne suivre que si l'on est déjà près du bas » — se
    * retournait contre elle-même à l'ouverture : l'historique arrive d'un coup,
-   * la zone était en haut, donc loin du bas, donc on ne descendait pas. On
-   * atterrissait sur les premières lignes du démarrage, et il fallait faire
-   * défiler des centaines de lignes pour voir ce qui se passe maintenant.
+   * la zone était en haut, donc loin du bas, donc on ne descendait pas.
    *
    * L'accroche ne se défait que par un geste : remonter le texte. Elle se
-   * reprend dès qu'on redescend au bas — lire l'historique ne doit pas
-   * condamner la console à ne plus jamais suivre.
+   * reprend dès qu'on redescend au bas. Changer de filtre la reprend aussi :
+   * on filtre pour voir ce qui se passe, pas pour relire le début.
    */
   const pinned = useRef(true);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: réaccroche à chaque changement de filtre
+  useEffect(() => {
+    pinned.current = true;
+  }, [deferred]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll sur chaque nouvelle ligne
   useEffect(() => {
     const el = outRef.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [lines.length]);
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const cmd = value.trim();
-    if (!cmd || disabled) return;
-    onSend?.(cmd);
-    setHistory((h) => [cmd, ...h].slice(0, 100));
-    setCursor(-1);
-    setValue("");
-  };
+  }, [visible.length, lines.at(-1)?.id]);
 
   return (
     <div
@@ -93,10 +170,20 @@ export function ConsoleView({
         className,
       )}
     >
+      {hideToolbar ? null : (
+        <ConsoleToolbar
+          filter={filter}
+          onChange={setFilter}
+          labels={labels}
+          shown={visible.length}
+          total={lines.length}
+        />
+      )}
       <div
         ref={outRef}
-        className="gd-mono overflow-y-auto bg-console-bg px-4 py-3 text-[13px] leading-6 text-console-fg"
+        className="gd-mono overflow-y-auto bg-console-bg px-4 py-3 text-[13px] text-console-fg leading-6"
         style={{ height }}
+        role="log"
         aria-live="polite"
         onScroll={(e) => {
           // Une marge de quelques pixels : le défilement fluide et les
@@ -107,82 +194,22 @@ export function ConsoleView({
         }}
       >
         {lines.length === 0 ? (
-          <p className="text-faint">En attente de sortie…</p>
+          <p className="text-faint">{labels.waiting}</p>
+        ) : visible.length === 0 ? (
+          <p className="text-faint">{labels.noMatch}</p>
         ) : (
-          /*
-           * Les messages du panel et du daemon sont **surlignés**, pas
-           * seulement colorés.
-           *
-           * Ils se perdaient au milieu de la sortie du jeu, qui défile vite et
-           * porte déjà ses propres couleurs : « You need to agree to the EULA »
-           * passait inaperçu entre deux lignes de chargement de chunks. Un fond
-           * et un filet à gauche les détachent du flux, comme un trait de
-           * surligneur sur une page imprimée.
-           */
-          lines.map((l) => (
-            <div
-              key={l.id}
-              className={cn(
-                "whitespace-pre-wrap break-all",
-                l.source === "system" &&
-                  "-mx-2 my-0.5 rounded-field border-warning border-l-2 bg-warning/12 px-2 py-0.5 text-warning-ink",
-              )}
-            >
-              {l.source === "system" ? (
-                <span className="mr-2 font-semibold text-warning-ink/80">
-                  [{l.label ?? "System"}]
-                </span>
-              ) : null}
-              {l.text}
-            </div>
-          ))
+          visible.map((l) => <ConsoleLineView key={l.id} line={l} query={query} />)
         )}
       </div>
-      <form
-        onSubmit={submit}
-        className="flex items-center gap-3 border-t border-border bg-surface px-4 py-3"
-      >
-        <span className="gd-mono text-base font-bold text-accent">$</span>
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              const next = Math.min(cursor + 1, history.length - 1);
-              setCursor(next);
-              setValue(history[next] ?? "");
-            } else if (e.key === "ArrowDown") {
-              e.preventDefault();
-              const next = Math.max(cursor - 1, -1);
-              setCursor(next);
-              setValue(next === -1 ? "" : (history[next] ?? ""));
-            }
-          }}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="gd-mono min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-faint focus:shadow-none"
-          aria-label={commandLabel}
-        />
-        {onUpload ? (
-          <button
-            type="button"
-            onClick={onUpload}
-            className="cursor-pointer text-muted hover:text-fg"
-            aria-label={uploadLabel}
-          >
-            <Upload className="size-5" />
-          </button>
-        ) : null}
-        <button
-          type="submit"
-          disabled={disabled}
-          className="cursor-pointer text-muted hover:text-accent disabled:opacity-40"
-          aria-label={sendLabel}
-        >
-          <SendHorizontal className="size-5" />
-        </button>
-      </form>
+      <ConsoleInput
+        onSend={onSend ? send : undefined}
+        onUpload={onUpload}
+        disabled={disabled}
+        placeholder={placeholder}
+        labels={labels}
+        history={history}
+        commands={commands}
+      />
     </div>
   );
 }

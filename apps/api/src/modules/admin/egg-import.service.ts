@@ -469,6 +469,7 @@ export class EggImportService {
       installEntrypoint: parsed.installEntrypoint,
       features: parsed.features,
       fileDenylist: parsed.fileDenylist,
+      consoleCommands: parsed.consoleCommands,
       sourceId: origin.sourceId,
       sourceRef: origin.sourceRef,
       importedAt: new Date().toISOString(),

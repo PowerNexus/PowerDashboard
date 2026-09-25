@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { API_OFFLINE_DIGEST, API_TIMEOUT_DIGEST, type ApiFailureKind } from "@/lib/api-status";
 import type { SessionUser } from "@/lib/session-user";
 import { forwardedIdentityHeaders } from "./forwarded";
@@ -273,6 +273,26 @@ export async function fetchMyServer(id: string): Promise<ClientServer | null> {
     // 404 seulement : un 403 a déjà provoqué la redirection vers la connexion.
     if (error instanceof ApiError && error.status === 404) return null;
     throw error;
+  }
+}
+
+/**
+ * Commandes du jeu proposées par l'egg, pour l'autocomplétion de la console.
+ *
+ * Une liste vide en cas d'échec : l'autocomplétion est un confort, et son
+ * absence ne doit pas empêcher d'ouvrir la console.
+ */
+export async function fetchConsoleCommands(id: string): Promise<string[]> {
+  try {
+    const { data } = await apiFetch<{ data: { commands: string[] } }>(
+      `/api/v1/client/servers/${id}/commands`,
+    );
+    return data.commands;
+  } catch (error) {
+    // Une redirection vers la connexion n'est pas un échec à taire : Next la
+    // lève en exception, et c'est à lui de l'intercepter.
+    unstable_rethrow(error);
+    return [];
   }
 }
 

@@ -730,7 +730,27 @@
     "interrupted": "Connexion interrompue",
     "interruptedBody": "Le flux temps réel s'est arrêté. Rechargez la page pour vous reconnecter.",
     "cpuChart": "Utilisation CPU",
-    "memoryChart": "Mémoire"
+    "memoryChart": "Mémoire",
+    "placeholder": "Tapez une commande…",
+    "command": "Commande",
+    "upload": "Téléverser",
+    "send": "Envoyer",
+    "waiting": "En attente de sortie…",
+    "noMatch": "Aucune ligne ne correspond au filtre.",
+    "source": "Source",
+    "sourceAll": "Tout",
+    "sourceServer": "Serveur",
+    "sourceSystem": "Système",
+    "levels": "Niveaux",
+    "levelError": "Erreurs",
+    "levelWarn": "Avertissements",
+    "levelInfo": "Infos",
+    "search": "Rechercher dans la sortie",
+    "clearSearch": "Effacer la recherche",
+    "suggestions": "Commandes proposées",
+    "fromHistory": "Déjà tapée",
+    "fromEgg": "Commande du jeu",
+    "shown": "{shown} / {total} lignes"
   },
   "createServer": {
     "title": "Nouveau serveur",
@@ -2219,7 +2239,9 @@
       "ruleNeedsTwoNumbers": "La règle « between » attend deux nombres, par exemple between:1,10.",
       "ruleInEmpty": "La règle « in » attend une liste de valeurs, par exemple in:oui,non.",
       "ruleRegexInvalid": "Expression régulière illisible. Elle s'écrit entre barres obliques, par exemple regex:/^[a-z]+$/."
-    }
+    },
+    "consoleCommandsLabel": "Commandes de la console",
+    "consoleCommandsHint": "Une par ligne, arguments entre chevrons. Proposées à la saisie dans la console ; rien n'est exécuté sans être tapé."
   },
   "nodeAdmin": {
     "title": "Machines (nodes)",

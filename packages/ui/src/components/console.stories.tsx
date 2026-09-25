@@ -25,7 +25,11 @@ const LIGNES: ConsoleLine[] = [
 const meta = {
   title: "Organismes/Console",
   component: ConsoleView,
-  args: { lines: LIGNES, onSend: () => undefined },
+  args: {
+    lines: LIGNES,
+    onSend: () => undefined,
+    commands: ["say <message>", "list", "whitelist add <joueur>", "stop"],
+  },
 } satisfies Meta<typeof ConsoleView>;
 
 export default meta;
