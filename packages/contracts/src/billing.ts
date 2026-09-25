@@ -1,7 +1,7 @@
 /**
- * Lecture de la facturation HostBill.
+ * Lecture de la facturation reliée : HostBill, WHMCS ou ClientXCMS.
  *
- * Le panel **lit** HostBill, il n'y écrit rien. La facturation reste chez le
+ * Le panel **lit** le facturier, il n'y écrit rien. La facturation reste chez le
  * tiers, qui pilote le panel par l'API applicative ; l'inverse — un panel qui
  * créerait des factures — ferait deux systèmes responsables du même chiffre,
  * et deux réponses différentes le jour où ils divergent.
@@ -11,14 +11,38 @@
  * que c'est exactement le genre de calcul qu'on rate d'un jour.
  */
 
-export type HostbillServiceState = "active" | "suspended" | "pending" | "cancelled" | "unknown";
+/**
+ * Les facturiers que le panel sait lire.
+ *
+ * Sous-ensemble des valeurs de `billing.provider` : « aucun » et « sur mesure »
+ * n'ont pas d'API de lecture connue, et le panel n'affiche alors aucun service.
+ */
+export const BILLING_PROVIDERS = ["hostbill", "whmcs", "clientxcms"] as const;
 
-export interface HostbillService {
+export type BillingProviderKind = (typeof BILLING_PROVIDERS)[number];
+
+/** Le nom affiché de chaque facturier, le même que dans les réglages. */
+export const BILLING_PROVIDER_LABELS: Readonly<Record<BillingProviderKind, string>> = {
+  hostbill: "HostBill",
+  whmcs: "WHMCS",
+  clientxcms: "ClientXCMS",
+};
+
+/** La valeur de `billing.provider`, si c'est un facturier lisible ; sinon `null`. */
+export function readableBillingProvider(raw: unknown): BillingProviderKind | null {
+  return typeof raw === "string" && (BILLING_PROVIDERS as readonly string[]).includes(raw)
+    ? (raw as BillingProviderKind)
+    : null;
+}
+
+export type BilledServiceState = "active" | "suspended" | "pending" | "cancelled" | "unknown";
+
+export interface BilledService {
   id: string;
   name: string;
-  /** Formule facturée, telle que HostBill la nomme. Nulle si absente. */
+  /** Formule facturée, telle que le facturier la nomme. Nulle si absente. */
   plan: string | null;
-  state: HostbillServiceState;
+  state: BilledServiceState;
   /** Prochaine échéance, en `AAAA-MM-JJ`. Nulle pour un service sans terme. */
   dueDate: string | null;
   /**
@@ -29,29 +53,35 @@ export interface HostbillService {
    * depuis trois semaines.
    */
   daysLeft: number | null;
-  /** Montant du prochain terme, tel quel. Nul si HostBill ne le donne pas. */
+  /** Montant du prochain terme, tel quel. Nul si le facturier ne le donne pas. */
   amount: string | null;
   currency: string | null;
 }
 
-export interface HostbillSummary {
-  /** Faux tant que l'administrateur n'a pas renseigné les trois réglages. */
+export interface BillingSummary {
+  /** Faux tant que l'administrateur n'a pas choisi un facturier et renseigné son API. */
   configured: boolean;
   /**
-   * Vrai quand HostBill n'a pas répondu.
+   * Le facturier relié, pour que l'écran le nomme au lieu de dire « HostBill »
+   * à tout le monde. Nul quand rien n'est configuré.
+   */
+  provider: BillingProviderKind | null;
+  /**
+   * Vrai quand le facturier n'a pas répondu.
    *
    * Distinct d'une liste vide : « nous n'avons pas pu demander » et « vous
    * n'avez aucun service » n'appellent pas le même écran, et le second est une
    * affirmation qu'on n'a pas le droit de faire sans réponse.
    */
   unreachable: boolean;
-  services: HostbillService[];
+  services: BilledService[];
   /** Adresse de l'espace client, pour régler une facture. Nulle si non réglée. */
   clientUrl: string | null;
 }
 
-export const HOSTBILL_SILENT: HostbillSummary = {
+export const BILLING_SILENT: BillingSummary = {
   configured: false,
+  provider: null,
   unreachable: false,
   services: [],
   clientUrl: null,
@@ -63,10 +93,10 @@ export const HOSTBILL_SILENT: HostbillSummary = {
  * Sept jours : assez tôt pour qu'un virement ait le temps d'arriver, assez
  * tard pour que l'avertissement ne devienne pas un décor qu'on cesse de voir.
  */
-export const HOSTBILL_DUE_SOON_DAYS = 7;
+export const BILLING_DUE_SOON_DAYS = 7;
 
-export function isDueSoon(service: HostbillService): boolean {
-  return service.daysLeft !== null && service.daysLeft <= HOSTBILL_DUE_SOON_DAYS;
+export function isDueSoon(service: BilledService): boolean {
+  return service.daysLeft !== null && service.daysLeft <= BILLING_DUE_SOON_DAYS;
 }
 
 /**
@@ -91,7 +121,7 @@ function parseDateOnly(value: string): number | null {
   if (!match) return null;
 
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  // HostBill écrit « 0000-00-00 » pour « pas d'échéance ». Une date nulle
+  // HostBill et WHMCS écrivent « 0000-00-00 » pour « pas d'échéance ». Une date nulle
   // traversée telle quelle donnerait un compte à rebours de sept cent mille
   // jours affiché en toutes lettres.
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
@@ -99,8 +129,15 @@ function parseDateOnly(value: string): number | null {
   return Date.UTC(year, month - 1, day);
 }
 
-/** Les états de HostBill, ramenés aux nôtres. Tout le reste est `unknown`. */
-export function readServiceState(raw: unknown): HostbillServiceState {
+/**
+ * Les états des trois facturiers, ramenés aux nôtres. Tout le reste est `unknown`.
+ *
+ * Un seul tableau pour les trois : leurs mots se recouvrent presque tous, et
+ * trois traductions séparées finiraient par ne plus dire la même chose d'un
+ * même état. `terminated` (HostBill, WHMCS), `completed` (WHMCS) et `expired`
+ * (ClientXCMS) sont des fins de service, donc `cancelled`.
+ */
+export function readServiceState(raw: unknown): BilledServiceState {
   if (typeof raw !== "string") return "unknown";
   switch (raw.trim().toLowerCase()) {
     case "active":
@@ -112,6 +149,8 @@ export function readServiceState(raw: unknown): HostbillServiceState {
     case "cancelled":
     case "canceled":
     case "terminated":
+    case "completed":
+    case "expired":
       return "cancelled";
     default:
       return "unknown";

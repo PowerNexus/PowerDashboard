@@ -18,11 +18,11 @@ import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { ImpersonationReadOnlyGuard } from "../auth/impersonation.guard";
 import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
+import { BillingService } from "../billing/billing.service";
 import { ResellerQuotaService } from "../reseller/reseller-quota.service";
 import { CatalogueService } from "./catalogue.service";
 import { ClientNodesService } from "./client-nodes.service";
 import { type ClientServer, ClientServersService } from "./client-servers.service";
-import { HostbillService } from "./hostbill.service";
 import { ServerAccessService } from "./server-access.service";
 import { ServerProvisioningService } from "./server-provisioning.service";
 import { SubusersService } from "./subusers.service";
@@ -67,7 +67,7 @@ export class ClientController {
     @Inject(CatalogueService) private readonly catalogue: CatalogueService,
     @Inject(ServerProvisioningService) private readonly provisioning: ServerProvisioningService,
     @Inject(ResellerQuotaService) private readonly quotas: ResellerQuotaService,
-    @Inject(HostbillService) private readonly billing: HostbillService,
+    @Inject(BillingService) private readonly billing: BillingService,
     @Inject(PlatformSettingsService) private readonly platform: PlatformSettingsService,
     @Inject(SubusersService) private readonly subusers: SubusersService,
     // Le point de passage unique des droits sur un serveur : c'est lui qui
@@ -77,7 +77,7 @@ export class ClientController {
   ) {}
 
   /**
-   * Services facturés du client connecté, lus chez HostBill.
+   * Services facturés du client connecté, lus chez le facturier relié.
    *
    * Sous `client` et non sous une route publique : ce sont **ses** échéances,
    * et la garde de session est ce qui garantit qu il ne voit que les siennes.
