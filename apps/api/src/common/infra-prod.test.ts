@@ -642,9 +642,18 @@ describe("actions GitHub des workflows", () => {
   it("marquent leurs conteneurs et retirent ceux qu'un job tué a laissés", () => {
     const linux = readFileSync(join(RACINE, "infra", "ci", "linux.sh"), "utf8");
     expect(linux).toMatch(/^ {2}balayer$/m);
-    expect(linux).toContain('--name "$NOM" --label gd-ci');
-    expect(linux).toContain('--name "$BASE" --label gd-ci');
+    expect(linux).toContain('ETIQUETTES=(--label gd-ci --label "gd-ci.job=$NOM")');
+    expect(linux).toContain(`--name "$NOM" "\${ETIQUETTES[@]}"`);
+    expect(linux).toContain(`--name "$BASE" "\${ETIQUETTES[@]}"`);
     expect(linux).toContain("docker ps -aq --filter label=gd-ci");
+    // Régression : des dizaines de conteneurs restaient sur le runner. Les
+    // outils lancés avec --rm survivent à un job annulé : étiquetés, et
+    // retirés par `fermer` ; les conteneurs arrêtés, balayés tout de suite.
+    expect(linux).toContain(`docker run --rm "\${ETIQUETTES[@]}"`);
+    expect(linux).toContain('docker ps -aq --filter "label=gd-ci.job=$NOM"');
+    expect(linux).toContain("--filter status=exited");
+    const zap = readFileSync(join(RACINE, "infra", "ci", "zap-baseline.sh"), "utf8");
+    expect(zap).toContain('ETIQUETTES=(--label gd-ci --label "gd-ci.job=$CONTENEUR")');
     // Les caches ne sont jamais balayés.
     expect(linux).not.toMatch(/volume prune/);
   });

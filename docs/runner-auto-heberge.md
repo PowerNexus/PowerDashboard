@@ -121,10 +121,18 @@ conteneur `gd-ci-…` : `docker ps -a --filter name=gd-ci-` les montre, et
 
 ### Veille de Docker Desktop
 
-Entre deux jobs, Docker ne doit rien garder d'actif : chaque job retire ses
-conteneurs, même en échec (`linux.sh fermer`), et le suivant retire ceux
-qu'un job tué net aurait laissés depuis plus de deux heures (`linux.sh
-balayer`, conteneurs marqués `gd-ci`). Il reste à laisser Docker Desktop
+Entre deux jobs, Docker ne doit rien garder d'actif. Tout conteneur d'un job
+(Node, PostgreSQL, Trivy, Semgrep, ZAP) porte les étiquettes `gd-ci` et
+`gd-ci.job=<job>` : `linux.sh fermer`, exécuté même en échec, les retire tous.
+Le job suivant retire ce qu'un job tué net aurait laissé (`linux.sh
+balayer`) : les conteneurs arrêtés tout de suite, ceux qui tournent encore
+au bout d'une heure. Pour vider à la main ce qui date d'avant ces étiquettes :
+
+```bash
+docker ps -aq --filter name=gd-ci- | xargs -r docker rm -f
+docker ps -aq --filter ancestor=ghcr.io/zaproxy/zaproxy | xargs -r docker rm -f
+```
+ Il reste à laisser Docker Desktop
 arrêter sa machine virtuelle quand plus rien ne tourne : **Settings →
 Resources → Advanced → Resource Saver**, activé, délai de 5 minutes. La
 machine virtuelle est alors arrêtée, sa mémoire rendue à Windows, et elle
