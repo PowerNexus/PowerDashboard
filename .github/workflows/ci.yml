@@ -200,11 +200,18 @@ jobs:
       # Semgrep cherche des motifs dans **notre** code, là où les deux autres
       # regardent ce qu'on importe. C'est le seul des trois qui puisse voir une
       # requête concaténée ou une comparaison de secret non constante.
+      # Deux règles écartées, par décision de Matheo (2026-09-25) : elles
+      # exigent d'attendre sept jours avant d'installer une version publiée,
+      # contre la règle du projet « toujours les dernières versions stables ».
+      # La chaîne d'approvisionnement reste couverte par pnpm audit, Trivy,
+      # allowBuilds, blockExoticSubdeps et trustPolicy (pnpm-workspace.yaml).
       - name: Semgrep
         run: |
           source infra/ci/outils.env
           bash infra/ci/linux.sh outil "$IMAGE_SEMGREP" semgrep scan --error --metrics off \
             --config p/typescript --config p/nodejs --config p/secrets --config p/owasp-top-ten \
+            --exclude-rule package_managers.pnpm.pnpm-missing-minimum-release-age.pnpm-minimum-release-age \
+            --exclude-rule package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age \
             --exclude node_modules /w
 
       - name: Rendre la machine du runner
