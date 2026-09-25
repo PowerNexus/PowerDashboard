@@ -519,7 +519,9 @@ describe("actions GitHub des workflows", () => {
       expect(bloc.slice(premiere, chemin)).not.toMatch(/^ {6}- /m);
       // Régression : la stratégie d'exécution refusait le script (« l'exécution
       // de scripts est désactivée sur ce système »).
-      expect(bloc.slice(chemin)).toMatch(/^ {8}shell: powershell .*-ExecutionPolicy Bypass .*\{0\}/m);
+      expect(bloc.slice(chemin)).toMatch(
+        /^ {8}shell: powershell .*-ExecutionPolicy Bypass .*\{0\}/m,
+      );
       expect(bloc).toContain("$env:GITHUB_PATH");
       expect(bloc).toContain("run: git config --global core.autocrlf false");
       expect(bloc).toMatch(/run: bash infra\/ci\/linux\.sh ouvrir/);
