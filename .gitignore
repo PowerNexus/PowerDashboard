@@ -35,3 +35,6 @@ infra/docker/wings/config.yml
 
 # Rapport du scan ZAP (infra/ci/zap-baseline.sh)
 zap-rapport/
+
+# Cache incrémental de TypeScript, réécrit à chaque construction.
+*.tsbuildinfo

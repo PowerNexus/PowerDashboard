@@ -8,9 +8,9 @@ import {
   PLATFORM_BRAND_SETTINGS,
   sniffBrandImage,
 } from "@gamedashboard/contracts";
-import { brandImages, type Database, resellerBrandings } from "@gamedashboard/db";
+import { brandImages, type Database, resellerBrandings, settings } from "@gamedashboard/db";
 import { BadRequestException, Inject, Injectable, PayloadTooLargeException } from "@nestjs/common";
-import { and, eq, isNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 import { BrandingService } from "./branding.service";
@@ -30,7 +30,14 @@ import { BrandingService } from "./branding.service";
  * dans le champ `logoUrl` ou `faviconUrl`. Les images que plus aucun champ ne
  * désigne sont effacées (`prune`) : ni orphelines accumulées, ni image
  * effacée alors qu'un champ la sert encore.
+ *
+ * **Un propriétaire à la fois.** Envoi et nettoyage tiennent dans une
+ * transaction sous un verrou consultatif par propriétaire : sans lui, le
+ * nettoyage d'un envoi effaçait l'image d'un envoi simultané (le favicon
+ * envoyé juste après le logo), rangée mais pas encore inscrite dans la marque.
  */
+
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /** Propriétaire d'une image : un revendeur, ou la plateforme (`null`). */
 type Owner = string | null;
@@ -50,7 +57,7 @@ export interface StoredBrandImage {
 export class BrandImagesService {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    @Inject(PlatformSettingsService) private readonly settings: PlatformSettingsService,
+    @Inject(PlatformSettingsService) private readonly platformSettings: PlatformSettingsService,
     @Inject(BrandingService) private readonly branding: BrandingService,
   ) {}
 
@@ -62,25 +69,34 @@ export class BrandImagesService {
    * laisserait une image rangée que rien n'affiche.
    */
   async uploadForReseller(userId: string, kind: BrandImageKind, body: unknown): Promise<string> {
-    const path = await this.store(userId, kind, body);
-    const field = kind === "logo" ? { logoUrl: path } : { faviconUrl: path };
-    await this.db
-      .insert(resellerBrandings)
-      .values({ userId, ...field })
-      .onConflictDoUpdate({
-        target: resellerBrandings.userId,
-        set: { ...field, updatedAt: new Date().toISOString() },
-      });
-    await this.prune(userId);
+    const image = checkedBrandImage(body);
+    const path = await this.locked(userId, async (tx) => {
+      const path = await store(tx, userId, kind, image);
+      const field = kind === "logo" ? { logoUrl: path } : { faviconUrl: path };
+      await tx
+        .insert(resellerBrandings)
+        .values({ userId, ...field })
+        .onConflictDoUpdate({
+          target: resellerBrandings.userId,
+          set: { ...field, updatedAt: new Date().toISOString() },
+        });
+      await prune(tx, userId);
+      return path;
+    });
     this.branding.forgetAll();
     return path;
   }
 
   /** Même chose pour la marque de la plateforme, par ses réglages `brand.*`. */
   async uploadForPlatform(kind: BrandImageKind, body: unknown): Promise<string> {
-    const path = await this.store(null, kind, body);
-    await this.settings.save({ [PLATFORM_BRAND_SETTINGS[FIELD[kind]]]: path });
-    await this.prune(null);
+    const image = checkedBrandImage(body);
+    const path = await this.locked(null, async (tx) => {
+      const path = await store(tx, null, kind, image);
+      // Le réglage passe par le service, contrôles compris, dans la transaction.
+      await this.platformSettings.save({ [PLATFORM_BRAND_SETTINGS[FIELD[kind]]]: path }, tx);
+      await prune(tx, null);
+      return path;
+    });
     this.branding.forgetAll();
     return path;
   }
@@ -103,67 +119,99 @@ export class BrandImagesService {
   /**
    * Efface les images d'un propriétaire que plus aucun de ses champs ne sert.
    *
-   * Appelé après un envoi, et après tout enregistrement de la marque : un
-   * champ vidé ou remplacé par une adresse externe libère son image.
+   * Appelé après tout enregistrement de la marque : un champ vidé ou remplacé
+   * par une adresse externe libère son image. Sous le même verrou que l'envoi.
    */
   async prune(owner: Owner): Promise<void> {
-    const kept = (await this.referencedUrls(owner)).flatMap((url) => {
-      const id = brandImageIdOf(url);
-      return id ? [id] : [];
-    });
-
-    const ofOwner =
-      owner === null ? isNull(brandImages.resellerId) : eq(brandImages.resellerId, owner);
-    await this.db
-      .delete(brandImages)
-      .where(kept.length > 0 ? and(ofOwner, notInArray(brandImages.id, kept)) : ofOwner);
+    await this.locked(owner, (tx) => prune(tx, owner));
   }
 
-  /**
-   * Contrôle et range les octets reçus. Rend le chemin interne de l'image.
-   *
-   * La taille est contrôlée ici **en plus** du plafond de l'analyseur du
-   * corps (`main.ts`), qui est celui, plus large, des morceaux d'envoi de
-   * fichiers : une image de marque n'a pas à peser un mégaoctet.
-   */
-  private async store(owner: Owner, kind: BrandImageKind, body: unknown): Promise<string> {
-    const bytes = checkedImage(body);
-    const contentType = sniffBrandImage(bytes);
-    if (contentType === null) {
-      throw new BadRequestException(
-        "Image refusée : seuls les formats PNG, JPEG, WebP et ICO sont acceptés (pas de SVG).",
+  /** `work` dans une transaction, seul à toucher aux images de ce propriétaire. */
+  private locked<T>(owner: Owner, work: (tx: Transaction) => Promise<T>): Promise<T> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`brand_images:${owner ?? "plateforme"}`}))`,
       );
-    }
-
-    const [row] = await this.db
-      .insert(brandImages)
-      .values({
-        resellerId: owner,
-        kind,
-        contentType,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
-        bytes,
-      })
-      .returning({ id: brandImages.id });
-    if (!row) throw new Error("L'image n'a pas été enregistrée.");
-    return brandImagePath(row.id);
+      return work(tx);
+    });
   }
+}
 
-  /** Adresses de logo et de favicon actuellement enregistrées pour ce propriétaire. */
-  private async referencedUrls(owner: Owner): Promise<string[]> {
-    if (owner === null) {
-      return Promise.all([
-        this.settings.text(PLATFORM_BRAND_SETTINGS.logoUrl),
-        this.settings.text(PLATFORM_BRAND_SETTINGS.faviconUrl),
-      ]);
-    }
-    const [row] = await this.db
-      .select({ logoUrl: resellerBrandings.logoUrl, faviconUrl: resellerBrandings.faviconUrl })
-      .from(resellerBrandings)
-      .where(eq(resellerBrandings.userId, owner))
-      .limit(1);
-    return row ? [row.logoUrl, row.faviconUrl] : [];
+/** Range des octets contrôlés (`checkedBrandImage`). Rend le chemin interne de l'image. */
+async function store(
+  tx: Transaction,
+  owner: Owner,
+  kind: BrandImageKind,
+  image: CheckedBrandImage,
+): Promise<string> {
+  const [row] = await tx
+    .insert(brandImages)
+    .values({ resellerId: owner, kind, ...image })
+    .returning({ id: brandImages.id });
+  if (!row) throw new Error("L'image n'a pas été enregistrée.");
+  return brandImagePath(row.id);
+}
+
+async function prune(tx: Transaction, owner: Owner): Promise<void> {
+  const kept = (await referencedUrls(tx, owner)).flatMap((url) => {
+    const id = brandImageIdOf(url);
+    return id ? [id] : [];
+  });
+
+  const ofOwner =
+    owner === null ? isNull(brandImages.resellerId) : eq(brandImages.resellerId, owner);
+  await tx
+    .delete(brandImages)
+    .where(kept.length > 0 ? and(ofOwner, notInArray(brandImages.id, kept)) : ofOwner);
+}
+
+/**
+ * Adresses de logo et de favicon enregistrées pour ce propriétaire, lues
+ * **dans la transaction** : l'adresse que l'envoi vient d'écrire en fait partie.
+ */
+async function referencedUrls(tx: Transaction, owner: Owner): Promise<string[]> {
+  if (owner === null) {
+    const rows = await tx
+      .select({ value: settings.value })
+      .from(settings)
+      .where(
+        inArray(settings.key, [
+          PLATFORM_BRAND_SETTINGS.logoUrl,
+          PLATFORM_BRAND_SETTINGS.faviconUrl,
+        ]),
+      );
+    return rows.flatMap((row) => (typeof row.value === "string" ? [row.value] : []));
   }
+  const [row] = await tx
+    .select({ logoUrl: resellerBrandings.logoUrl, faviconUrl: resellerBrandings.faviconUrl })
+    .from(resellerBrandings)
+    .where(eq(resellerBrandings.userId, owner))
+    .limit(1);
+  return row ? [row.logoUrl, row.faviconUrl] : [];
+}
+
+interface CheckedBrandImage {
+  contentType: string;
+  sha256: string;
+  bytes: Buffer;
+}
+
+/**
+ * Contrôle les octets reçus, **hors transaction** : un refus n'a rien à verrouiller.
+ *
+ * La taille est contrôlée ici **en plus** du plafond de l'analyseur du
+ * corps (`main.ts`), qui est celui, plus large, des morceaux d'envoi de
+ * fichiers : une image de marque n'a pas à peser un mégaoctet.
+ */
+function checkedBrandImage(body: unknown): CheckedBrandImage {
+  const bytes = checkedImage(body);
+  const contentType = sniffBrandImage(bytes);
+  if (contentType === null) {
+    throw new BadRequestException(
+      "Image refusée : seuls les formats PNG, JPEG, WebP et ICO sont acceptés (pas de SVG).",
+    );
+  }
+  return { contentType, sha256: createHash("sha256").update(bytes).digest("hex"), bytes };
 }
 
 /**

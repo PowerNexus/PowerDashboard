@@ -373,7 +373,12 @@ export class PlatformSettingsService {
    *    le relit jamais — effacerait la configuration SMTP à chaque
    *    enregistrement de la couleur d'accent.
    */
-  async save(values: Record<string, unknown>): Promise<{ saved: string[] }> {
+  async save(
+    values: Record<string, unknown>,
+    // Une transaction en cours, quand l'écriture doit en faire partie (envoi
+    // d'une image de marque, `BrandImagesService`).
+    db: Pick<Database, "insert"> = this.db,
+  ): Promise<{ saved: string[] }> {
     const saved: string[] = [];
 
     for (const [key, raw] of Object.entries(values)) {
@@ -384,7 +389,7 @@ export class PlatformSettingsService {
         if (typeof raw !== "string" || raw === "") continue;
         // La clé du réglage tient lieu d'identifiant de ligne : c'est elle
         // que la table rend unique, et elle ne change jamais.
-        await this.upsert(key, encryptRowSecret("settings.value", key, raw), true);
+        await upsert(db, key, encryptRowSecret("settings.value", key, raw), true);
         saved.push(key);
         continue;
       }
@@ -447,7 +452,8 @@ export class PlatformSettingsService {
         await assertOutboundSetting(text, descriptor.label);
       }
 
-      await this.upsert(
+      await upsert(
+        db,
         key,
         coerce(descriptor.format ? text : raw, descriptor.kind, descriptor.fallback),
         false,
@@ -512,7 +518,7 @@ export class PlatformSettingsService {
       throw new BadRequestException(parsed.error.issues[0]?.message ?? "Presets invalides.");
     }
 
-    await this.upsert(ROLE_PRESETS_SETTING_KEY, parsed.data, false);
+    await upsert(this.db, ROLE_PRESETS_SETTING_KEY, parsed.data, false);
     return resolveRolePresets(parsed.data);
   }
 
@@ -527,16 +533,21 @@ export class PlatformSettingsService {
     await this.db.delete(settings).where(eq(settings.key, ROLE_PRESETS_SETTING_KEY));
     return resolveRolePresets(undefined);
   }
+}
 
-  private async upsert(key: string, value: unknown, isSecret: boolean): Promise<void> {
-    await this.db
-      .insert(settings)
-      .values({ key, value, isSecret })
-      .onConflictDoUpdate({
-        target: settings.key,
-        set: { value, isSecret, updatedAt: new Date().toISOString() },
-      });
-  }
+async function upsert(
+  db: Pick<Database, "insert">,
+  key: string,
+  value: unknown,
+  isSecret: boolean,
+): Promise<void> {
+  await db
+    .insert(settings)
+    .values({ key, value, isSecret })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value, isSecret, updatedAt: new Date().toISOString() },
+    });
 }
 
 /**

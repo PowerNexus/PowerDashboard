@@ -30,6 +30,13 @@ export interface ProbePlanInput {
   variables: Record<string, string>;
   /** Port principal (celui de l'allocation). */
   port: number;
+  /**
+   * Ports de toutes les allocations du serveur, principal compris. Un port lu
+   * dans une variable n'est retenu que s'il en fait partie : le client règle
+   * ses variables, et le panel ne va pas sonder pour lui un port qu'il ne
+   * loue pas.
+   */
+  ports: readonly number[];
 }
 
 export interface ProbePlan {
@@ -108,7 +115,7 @@ export function probePlan(input: ProbePlanInput): ProbePlan | null {
   const declared = readGameQuery(input.declared);
   if (declared) {
     const fromVariable = declared.port_variable
-      ? portOf(input.variables[declared.port_variable])
+      ? allocatedPort(input, input.variables[declared.port_variable])
       : null;
     return plan(declared.protocol, fromVariable ?? input.port + (declared.port_offset ?? 0));
   }
@@ -128,13 +135,19 @@ export function probePlan(input: ProbePlanInput): ProbePlan | null {
   // sur le port même du jeu.
   const fromVariable =
     rule.protocol === "a2s"
-      ? (QUERY_PORT_VARIABLES.map((name) => portOf(input.variables[name])).find(
+      ? (QUERY_PORT_VARIABLES.map((name) => allocatedPort(input, input.variables[name])).find(
           (port) => port !== null,
         ) ?? null)
       : null;
   if (fromVariable !== null) return plan(rule.protocol, fromVariable);
   if (rule.requiresVariable) return null;
   return plan(rule.protocol, input.port + (rule.offset ?? 0));
+}
+
+/** Un port lu dans une variable, retenu seulement s'il est alloué au serveur. */
+function allocatedPort(input: ProbePlanInput, value: string | undefined): number | null {
+  const port = portOf(value);
+  return port !== null && input.ports.includes(port) ? port : null;
 }
 
 /** Un port lu dans une variable : entier décimal de 1 à 65535, sinon `null`. */

@@ -311,6 +311,22 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
           rows.map((row) => row.id),
         ),
       );
+    // Les ports alloués bornent ceux que les variables peuvent désigner.
+    const allocated = await this.db
+      .select({ serverId: allocations.serverId, port: allocations.port })
+      .from(allocations)
+      .where(
+        inArray(
+          allocations.serverId,
+          rows.map((row) => row.id),
+        ),
+      );
+    const ports = new Map<string, number[]>();
+    for (const entry of allocated) {
+      if (!entry.serverId) continue;
+      ports.set(entry.serverId, [...(ports.get(entry.serverId) ?? []), entry.port]);
+    }
+
     const variables = new Map<string, Record<string, string>>();
     for (const entry of values) {
       const own = variables.get(entry.serverId) ?? {};
@@ -327,6 +343,7 @@ export class GameProbeService implements OnModuleInit, OnModuleDestroy {
         declared: row.declared,
         variables: variables.get(row.id) ?? {},
         port: row.port,
+        ports: ports.get(row.id) ?? [row.port],
       });
       return plan
         ? [

@@ -419,7 +419,7 @@ traiter() {
 # ─── Domaine déclaré, pas encore vérifié ─────────────────────────────────────
 
 # Rend 0 si un site qui n'est pas à nous sert déjà ce nom (exact, `*.suffixe`,
-# `.suffixe` ou `préfixe.*`), d'après `CONFIG_NGINX` (sortie de `nginx -T`).
+# `.suffixe`, `préfixe.*` ou expression régulière `~…`), d'après `CONFIG_NGINX` (sortie de `nginx -T`).
 # Le nom n'est pas prouvé : sans cette garde, un revendeur qui déclarerait le
 # domaine d'un autre site de la machine en capterait le port 80.
 nom_servi_ailleurs() { # domaine
@@ -438,6 +438,18 @@ for ligne in sys.stdin.read().splitlines():
     if not directive:
         continue
     for nom in directive.group(1).split():
+        nom = nom.strip("\"\x27")
+        if nom.startswith("~"):
+            # Expression régulière (PCRE, groupes nommés `(?<nom>` compris).
+            # Illisible pour Python : le nom est réputé servi ailleurs plutôt
+            # que de risquer de le capter.
+            try:
+                motif = re.sub(r"\(\?<(?![=!])", "(?P<", nom[1:])
+                if re.search(motif, domaine, re.IGNORECASE):
+                    raise SystemExit(0)
+            except re.error:
+                raise SystemExit(0)
+            continue
         nom = nom.lower()
         if (nom == domaine
                 or (nom.startswith("*.") and domaine.endswith(nom[1:]))
