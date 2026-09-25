@@ -33,7 +33,16 @@ concurrency:
 permissions:
   contents: read
 
+# Comme la CI : Git Bash sur le runner Windows, commandes dans un conteneur
+# Linux (infra/ci/linux.sh). Ici c'est indispensable et non commode :
+# l'archive autonome embarque le binaire d'argon2 et l'interface standalone
+# pour Linux x64, ceux des hébergements.
+defaults:
+  run:
+    shell: bash
+
 env:
+  CI: "true"
   TURBO_TELEMETRY_DISABLED: 1
   NEXT_TELEMETRY_DISABLED: 1
 
@@ -46,7 +55,7 @@ jobs:
     name: Compiler, assembler, publier
     needs: verifier
     # Même runner que la CI (docs/runner-auto-heberge.md).
-    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","linux","x64"]') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","windows","x64"]') }}
     timeout-minutes: 20
     permissions:
       # Créer la release et y téléverser l'archive.
@@ -60,6 +69,9 @@ jobs:
       VERSION: ${{ inputs.version || github.ref_name }}
 
     steps:
+      - name: Fins de ligne du dépôt
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ inputs.version || github.ref }}
@@ -71,28 +83,21 @@ jobs:
           git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null \
             || { echo "::error::L'étiquette $VERSION n'existe pas."; exit 1; }
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-
-      # La version de Node des serveurs (.nvmrc) : l'interface est compilée
-      # par celle qui l'exécutera.
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version-file: .nvmrc
-          # Cache distant réservé aux runners de GitHub : sur une machine à
-          # nous le store pnpm reste sur disque, et téléverser ses 240 Mo à
-          # chaque job coûtait plus de deux minutes.
-          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+      # Node et pnpm à l'intérieur, aux versions du dépôt : l'interface est
+      # compilée par la version de Node qui l'exécutera sur les serveurs.
+      - name: Conteneur Linux
+        run: bash infra/ci/linux.sh ouvrir
 
       - name: Installer les dépendances
-        run: pnpm install --frozen-lockfile
+        run: bash infra/ci/linux.sh lancer 'pnpm install --frozen-lockfile'
 
       # Compilation complète, en production. Aucun secret : les clés ne sont
       # lues qu'à l'exécution, sur le serveur.
       - name: Compiler
-        run: pnpm build
+        run: bash infra/ci/linux.sh lancer 'pnpm build'
 
       - name: Assembler l'archive
-        run: bash infra/release/assembler.sh "$VERSION" dist
+        run: bash infra/ci/linux.sh lancer 'bash infra/release/assembler.sh "$VERSION" dist'
 
       # L'archive autonome : le panel prêt à tourner, qu'un hébergement cPanel
       # installe sans outils puis met à jour de lui-même depuis cette page
@@ -102,22 +107,24 @@ jobs:
       # suivantes la couvrent.
       - name: Assembler l'archive autonome
         run: |
-          GAMEDASHBOARD_AUTONOME=1 pnpm --filter @gamedashboard/web build
-          node infra/release/autonome.mjs "$VERSION" dist
+          bash infra/ci/linux.sh lancer '
+            GAMEDASHBOARD_AUTONOME=1 pnpm --filter @gamedashboard/web build
+            node infra/release/autonome.mjs "$VERSION" dist'
 
       # Inventaire des dépendances livrées (PLAN §5.4), au format CycloneDX,
       # publié à côté de l'archive. Trivy lit le lockfile, sans les
       # dépendances de développement, qui ne sont pas livrées, et prend les
       # licences dans node_modules : c'est pour cela qu'il n'est pas exclu.
-      # Même action épinglée que l'audit de la CI : aucun outil de plus.
+      # Même image épinglée que l'audit de la CI : aucun outil de plus.
       - name: Inventaire des dépendances (SBOM)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: cyclonedx
-          output: dist/gamedashboard-${{ env.VERSION }}.cdx.json
-          skip-dirs: dist,apps/web/.next
+        run: |
+          source infra/ci/outils.env
+          bash infra/ci/linux.sh outil "$IMAGE_TRIVY" fs --format cyclonedx \
+            --output "dist/gamedashboard-$VERSION.cdx.json" \
+            --skip-dirs dist --skip-dirs apps/web/.next /w
+
+      - name: Rapatrier l'archive
+        run: bash infra/ci/linux.sh rapatrier dist
 
       - name: Attester la provenance
         uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
@@ -227,3 +234,7 @@ jobs:
           name: gamedashboard-${{ env.VERSION }}
           path: dist/
           retention-days: 14
+
+      - name: Rendre la machine du runner
+        if: always()
+        run: bash infra/ci/linux.sh fermer

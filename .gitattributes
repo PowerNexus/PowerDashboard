@@ -1,0 +1,4 @@
+# Fins de ligne LF partout, quelle que soit la machine qui extrait le dépôt :
+# le runner de la CI est sous Windows, et un CRLF casse les scripts bash, le
+# lint et la comparaison d'openapi.json.
+* text=auto eol=lf

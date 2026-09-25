@@ -187,6 +187,9 @@ d'anticrénelage.
   Lancer *Actions › Captures de référence › Run workflow* sur la branche : le
   workflow reprend toutes les captures sur le runner et les commite. Son
   commit ne relance pas la CI ; pousser ensuite, ou relancer la CI.
+- **L'image Node de `infra/ci/linux.sh` ou la machine du runner a changé** :
+  les polices changent avec elles, donc toutes les captures ; les reprendre
+  par le même workflow.
 - **Un écran a changé sans le vouloir** : c'est ce que la suite est là pour
   attraper. Le rapport Playwright montre l'image attendue, l'image obtenue et
   leur différence.

@@ -2,6 +2,14 @@
 # Scan ZAP « baseline » du panel compilé (PLAN §5.4 et §12.2).
 #
 #   DATABASE_URL=… APP_SECRET_KEY=… bash infra/ci/zap-baseline.sh [dossier-du-rapport]
+#   ZAP_CONTENEUR=<conteneur> bash infra/ci/zap-baseline.sh [dossier-du-rapport]
+#
+# Deux façons de tourner :
+# - sur la machine (poste, runner Linux) : le panel démarre ici, et ZAP le
+#   joint par le réseau de l'hôte ;
+# - dans la CI (runner Windows) : le panel démarre dans le conteneur Linux du
+#   job (`ZAP_CONTENEUR`, voir infra/ci/linux.sh), qui porte déjà la base et
+#   la clé, et ZAP partage son réseau.
 #
 # Le scan est **passif** : ZAP parcourt les pages et lit les réponses (en-têtes,
 # CSP, cookies, formulaires) sans rien attaquer. C'est ce qui permet de le
@@ -13,6 +21,8 @@
 # sinon. Le rapport HTML est copié dans le dossier donné (zap-rapport par
 # défaut).
 set -euo pipefail
+# Git Bash réécrirait les chemins passés à docker.exe (voir infra/ci/linux.sh).
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 
 RACINE=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 RAPPORT=${1:-$RACINE/zap-rapport}
@@ -25,42 +35,65 @@ CIBLE="http://127.0.0.1:$WEB_PORT"
 # remplace : `docker pull ghcr.io/zaproxy/zaproxy:stable`, puis RepoDigests.
 IMAGE=ghcr.io/zaproxy/zaproxy@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef # 2.17.0
 
-: "${DATABASE_URL:?DATABASE_URL manquante}"
-: "${APP_SECRET_KEY:?APP_SECRET_KEY manquante}"
+CONTENEUR=${ZAP_CONTENEUR:-}
+if [ -z "$CONTENEUR" ]; then
+  : "${DATABASE_URL:?DATABASE_URL manquante}"
+  : "${APP_SECRET_KEY:?APP_SECRET_KEY manquante}"
+fi
 # Sans Docker, `docker run` échoue avec le code 1 — celui d'une alerte ZAP.
 # Le script annonçait alors « alerte à corriger » pour un scan qui n'avait
 # jamais eu lieu.
 docker info >/dev/null 2>&1 || { echo "Docker ne répond pas : le scan ne peut pas tourner." >&2; exit 3; }
 
-# ZAP tourne dans son conteneur sous un autre utilisateur que le runner. Il
-# écrit donc dans un dossier temporaire **hors** de l'espace de travail, ouvert
-# à tous : des fichiers qui ne sont pas au runner, laissés dans _work, font
-# échouer le checkout suivant (voir docs/runner-auto-heberge.md).
+# Le dossier de travail de ZAP est préparé ici puis **copié** dans son
+# conteneur, et le rapport recopié à la fin : aucun montage, donc aucun
+# fichier écrit par ZAP (sous un autre utilisateur) ne reste dans _work. Les
+# copies passent par une archive tar sur l'entrée et la sortie standard de
+# `docker cp` : aucun chemin de Windows à traduire pour docker.exe, et le
+# dossier arrive à l'utilisateur de ZAP (uid 1000) quels que soient les droits
+# que Windows donne au dossier temporaire. L'image n'a pas de /zap/wrk.
 TRAVAIL=$(mktemp -d)
-chmod 777 "$TRAVAIL"
-cp "$RACINE/infra/ci/zap-regles.tsv" "$TRAVAIL/regles.tsv"
+mkdir "$TRAVAIL/wrk"
+cp "$RACINE/infra/ci/zap-regles.tsv" "$TRAVAIL/wrk/regles.tsv"
 
+ZAP=""
 PIDS=()
 arreter() {
   # Chaque service a son propre groupe (setsid) : pnpm lance node, et tuer
-  # pnpm seul laisserait node tenir le port.
+  # pnpm seul laisserait node tenir le port. Dans la CI, le conteneur du job
+  # est retiré à la fin, services compris.
   for pid in "${PIDS[@]}"; do kill -- "-$pid" 2>/dev/null || true; done
-  # Le dossier est au runner : il peut en retirer les fichiers de ZAP.
+  [ -n "$ZAP" ] && docker rm -f "$ZAP" >/dev/null 2>&1
   rm -rf "$TRAVAIL" 2>/dev/null || true
 }
 trap arreter EXIT
 
 cd "$RACINE"
-PORT=$API_PORT HOST=127.0.0.1 PANEL_ORIGIN=$CIBLE NODE_ENV=production \
-  setsid pnpm --filter @gamedashboard/api start >"$TRAVAIL/api.log" 2>&1 &
-PIDS+=($!)
-API_URL="http://127.0.0.1:$API_PORT" PORT=$WEB_PORT NODE_ENV=production \
-  setsid pnpm --filter @gamedashboard/web start --port "$WEB_PORT" >"$TRAVAIL/web.log" 2>&1 &
-PIDS+=($!)
+if [ -n "$CONTENEUR" ]; then
+  docker exec -d -w /w "$CONTENEUR" bash -c \
+    "PORT=$API_PORT HOST=127.0.0.1 PANEL_ORIGIN=$CIBLE NODE_ENV=production \
+      pnpm --filter @gamedashboard/api start >/tmp/zap-api.log 2>&1"
+  docker exec -d -w /w "$CONTENEUR" bash -c \
+    "API_URL=http://127.0.0.1:$API_PORT PORT=$WEB_PORT NODE_ENV=production \
+      pnpm --filter @gamedashboard/web start --port $WEB_PORT >/tmp/zap-web.log 2>&1"
+  sonde() { docker exec "$CONTENEUR" curl "$@"; }
+  journaux() { docker exec "$CONTENEUR" tail -n 40 /tmp/zap-api.log /tmp/zap-web.log; }
+  RESEAU="container:$CONTENEUR"
+else
+  PORT=$API_PORT HOST=127.0.0.1 PANEL_ORIGIN=$CIBLE NODE_ENV=production \
+    setsid pnpm --filter @gamedashboard/api start >"$TRAVAIL/api.log" 2>&1 &
+  PIDS+=($!)
+  API_URL="http://127.0.0.1:$API_PORT" PORT=$WEB_PORT NODE_ENV=production \
+    setsid pnpm --filter @gamedashboard/web start --port "$WEB_PORT" >"$TRAVAIL/web.log" 2>&1 &
+  PIDS+=($!)
+  sonde() { curl "$@"; }
+  journaux() { tail -n 40 "$TRAVAIL/api.log" "$TRAVAIL/web.log"; }
+  RESEAU=host
+fi
 
 pret=0
 for _ in $(seq 60); do
-  if curl -fsS -o /dev/null "$CIBLE/login" && curl -sS -o /dev/null "http://127.0.0.1:$API_PORT/"; then
+  if sonde -fsS -o /dev/null "$CIBLE/login" && sonde -sS -o /dev/null "http://127.0.0.1:$API_PORT/"; then
     pret=1
     break
   fi
@@ -68,12 +101,13 @@ for _ in $(seq 60); do
 done
 if [ "$pret" = 0 ]; then
   echo "Le panel n'a pas démarré en deux minutes." >&2
-  tail -n 40 "$TRAVAIL/api.log" "$TRAVAIL/web.log" >&2
+  journaux >&2 || true
   exit 1
 fi
 
-# `--network host` : ZAP joint le panel sur 127.0.0.1, comme un navigateur de
-# la machine. Sans -I, un avertissement non accepté rend un code non nul.
+# ZAP joint le panel sur 127.0.0.1, comme un navigateur de la même machine :
+# réseau de l'hôte, ou celui du conteneur du job. Sans -I, un avertissement
+# non accepté rend un code non nul.
 #
 # `-z -silent` : sans lui, ZAP télécharge au démarrage les dernières règles
 # « bêta » (-addonupdate), et le verdict changeait d'un jour à l'autre sans que
@@ -81,11 +115,15 @@ fi
 # Les règles sont donc celles de l'image épinglée, ni plus ni moins ; on en
 # gagne en changeant l'empreinte, pas au hasard d'une exécution.
 code=0
-docker run --rm --network host -v "$TRAVAIL:/zap/wrk:rw" "$IMAGE" \
-  zap-baseline.py -t "$CIBLE" -c regles.tsv -r rapport.html -J rapport.json -z -silent || code=$?
+ZAP=$(docker create --network "$RESEAU" "$IMAGE" \
+  zap-baseline.py -t "$CIBLE" -c regles.tsv -r rapport.html -J rapport.json -z -silent)
+tar -C "$TRAVAIL" --owner=1000 --group=1000 --numeric-owner -cf - wrk | docker cp - "$ZAP:/zap"
+docker start -a "$ZAP" || code=$?
 
 mkdir -p "$RAPPORT"
-cp "$TRAVAIL"/rapport.html "$TRAVAIL"/rapport.json "$RAPPORT"/ 2>/dev/null || true
+for fichier in rapport.html rapport.json; do
+  docker cp "$ZAP:/zap/wrk/$fichier" - 2>/dev/null | tar --no-same-owner -xf - -C "$RAPPORT" 2>/dev/null || true
+done
 
 case $code in
   0) echo "ZAP : aucune alerte hors des exceptions de infra/ci/zap-regles.tsv." ;;
