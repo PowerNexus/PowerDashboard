@@ -301,7 +301,7 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         description:
           "Console Google Cloud › API et services › Identifiants › ID client OAuth, de type " +
           "« Application Web ». URI de redirection autorisé : l'adresse du panel suivie de " +
-          "/auth/google/callback.",
+          "/auth/google/callback, et la même chose pour chaque domaine vérifié de revendeur.",
         placeholder: "123456789-abc.apps.googleusercontent.com",
       },
       { key: "google.clientSecret", kind: "secret", label: "Secret client" },

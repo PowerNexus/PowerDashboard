@@ -1599,6 +1599,7 @@
     "passkeyLabel": "Key name",
     "passkeyLabelHint": "To recognise it in the list. Asked now, because after the ceremony you no longer know which one you just touched.",
     "passkeyLabelPlaceholder": "Office YubiKey",
+    "passkeyDomain": "Only usable on {domain}",
     "passkeyLastUsed": "Last used",
     "passkeyNeverUsed": "Never used",
     "sshSection": "SFTP access by key",

@@ -8,6 +8,7 @@ const RP: RelyingParty = {
   name: "GameDashboard",
   id: "localhost",
   origin: "http://localhost:3000",
+  scope: null,
 };
 const USER = { id: "11111111-1111-4111-8111-111111111111", email: "a@b.fr", name: "Alex B" };
 
@@ -20,13 +21,19 @@ const USER = { id: "11111111-1111-4111-8111-111111111111", email: "a@b.fr", name
  * simplement se donner raison.
  */
 function repository() {
-  const rows: (StoredPasskey & { userId: string; label: string })[] = [];
+  const rows: (StoredPasskey & { userId: string; label: string; rpId: string | null })[] = [];
+  // Même règle que `inScope` du vrai dépôt : `null` désigne la plateforme.
+  const inScope = (row: { rpId: string | null }, scope: string | null) =>
+    (row.rpId ?? null) === scope;
   return {
     rows,
     repo: {
-      credentialsForUser: async (userId: string) => rows.filter((r) => r.userId === userId),
-      findCredential: async (userId: string, credentialId: string) =>
-        rows.find((r) => r.userId === userId && r.credentialId === credentialId) ?? null,
+      credentialsForUser: async (userId: string, scope: string | null) =>
+        rows.filter((r) => r.userId === userId && inScope(r, scope)),
+      findCredential: async (userId: string, credentialId: string, scope: string | null) =>
+        rows.find(
+          (r) => r.userId === userId && r.credentialId === credentialId && inScope(r, scope),
+        ) ?? null,
       add: async (input: Record<string, unknown>) => {
         rows.push({ id: `row-${rows.length}`, ...input } as never);
       },
@@ -239,6 +246,75 @@ describe("PasskeyService", () => {
       expect(options.allowCredentials?.map((c) => c.id)).toEqual([
         authenticator.credentialId.toString("base64url"),
       ]);
+    });
+  });
+
+  /**
+   * Clés d'accès sur le domaine d'un revendeur.
+   *
+   * Le domaine relais était toujours celui de `PANEL_ORIGIN` : sur
+   * `panel.revendeur.fr`, le navigateur refusait toute cérémonie, et les
+   * clients d'un revendeur ne pouvaient pas utiliser de clé d'accès.
+   */
+  describe("domaine d'un revendeur", () => {
+    const REVENDEUR: RelyingParty = {
+      name: "Revendeur",
+      id: "panel.revendeur.fr",
+      origin: "https://panel.revendeur.fr",
+      scope: "panel.revendeur.fr",
+    };
+
+    it("enregistre sur le domaine du revendeur, et range la clé dans sa portée", async () => {
+      const cle = new SoftwareAuthenticator({ rpId: REVENDEUR.id, origin: REVENDEUR.origin });
+      const options = await service.registrationOptions(REVENDEUR, USER);
+
+      expect(options.rp.id).toBe("panel.revendeur.fr");
+      expect(
+        await service.verifyRegistration(
+          REVENDEUR,
+          USER.id,
+          options.challenge,
+          cle.register(options.challenge) as never,
+          "Clé revendeur",
+        ),
+      ).toBe(true);
+      expect(store.rows[0]?.rpId).toBe("panel.revendeur.fr");
+    });
+
+    it("ne propose ni n'accepte une clé hors du domaine où elle a été créée", async () => {
+      const cle = new SoftwareAuthenticator({ rpId: REVENDEUR.id, origin: REVENDEUR.origin });
+      const inscription = await service.registrationOptions(REVENDEUR, USER);
+      await service.verifyRegistration(
+        REVENDEUR,
+        USER.id,
+        inscription.challenge,
+        cle.register(inscription.challenge) as never,
+        "Clé revendeur",
+      );
+
+      // Sur la plateforme, la clé du revendeur n'est ni proposée ni vérifiée.
+      const surPlateforme = await service.authenticationOptions(RP, USER.id);
+      expect(surPlateforme.allowCredentials).toEqual([]);
+      expect(
+        await service.verifyAuthentication(
+          RP,
+          USER.id,
+          surPlateforme.challenge,
+          cle.authenticate(surPlateforme.challenge) as never,
+        ),
+      ).toBe(false);
+
+      // Sur son domaine, elle ouvre la session.
+      const chezLui = await service.authenticationOptions(REVENDEUR, USER.id);
+      expect(chezLui.allowCredentials).toHaveLength(1);
+      expect(
+        await service.verifyAuthentication(
+          REVENDEUR,
+          USER.id,
+          chezLui.challenge,
+          cle.authenticate(chezLui.challenge) as never,
+        ),
+      ).toBe(true);
     });
   });
 });

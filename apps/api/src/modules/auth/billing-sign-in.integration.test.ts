@@ -15,10 +15,12 @@ import {
 } from "../../test/throwaway-database";
 import { ActivityService } from "../activity/activity.service";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
+import type { BrandingService } from "../reseller/branding.service";
 import { AuthController } from "./auth.controller";
 import { AuthTokenRepository } from "./auth-token.repository";
 import { BillingSsoService } from "./billing-sso.service";
 import { readChallenge } from "./login-challenge";
+import { PasskeyRepository } from "./passkey.repository";
 import { PasswordConfirmationService } from "./password-confirmation.service";
 import type { SecurityAlertService } from "./security-alert.service";
 import { SessionRepository } from "./session.repository";
@@ -93,7 +95,8 @@ describe.skipIf(!HAS_DATABASE)("connexion par le lien de la facturation (intégr
       sessions,
       new ActivityService(db),
       new TwoFactorRepository(db),
-      {} as never,
+      // Les clés d'accès : l'écran du second facteur demande s'il y en a ici.
+      new PasskeyRepository(db),
       {} as never,
       {} as never,
       billing,
@@ -114,6 +117,9 @@ describe.skipIf(!HAS_DATABASE)("connexion par le lien de la facturation (intégr
       new PasswordConfirmationService(usersRepo, {
         afterFailure: () => undefined,
       } as unknown as SecurityAlertService),
+      {
+        forHost: async () => ({ name: "GameDashboard", resellerId: null }),
+      } as unknown as BrandingService,
     );
   }, 60_000);
 

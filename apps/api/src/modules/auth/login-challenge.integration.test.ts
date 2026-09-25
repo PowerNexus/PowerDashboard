@@ -88,7 +88,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     const issuer = new SessionIssuerService(sessionsRepo, usersRepo, {
       afterSignIn: () => undefined,
     } as unknown as SecurityAlertService);
-    const args: unknown[] = Array.from({ length: 19 }, () => ({}));
+    const args: unknown[] = Array.from({ length: 20 }, () => ({}));
     args[0] = usersRepo;
     args[1] = sessionsRepo;
     args[2] = new ActivityService(db);
@@ -101,6 +101,8 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
     args[18] = new PasswordConfirmationService(usersRepo, {
       afterFailure: () => undefined,
     } as unknown as SecurityAlertService);
+    // La marque du domaine d'arrivée : la plateforme, faute d'en-tête.
+    args[19] = { forHost: async () => ({ name: "GameDashboard", resellerId: null }) };
     return new (AuthController as unknown as new (...a: unknown[]) => AuthController)(...args);
   }
 
@@ -168,7 +170,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
       });
 
       const options = fakeReply();
-      await auth.passkeyAuthenticationOptions({ challenge }, options as never);
+      await auth.passkeyAuthenticationOptions({ challenge }, REQUEST as never, options as never);
       const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
 
       const passkey = fakeReply();
@@ -192,7 +194,11 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
       expect(rejeu.cookies.size).toBe(0);
 
       const autreCeremonie = fakeReply();
-      await auth.passkeyAuthenticationOptions({ challenge }, autreCeremonie as never);
+      await auth.passkeyAuthenticationOptions(
+        { challenge },
+        REQUEST as never,
+        autreCeremonie as never,
+      );
       expect(autreCeremonie.statusCode).toBe(401);
 
       const ouvertes = await db.select().from(sessions).where(eq(sessions.userId, compte.id));
@@ -225,6 +231,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
       const options = fakeReply();
       await auth.passkeyAuthenticationOptions(
         { challenge: issueChallenge("login", compte.id, { method: "password" }) },
+        REQUEST as never,
         options as never,
       );
       const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
@@ -260,7 +267,7 @@ describe.skipIf(!HAS_DATABASE)("défis de connexion consommés en base (intégra
 
       // La cérémonie est ouverte, puis le défi sert au code de secours.
       const options = fakeReply();
-      await auth.passkeyAuthenticationOptions({ challenge }, options as never);
+      await auth.passkeyAuthenticationOptions({ challenge }, REQUEST as never, options as never);
       const ceremonie = (options.body as { data: { challenge: string } }).data.challenge;
 
       const code = fakeReply();
