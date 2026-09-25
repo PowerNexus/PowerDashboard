@@ -22,7 +22,7 @@ import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { ServerResizeService } from "../client/server-resize.service";
 import { WebhookRegistryService } from "../webhooks/webhook-registry.service";
-import { BrandingService } from "./branding.service";
+import { BrandingService, brandingInput } from "./branding.service";
 import { ResellerGuard } from "./reseller.guard";
 import { ResellerService } from "./reseller.service";
 import { ResellerQuotaService } from "./reseller-quota.service";
@@ -130,20 +130,7 @@ export class ResellerController {
 
   @Post("branding")
   async saveBranding(@Req() request: ResellerRequest, @Body() body: unknown) {
-    const payload = (body ?? {}) as Record<string, unknown>;
-    const text = (key: string): string =>
-      typeof payload[key] === "string" ? (payload[key] as string) : "";
-
-    const saved = await this.branding_.save(request.user.id, {
-      name: text("name"),
-      logoUrl: text("logoUrl"),
-      faviconUrl: text("faviconUrl"),
-      accent: text("accent"),
-      supportUrl: text("supportUrl"),
-      termsUrl: text("termsUrl"),
-      footerText: text("footerText"),
-      loginTagline: text("loginTagline"),
-    });
+    const saved = await this.branding_.save(request.user.id, brandingInput(body));
 
     await this.activity.record({
       event: "reseller.branding_saved",
