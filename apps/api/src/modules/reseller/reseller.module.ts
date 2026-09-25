@@ -11,6 +11,7 @@ import { ServerResizeService } from "../client/server-resize.service";
 import { StorageModule } from "../storage/storage.module";
 import { WebhooksModule } from "../webhooks/webhooks.module";
 import { WingsModule } from "../wings/wings.module";
+import { BrandImagesService } from "./brand-images.service";
 import { BrandingController } from "./branding.controller";
 import { BrandingService } from "./branding.service";
 import { ResellerController } from "./reseller.controller";
@@ -45,6 +46,7 @@ import { ResellerShareService } from "./reseller-share.service";
     ResellerShareService,
     ResellerGuard,
     BrandingService,
+    BrandImagesService,
     // Fourni ici et non importé du module applicatif, qui importe déjà
     // celui-ci : un import en retour formerait un cycle. Le service ne dépend
     // que de la base, et les deux instances écrivent la même table.
@@ -97,6 +99,6 @@ import { ResellerShareService } from "./reseller-share.service";
    * relire la table chacun de leur côté — une enveloppe interprétée à trois
    * endroits finit par l'être de trois façons.
    */
-  exports: [ResellerQuotaService, ResellerShareService, BrandingService],
+  exports: [ResellerQuotaService, ResellerShareService, BrandingService, BrandImagesService],
 })
 export class ResellerModule {}

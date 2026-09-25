@@ -1,4 +1,8 @@
-import { PLATFORM_ACCESS_LEVELS, ServerLimitsPatch } from "@gamedashboard/contracts";
+import {
+  isBrandImageKind,
+  PLATFORM_ACCESS_LEVELS,
+  ServerLimitsPatch,
+} from "@gamedashboard/contracts";
 import {
   BadRequestException,
   Body,
@@ -22,6 +26,7 @@ import type { AuthenticatedRequest } from "../auth/session.guard";
 import { SessionGuard } from "../auth/session.guard";
 import { ServerResizeService } from "../client/server-resize.service";
 import { WebhookRegistryService } from "../webhooks/webhook-registry.service";
+import { BrandImagesService } from "./brand-images.service";
 import { BrandingService, brandingInput } from "./branding.service";
 import { ResellerGuard } from "./reseller.guard";
 import { ResellerService } from "./reseller.service";
@@ -99,6 +104,7 @@ export class ResellerController {
     @Inject(ResellerQuotaService) private readonly quotas: ResellerQuotaService,
     @Inject(ApplicationKeysService) private readonly keys_: ApplicationKeysService,
     @Inject(BrandingService) private readonly branding_: BrandingService,
+    @Inject(BrandImagesService) private readonly images_: BrandImagesService,
     @Inject(WebhookRegistryService) private readonly webhooks_: WebhookRegistryService,
     // Le périmètre : « ce serveur est-il sur mon parc ? ». Le même service que
     // celui qui borne les clés applicatives — une seule règle, un seul endroit.
@@ -131,6 +137,9 @@ export class ResellerController {
   @Post("branding")
   async saveBranding(@Req() request: ResellerRequest, @Body() body: unknown) {
     const saved = await this.branding_.save(request.user.id, brandingInput(body));
+    // Un logo envoyé que le champ ne désigne plus (vidé, ou remplacé par une
+    // adresse) n'a plus de raison d'occuper la base.
+    await this.images_.prune(request.user.id);
 
     await this.activity.record({
       event: "reseller.branding_saved",
@@ -143,6 +152,34 @@ export class ResellerController {
     });
 
     return { data: saved };
+  }
+
+  /**
+   * Envoi du logo ou du favicon par fichier (corps `application/octet-stream`).
+   *
+   * Le type est lu dans les octets, pas dans le nom : PNG, JPEG, WebP ou ICO,
+   * jamais de SVG. L'adresse interne rendue est aussitôt celle de la marque.
+   */
+  @Post("branding/images/:kind")
+  async uploadBrandImage(
+    @Req() request: ResellerRequest,
+    @Param("kind") kind: string,
+    @Body() body: unknown,
+  ) {
+    if (!isBrandImageKind(kind)) throw new BadRequestException("Image de marque inconnue.");
+    const url = await this.images_.uploadForReseller(request.user.id, kind, body);
+
+    await this.activity.record({
+      event: "reseller.branding_image_uploaded",
+      serverId: null,
+      actorId: request.user.id,
+      actorType: "user",
+      actorLabel: request.user.email,
+      ip: request.ip ?? null,
+      properties: { kind },
+    });
+
+    return { data: { url } };
   }
 
   /**

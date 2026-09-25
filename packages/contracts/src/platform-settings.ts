@@ -7,7 +7,7 @@
  * par personne. La déclaration est donc ce qui rend la table exploitable.
  */
 
-import type { BrandingOverrides } from "./branding";
+import type { BrandImageKind, BrandingOverrides } from "./branding";
 
 export type SettingKind = "text" | "number" | "boolean" | "secret" | "choice";
 
@@ -42,6 +42,12 @@ export interface SettingDescriptor {
    *   (`assertPublicDestination`, rapport ASVS NC-56).
    */
   format?: "url" | "hex" | "outbound" | "email";
+  /**
+   * L'adresse peut aussi s'obtenir **par envoi de fichier** : l'écran propose
+   * un bouton qui range l'image (PNG, JPEG, WebP ou ICO) et remplit le champ
+   * de son chemin interne. Voir `BRAND_IMAGE_KINDS`.
+   */
+  upload?: BrandImageKind;
 }
 
 export interface SettingGroup {
@@ -92,9 +98,11 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         key: "brand.logoUrl",
         kind: "text",
         label: "Logo",
-        description: "Adresse https:// ou chemin interne (/…). Vide : logo GameDashboard.",
+        description:
+          "Adresse https:// ou chemin interne (/…), ou image envoyée. Vide : logo GameDashboard.",
         placeholder: "https://cdn.exemple.fr/logo.webp",
         format: "url",
+        upload: "logo",
       },
       {
         key: "brand.faviconUrl",
@@ -103,6 +111,7 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         description: "Vide : le logo sert aussi d'icône d'onglet.",
         placeholder: "/brand/favicon.png",
         format: "url",
+        upload: "favicon",
       },
       {
         key: "brand.supportUrl",

@@ -234,6 +234,10 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
    * désactivé la seconde preuve du personnel » n'avait pas de réponse.
    */
   "admin.settings_saved": { category: "settings", label: "Réglages de la plateforme enregistrés" },
+  "admin.brand_image_uploaded": {
+    category: "settings",
+    label: "Logo ou favicon de la plateforme envoyé",
+  },
   "admin.feature_flag_set": { category: "settings", label: "Fonctionnalité activée ou coupée" },
   "admin.announcement_saved": { category: "settings", label: "Annonce publiée ou modifiée" },
   "admin.announcement_deleted": { category: "settings", label: "Annonce supprimée" },
@@ -464,6 +468,10 @@ export const ACTIVITY_EVENTS: Record<string, ActivityDescriptor> = {
     label: "Rappel sortant du revendeur activé ou suspendu",
   },
   "reseller.branding_saved": { category: "settings", label: "Marque du revendeur enregistrée" },
+  "reseller.branding_image_uploaded": {
+    category: "settings",
+    label: "Logo ou favicon du revendeur envoyé",
+  },
   "reseller.domain_declared": { category: "network", label: "Domaine de revendeur déclaré" },
   "reseller.domain_verified": { category: "network", label: "Domaine de revendeur vérifié" },
   "reseller.domain_check_failed": {

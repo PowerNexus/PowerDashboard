@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   index,
   inet,
   integer,
@@ -12,7 +13,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { id, moment, timestamps } from "../columns";
+import { createdAt, id, moment, timestamps } from "../columns";
 import { oauthProvider, userRole } from "./enums";
 
 /** §6.1 — Identité & accès. */
@@ -727,4 +728,41 @@ export const resellerBrandings = pgTable(
       .on(table.domain)
       .where(sql`${table.domainVerifiedAt} is not null`),
   ],
+);
+
+/** Octets bruts (`bytea`), rendus en `Buffer` par le pilote. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
+
+/**
+ * Logos et favicons **envoyés par fichier** (marque de la plateforme ou d'un
+ * revendeur).
+ *
+ * En base plutôt que sur disque : l'hébergement cPanel n'a qu'un processus,
+ * aucun nginx pour servir un dossier, et chaque mise à jour y remplace le
+ * dossier de l'application. Une image de 512 Kio au plus (`BRAND_IMAGE_MAX_BYTES`)
+ * y tient sans peine, part avec les sauvegardes de la base, et se sert par
+ * l'interface sous `/brand/fichier/<id>`.
+ *
+ * Une ligne n'est jamais modifiée : un nouvel envoi crée une nouvelle ligne,
+ * donc une nouvelle adresse, et l'ancienne image est effacée dès que plus rien
+ * ne la désigne. C'est ce qui permet de la servir avec un cache sans limite.
+ */
+export const brandImages = pgTable(
+  "brand_images",
+  {
+    id: id(),
+    /** Revendeur propriétaire, ou `null` pour la plateforme. */
+    resellerId: uuid("reseller_id").references(() => users.id, { onDelete: "cascade" }),
+    /** `logo` ou `favicon` (`BRAND_IMAGE_KINDS`). */
+    kind: varchar("kind", { length: 16 }).notNull(),
+    /** Type **lu dans les octets** (`sniffBrandImage`), jamais celui annoncé. */
+    contentType: varchar("content_type", { length: 32 }).notNull(),
+    /** Empreinte SHA-256 en hexadécimal : sert d'ETag. */
+    sha256: varchar("sha256", { length: 64 }).notNull(),
+    bytes: bytea("bytes").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index("brand_images_owner_idx").on(table.resellerId, table.kind)],
 );
