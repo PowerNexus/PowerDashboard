@@ -35,6 +35,13 @@ export interface Mail {
   subject: string;
   /** Corps en texte brut. Voir `send` pour la raison. */
   text: string;
+  /**
+   * Nom d'expéditeur affiché, tiré de la marque (`mailSender`). L'adresse,
+   * elle, reste celle des réglages SMTP : c'est elle que SPF et DKIM couvrent.
+   */
+  fromName?: string;
+  /** Adresse de réponse de la marque, quand elle en déclare une. */
+  replyTo?: string | null;
 }
 
 @Injectable()
@@ -92,7 +99,11 @@ export class MailerService {
 
     try {
       await this.transportFor(config).sendMail({
-        from: config.from,
+        // Objet plutôt que chaîne composée : nodemailer encode et met entre
+        // guillemets le nom lui-même, et une virgule ou un accent dans le nom
+        // d'un revendeur ne peut pas fabriquer un second expéditeur.
+        from: mail.fromName ? { name: mail.fromName, address: config.from } : config.from,
+        ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
         to: mail.to,
         subject: mail.subject,
         text: mail.text,

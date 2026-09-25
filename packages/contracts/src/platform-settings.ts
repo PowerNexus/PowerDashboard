@@ -41,7 +41,7 @@ export interface SettingDescriptor {
    *   de métadonnées). L'API le vérifie en résolvant le nom
    *   (`assertPublicDestination`, rapport ASVS NC-56).
    */
-  format?: "url" | "hex" | "outbound";
+  format?: "url" | "hex" | "outbound" | "email";
 }
 
 export interface SettingGroup {
@@ -132,6 +132,15 @@ export const PLATFORM_SETTINGS: readonly SettingGroup[] = [
         kind: "text",
         label: "Accroche de connexion",
         description: "Courte phrase en tête de la page de connexion.",
+      },
+      {
+        key: "brand.replyTo",
+        kind: "text",
+        label: "Adresse de réponse des e-mails",
+        description:
+          "Où arrivent les réponses des clients. Les e-mails partent toujours de l'adresse SMTP.",
+        placeholder: "support@exemple.fr",
+        format: "email",
       },
     ],
   },
@@ -539,6 +548,7 @@ export const PLATFORM_BRAND_SETTINGS: Readonly<Record<keyof BrandingOverrides, s
   termsUrl: "brand.termsUrl",
   footerText: "brand.footerText",
   loginTagline: "brand.loginTagline",
+  replyTo: "brand.replyTo",
 };
 
 export function isSecretSetting(key: string): boolean {

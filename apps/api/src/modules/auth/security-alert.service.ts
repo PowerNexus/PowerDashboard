@@ -4,6 +4,7 @@ import {
   MAX_ATTEMPTS_PER_ACCOUNT,
   shouldAlertOwner,
 } from "@gamedashboard/auth";
+import { type MailSender, mailSender } from "@gamedashboard/contracts";
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { battre } from "../../common/background-tick";
 import { ActivityService } from "../activity/activity.service";
@@ -202,7 +203,7 @@ export class SecurityAlertService {
     const recipient = await this.repository.recipient(input.userId);
     if (!recipient) return;
 
-    const { brand, link } = await this.brandAndLink(input.host);
+    const { brand, link, sender } = await this.brandAndLink(input.host);
     const texts = failureAlertTexts({
       locale: recipient.locale,
       brand,
@@ -212,7 +213,7 @@ export class SecurityAlertService {
       link,
     });
 
-    await this.deliver(recipient, FAILURE_ALERT, "danger", texts);
+    await this.deliver(recipient, FAILURE_ALERT, "danger", texts, sender);
   }
 
   /**
@@ -296,7 +297,7 @@ export class SecurityAlertService {
     );
     if (verdict !== "new") return;
 
-    const { brand, link } = await this.brandAndLink(context.host);
+    const { brand, link, sender } = await this.brandAndLink(context.host);
     const texts = newDeviceAlertTexts({
       locale: recipient.locale,
       brand,
@@ -307,14 +308,14 @@ export class SecurityAlertService {
       link,
     });
 
-    await this.deliver(recipient, NEW_DEVICE_ALERT, "warning", texts);
+    await this.deliver(recipient, NEW_DEVICE_ALERT, "warning", texts, sender);
   }
 
   private async noticeCredentialChange(input: CredentialChangeContext): Promise<void> {
     const recipient = await this.repository.recipient(input.userId);
     if (!recipient) return;
 
-    const { brand, link } = await this.brandAndLink(input.host);
+    const { brand, link, sender } = await this.brandAndLink(input.host);
     const texts = credentialChangeTexts({
       locale: recipient.locale,
       brand,
@@ -340,6 +341,7 @@ export class SecurityAlertService {
         CREDENTIAL_CHANGE_ALERT,
         level,
         texts,
+        sender,
         input.previousEmail.verified,
       );
       return;
@@ -349,6 +351,7 @@ export class SecurityAlertService {
       CREDENTIAL_CHANGE_ALERT,
       level,
       texts,
+      sender,
       recipient.emailVerifiedAt !== null || input.kind === "passwordReset",
     );
   }
@@ -365,6 +368,7 @@ export class SecurityAlertService {
     type: string,
     level: "info" | "warning" | "danger",
     texts: AlertTexts,
+    sender: MailSender,
     mailable = recipient.emailVerifiedAt !== null,
   ): Promise<void> {
     await this.notifications.notify({
@@ -377,7 +381,12 @@ export class SecurityAlertService {
     });
 
     if (!mailable) return;
-    await this.mail.send({ to: recipient.email, subject: texts.subject, text: texts.text });
+    await this.mail.send({
+      to: recipient.email,
+      subject: texts.subject,
+      text: texts.text,
+      ...sender,
+    });
   }
 
   /**
@@ -387,12 +396,18 @@ export class SecurityAlertService {
    * c'est celui de la plateforme. L'en-tête d'arrivée est forgeable, et un
    * lien de sécurité ne doit mener que chez nous.
    */
-  private async brandAndLink(host: string | null): Promise<{ brand: string; link: string }> {
+  private async brandAndLink(
+    host: string | null,
+  ): Promise<{ brand: string; link: string; sender: MailSender }> {
     const branding = await this.branding.forHost(host);
     const domain =
       host !== null && branding.resellerId !== null
         ? host
         : await this.platform.text("brand.domain");
-    return { brand: branding.name, link: `https://${domain}${SECURITY_PAGE}` };
+    return {
+      brand: branding.name,
+      link: `https://${domain}${SECURITY_PAGE}`,
+      sender: mailSender(branding),
+    };
   }
 }

@@ -117,6 +117,9 @@ describe.skipIf(!HAS_DATABASE)("Alertes de sécurité (intégration)", () => {
       new NotificationPreferencesRepository(db),
       mailer,
       { emit: async () => {} } as unknown as ClientWebhookEmitterService,
+      {
+        forReseller: async () => ({ branding: { name: "Panel", replyTo: null }, domain: null }),
+      } as unknown as BrandingService,
     );
     alerts = new SecurityAlertService(
       new SecurityAlertRepository(db),

@@ -1354,6 +1354,8 @@
     "accentHint": "In hexadecimal notation, such as #0ea5e9. The light and dark tones are derived from it.",
     "loginTagline": "Sign-in tagline",
     "loginTaglineHint": "Shown under the logo on the sign-in screen.",
+    "replyTo": "Email reply-to address",
+    "replyToHint": "Emails sent to your customers carry your name; their replies go to this address. Empty: the platform's.",
     "footer": "Footer note",
     "footerHint": "Your company name, for instance.",
     "support": "Support link",
