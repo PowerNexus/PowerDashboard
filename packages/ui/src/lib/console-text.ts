@@ -59,11 +59,27 @@ const URL_PATTERN = /\bhttps?:\/\/[^\s<>"'`]+/g;
  * celles de Wikipédia en portent.
  */
 function trimUrl(raw: string): string {
-  let url = raw.replace(/[.,;:!?'"]+$/, "");
-  while (url.endsWith(")") && count(url, "(") < count(url, ")")) {
-    url = url.slice(0, -1).replace(/[.,;:!?'"]+$/, "");
+  // Tout se fait par indices, en un seul passage : une expression ancrée en
+  // fin de chaîne et un décompte refait à chaque parenthèse coûtaient un temps
+  // quadratique, et une ligne de console de cent mille « ! » ou « ) » figeait
+  // l'onglet de quiconque la regardait.
+  const ouvrantes = count(raw, "(");
+  let fermantes = count(raw, ")");
+  let fin = sansPonctuationFinale(raw, raw.length);
+  while (fin > 0 && raw[fin - 1] === ")" && ouvrantes < fermantes) {
+    fermantes -= 1;
+    fin = sansPonctuationFinale(raw, fin - 1);
   }
-  return url;
+  return raw.slice(0, fin);
+}
+
+const PONCTUATION_FINALE = ".,;:!?'\"";
+
+/** L'indice où s'arrête `texte.slice(0, fin)` une fois sa ponctuation finale retirée. */
+function sansPonctuationFinale(texte: string, fin: number): number {
+  let indice = fin;
+  while (indice > 0 && PONCTUATION_FINALE.includes(texte.charAt(indice - 1))) indice -= 1;
+  return indice;
 }
 
 function count(text: string, char: string): number {

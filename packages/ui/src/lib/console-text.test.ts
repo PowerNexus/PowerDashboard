@@ -54,6 +54,24 @@ describe("liens", () => {
     expect(parts[2]).toEqual({ text: ")" });
   });
 
+  it("retire ponctuation et parenthèses mêlées en fin d'adresse", () => {
+    expect(linkify("(voir https://exemple.fr/a).)")[1]).toEqual({
+      text: "https://exemple.fr/a",
+      href: "https://exemple.fr/a",
+    });
+  });
+
+  // Non-régression (CodeQL js/polynomial-redos) : le retrait de la ponctuation
+  // finale était quadratique, et une telle ligne figeait l'onglet.
+  it("traite en temps linéaire une adresse suivie de cent mille « ! » ou « ) »", () => {
+    for (const queue of ["!".repeat(100_000), ")".repeat(100_000), ".)".repeat(50_000)]) {
+      const debut = performance.now();
+      const parts = linkify(`https://exemple.fr${queue}`);
+      expect(performance.now() - debut).toBeLessThan(500);
+      expect(parts[0]).toEqual({ text: "https://exemple.fr", href: "https://exemple.fr/" });
+    }
+  });
+
   it("ne fait jamais un lien d'un autre protocole", () => {
     expect(linkify("javascript:alert(1) ftp://x.fr")).toEqual([
       { text: "javascript:alert(1) ftp://x.fr" },
