@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { type Database, mounts, serverMounts, servers } from "@gamedashboard/db";
 import {
   BadRequestException,
@@ -35,6 +36,23 @@ const FORBIDDEN_MOUNT_SOURCES = [
   "/var/lib/pterodactyl",
   "/var/run",
 ] as const;
+
+/** Longueur maximale d'un chemin sous Linux (`PATH_MAX`). */
+const PATH_MAX = 4096;
+
+/**
+ * Le chemin est-il écrit sous sa forme simple ?
+ *
+ * Docker résout `//etc`, `/./etc` ou `/var//lib/docker` comme `/etc` et
+ * `/var/lib/docker` : comparer la forme écrite aux racines interdites les
+ * laissait passer. Plutôt que de corriger la saisie en silence, on la refuse,
+ * pour que la table (et donc `allowed_mounts`) ne garde que la forme simple.
+ * Une barre finale est tolérée.
+ */
+function isSimplePath(path: string): boolean {
+  const sansBarreFinale = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  return sansBarreFinale !== "" && posix.normalize(sansBarreFinale) === sansBarreFinale;
+}
 
 /**
  * Dossiers de la machine hôte partagés avec des conteneurs.
@@ -222,19 +240,29 @@ export class MountsService {
     const source = input.source.trim();
     const target = input.target.trim();
 
+    // Borne posée avant toute expression régulière : un chemin d'un mégaoctet
+    // rendait quadratique le retrait des barres finales.
+    if (source.length > PATH_MAX || target.length > PATH_MAX) {
+      throw new BadRequestException("Chemin trop long.");
+    }
     if (!source.startsWith("/")) {
       throw new BadRequestException("La source doit être un chemin absolu de la machine hôte.");
     }
     if (!target.startsWith("/")) {
       throw new BadRequestException("La cible doit être un chemin absolu dans le conteneur.");
     }
-    if (target === "/home/container" || target === "/home/container/") {
+    if (target.replace(/\/+$/, "") === "/home/container") {
       throw new BadRequestException(
         "La cible ne peut pas être la racine du serveur : elle masquerait tous ses fichiers.",
       );
     }
     if (source.includes("..") || target.includes("..")) {
       throw new BadRequestException("Les chemins ne peuvent pas contenir « .. ».");
+    }
+    if (!isSimplePath(source) || !isSimplePath(target)) {
+      throw new BadRequestException(
+        "Écrivez les chemins sous leur forme simple, sans « // » ni « /./ » : Docker lit « //etc » comme « /etc ».",
+      );
     }
 
     /*

@@ -71,7 +71,9 @@ export class AdminActionsService {
     withPassword: boolean;
   }): Promise<{ id: string; temporaryPassword: string | null }> {
     const email = input.email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    // 254 caractères au plus (RFC 5321), vérifiés avant l'expression : sur une
+    // chaîne d'un mégaoctet, elle tenait la boucle d'événements des minutes.
+    if (email.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       throw new BadRequestException("Adresse e-mail invalide.");
     }
 
