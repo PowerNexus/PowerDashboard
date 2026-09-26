@@ -27,7 +27,7 @@ import { SessionGuard } from "../auth/session.guard";
 import { ServerResizeService } from "../client/server-resize.service";
 import { WebhookRegistryService } from "../webhooks/webhook-registry.service";
 import { BrandImagesService } from "./brand-images.service";
-import { BrandingService, brandingInput } from "./branding.service";
+import { BrandingService, brandImageBases, brandingInput } from "./branding.service";
 import { ResellerGuard } from "./reseller.guard";
 import { ResellerService } from "./reseller.service";
 import { ResellerQuotaService } from "./reseller-quota.service";
@@ -136,7 +136,13 @@ export class ResellerController {
 
   @Post("branding")
   async saveBranding(@Req() request: ResellerRequest, @Body() body: unknown) {
-    const saved = await this.branding_.save(request.user.id, brandingInput(body));
+    // `imageBases` : la valeur de logo et de favicon que le formulaire a vue en
+    // dernier. Une image envoyée depuis n'est pas écrasée (`saveWithBases`).
+    const { overrides, keptImages } = await this.branding_.saveWithBases(
+      request.user.id,
+      brandingInput(body),
+      brandImageBases(body),
+    );
     // Un logo envoyé que le champ ne désigne plus (vidé, ou remplacé par une
     // adresse) n'a plus de raison d'occuper la base.
     await this.images_.prune(request.user.id);
@@ -148,10 +154,11 @@ export class ResellerController {
       actorType: "user",
       actorLabel: request.user.email,
       ip: request.ip ?? null,
-      properties: {},
+      properties: keptImages.length > 0 ? { keptImages } : {},
     });
 
-    return { data: saved };
+    // `keptImages` s'ajoute aux champs : la réponse reste la marque enregistrée.
+    return { data: { ...overrides, keptImages } };
   }
 
   /**

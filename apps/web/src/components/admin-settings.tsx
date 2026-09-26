@@ -2,6 +2,7 @@
 
 import {
   PLATFORM_SETTINGS,
+  SETTING_BY_KEY,
   type SettingDescriptor,
   settingsAnchor,
 } from "@gamedashboard/contracts";
@@ -22,6 +23,7 @@ import { Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useCallback, useState, useTransition } from "react";
+import { afterSave, afterUpload, openGuard } from "@/lib/brand-image-guard";
 import type { PlatformSettings } from "@/server/api/admin";
 import {
   savePlatformSettings,
@@ -94,6 +96,24 @@ function PlatformSettingsForm({
   );
   const [secrets, setSecrets] = useState<Record<string, string>>({});
 
+  /*
+   * « Base » du logo et du favicon : la dernière valeur vue côté serveur.
+   * Jointe à l'enregistrement, elle empêche d'écraser une image envoyée depuis
+   * un autre onglet, par un autre administrateur, ou encore en vol.
+   */
+  const [guard, setGuard] = useState(() =>
+    openGuard<string>(
+      Object.fromEntries(
+        initial.values.flatMap((v) =>
+          v.kind !== "secret" && SETTING_BY_KEY.get(v.key)?.upload
+            ? [[v.key, String(v.value)] as const]
+            : [],
+        ),
+      ),
+    ),
+  );
+  const kept = guard.kept;
+
   /**
    * Issue du dernier essai d'envoi.
    *
@@ -165,9 +185,19 @@ function PlatformSettingsForm({
       payload[descriptor.key] = values[descriptor.key] ?? "";
     }
 
+    const groupBases = Object.fromEntries(
+      settings.flatMap((d) => (d.upload ? [[d.key, guard.bases[d.key] ?? ""] as const] : [])),
+    );
+    const withImages = Object.keys(groupBases).length > 0;
+
     run(async () => {
-      const result = await savePlatformSettings(payload);
+      const result = await savePlatformSettings(payload, withImages ? groupBases : undefined);
       if (!result.error) setSecrets({});
+      // Recalé sur ce que le serveur a gardé : `useState(initial)` ne suit pas
+      // `router.refresh()`, et l'ancienne adresse resterait affichée.
+      const images = result.images;
+      if (images) setValues((current) => ({ ...current, ...images }));
+      if (!result.error) setGuard((current) => afterSave(current, images ?? {}, result.kept));
       return result;
     }, label);
   };
@@ -267,9 +297,12 @@ function PlatformSettingsForm({
                   target="platform"
                   kind={descriptor.upload}
                   disabled={pending}
-                  onUploaded={(url) =>
-                    setValues((current) => ({ ...current, [descriptor.key]: url }))
-                  }
+                  onUploaded={(url) => {
+                    // L'API a déjà écrit le réglage : c'est aussi la nouvelle base.
+                    setValues((current) => ({ ...current, [descriptor.key]: url }));
+                    // Nouvelle base, et bandeau « image gardée » effacé.
+                    setGuard((current) => afterUpload(current, descriptor.key, url));
+                  }}
                 />
               ) : null}
             </div>
@@ -291,6 +324,13 @@ function PlatformSettingsForm({
       {saved ? (
         <AlertBanner variant="success" title={tc("saved")} dismissible>
           {saved}
+        </AlertBanner>
+      ) : null}
+      {kept.length > 0 ? (
+        <AlertBanner variant="warning" title={t("imagesKeptTitle")} dismissible>
+          {t("imagesKeptBody", {
+            fields: kept.map((key) => SETTING_BY_KEY.get(key)?.label ?? key).join(", "),
+          })}
         </AlertBanner>
       ) : null}
 

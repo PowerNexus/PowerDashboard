@@ -409,6 +409,8 @@
   "adminSettings": {
     "title": "Paramètres",
     "subtitle": "Marque, e-mail, stockage et options de la plateforme.",
+    "imagesKeptTitle": "Image gardée",
+    "imagesKeptBody": "Modifié depuis l'ouverture de cette page, par exemple par l'envoi d'une image : la valeur en place a été gardée ({fields}). Le formulaire l'affiche maintenant ; enregistrez de nouveau pour la remplacer.",
     "saveRefused": "Enregistrement refusé",
     "secretStored": "Une valeur est enregistrée. Laissez vide pour la conserver.",
     "secretMissing": "Aucune valeur enregistrée.",
@@ -1331,6 +1333,8 @@
   "branding": {
     "title": "Marque blanche",
     "subtitle": "Votre nom, votre logo et votre couleur, servis sur votre propre domaine.",
+    "imagesKeptTitle": "Image gardée",
+    "imagesKeptBody": "Modifié depuis l'ouverture de cette page, par exemple par l'envoi d'une image : la valeur en place a été gardée ({fields}). Le formulaire l'affiche maintenant ; enregistrez de nouveau pour la remplacer.",
     "inactiveTitle": "Rien n'est encore affiché à vos clients",
     "inactiveBody": "C'est le domaine d'arrivée qui choisit la marque : tant que le vôtre n'est pas vérifié, vos clients voient celle de la plateforme, même s'ils sont vos clients.",
     "domainTitle": "Votre domaine",

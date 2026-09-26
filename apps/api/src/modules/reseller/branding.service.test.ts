@@ -1,7 +1,9 @@
 import type { Database } from "@gamedashboard/db";
+import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 import type { PlatformSettingsService } from "../admin/platform-settings.service";
-import { BrandingService, brandingInput } from "./branding.service";
+import { platformImageBases } from "./brand-images.service";
+import { BrandingService, brandImageBases, brandingInput } from "./branding.service";
 
 /**
  * Marque de la plateforme : tous ses champs sont lus, pas seulement le nom et
@@ -113,5 +115,42 @@ describe("brandingInput — champs lus dans le corps", () => {
       replyTo: "",
     });
     expect(brandingInput(null).accent).toBe("");
+  });
+});
+
+describe("bases des images — lues dans le corps", () => {
+  it("retient les champs d'image, ignore les autres clés", () => {
+    expect(brandImageBases({ imageBases: { logoUrl: " /brand/fichier/a ", name: 3 } })).toEqual({
+      logoUrl: "/brand/fichier/a",
+    });
+    expect(brandImageBases({ imageBases: { faviconUrl: "" } })).toEqual({ faviconUrl: "" });
+    // Sans base, comportement d'avant : aucun champ n'est conditionnel.
+    expect(brandImageBases({ logoUrl: "https://a.fr/l.png" })).toEqual({});
+    expect(brandImageBases({ imageBases: { logoUrl: undefined } })).toEqual({});
+    expect(brandImageBases(null)).toEqual({});
+  });
+
+  it("refuse une base malformée plutôt que d'écrire sans condition", () => {
+    // Non-régression : une base `null` ou numérique était ignorée sans rien
+    // dire, et l'écriture du champ redevenait inconditionnelle.
+    for (const logoUrl of [null, 3, true, ["x"], { a: 1 }]) {
+      expect(() => brandImageBases({ imageBases: { logoUrl } })).toThrow(BadRequestException);
+    }
+    for (const imageBases of [null, "x", ["x"]]) {
+      expect(() => brandImageBases({ imageBases })).toThrow(BadRequestException);
+    }
+  });
+
+  it("côté plateforme, seuls brand.logoUrl et brand.faviconUrl comptent", () => {
+    expect(
+      platformImageBases({
+        bases: { "brand.logoUrl": "https://a.fr/l.png", "brand.accent": 0 },
+      }),
+    ).toEqual({ "brand.logoUrl": "https://a.fr/l.png" });
+    expect(platformImageBases({ values: {} })).toEqual({});
+    expect(() => platformImageBases({ bases: { "brand.faviconUrl": 1 } })).toThrow(
+      BadRequestException,
+    );
+    expect(() => platformImageBases({ bases: null })).toThrow(BadRequestException);
   });
 });
