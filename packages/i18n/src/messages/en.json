@@ -409,6 +409,8 @@
   "adminSettings": {
     "title": "Settings",
     "subtitle": "Branding, email, storage and platform options.",
+    "imagesKeptTitle": "Image kept",
+    "imagesKeptBody": "Changed after this page was opened, for instance by an image upload: the current value was kept ({fields}). The form now shows it; save again to replace it.",
     "saveRefused": "Save refused",
     "secretStored": "A value is stored. Leave empty to keep it.",
     "secretMissing": "No value stored.",
@@ -1331,6 +1333,8 @@
   "branding": {
     "title": "White label",
     "subtitle": "Your name, your logo and your colour, served on your own domain.",
+    "imagesKeptTitle": "Image kept",
+    "imagesKeptBody": "Changed after this page was opened, for instance by an image upload: the current value was kept ({fields}). The form now shows it; save again to replace it.",
     "inactiveTitle": "Nothing is shown to your clients yet",
     "inactiveBody": "The arrival domain picks the brand: until yours is verified, your clients see the platform's one, even though they are your clients.",
     "domainTitle": "Your domain",

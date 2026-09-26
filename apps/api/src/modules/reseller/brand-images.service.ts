@@ -13,7 +13,7 @@ import { BadRequestException, Inject, Injectable, PayloadTooLargeException } fro
 import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
-import { BrandingService } from "./branding.service";
+import { BrandingService, readImageBases } from "./branding.service";
 
 /**
  * Logos et favicons **envoyés par fichier**, à côté des adresses saisies.
@@ -99,6 +99,59 @@ export class BrandImagesService {
     });
     this.branding.forgetAll();
     return path;
+  }
+
+  /**
+   * Enregistre des réglages de la plateforme **sans écraser une image posée
+   * entre-temps** — le pendant de `BrandingService.saveWithBases`.
+   *
+   * `bases` porte, pour `brand.logoUrl` et `brand.faviconUrl`, la valeur que le
+   * formulaire a vue en dernier. Si le réglage n'est plus celui-là (image
+   * envoyée depuis un autre onglet, par un autre administrateur, ou envoi
+   * encore en vol), la valeur reçue est ignorée pour ce réglage seulement ; le
+   * reste du lot s'enregistre. Sans base, rien ne change.
+   *
+   * **Lecture puis écriture, sous le verrou des images de la plateforme.** Les
+   * réglages sont en clé-valeur, une ligne par clé, et le lot passe par
+   * `PlatformSettingsService.save` (contrôles de forme compris) : une écriture
+   * conditionnelle par clé dans le SQL dupliquerait ces contrôles, et resterait
+   * délicate pour une clé encore absente. Le verrou consultatif est celui de
+   * `uploadForPlatform`, qui est le seul autre écrivain de ces deux réglages :
+   * l'envoi ne peut donc pas se glisser entre la lecture et l'écriture. Le
+   * nettoyage (`prune`) se fait dans la même transaction.
+   *
+   * N'est employé que si le lot touche une image : les autres réglages (une
+   * adresse de facturation vérifiée par résolution DNS, par exemple) n'ont pas
+   * à tenir ce verrou.
+   */
+  async savePlatformSettings(
+    values: Record<string, unknown>,
+    bases: PlatformImageBases,
+  ): Promise<{ saved: string[]; kept: string[]; images: Record<string, string> }> {
+    const result = await this.locked(null, async (tx) => {
+      const current = await platformImageValues(tx);
+      const wanted = { ...values };
+      const kept: string[] = [];
+      for (const key of PLATFORM_IMAGE_KEYS) {
+        const base = bases[key];
+        if (base === undefined || !(key in wanted)) continue;
+        // Gardé seulement si la valeur en place diffère **et** de la base **et**
+        // de la valeur reçue, comme chez le revendeur : renvoyer la valeur déjà
+        // servie n'écrase rien et n'a pas à être signalé.
+        const sent = String(wanted[key] ?? "").trim();
+        const stored = current[key] ?? "";
+        if (stored !== base && stored !== sent) {
+          delete wanted[key];
+          kept.push(key);
+        }
+      }
+
+      const { saved } = await this.platformSettings.save(wanted, tx);
+      await prune(tx, null);
+      return { saved, kept, images: await platformImageValues(tx) };
+    });
+    this.branding.forgetAll();
+    return result;
   }
 
   /** L'image à servir, ou `null` : identifiant malformé ou inconnu. */
@@ -188,6 +241,35 @@ async function referencedUrls(tx: Transaction, owner: Owner): Promise<string[]> 
     .where(eq(resellerBrandings.userId, owner))
     .limit(1);
   return row ? [row.logoUrl, row.faviconUrl] : [];
+}
+
+/** Les réglages d'image de la plateforme, que l'envoi par fichier écrit lui-même. */
+export const PLATFORM_IMAGE_KEYS = [
+  PLATFORM_BRAND_SETTINGS.logoUrl,
+  PLATFORM_BRAND_SETTINGS.faviconUrl,
+] as const;
+
+/** Dernière valeur vue par le formulaire, par réglage d'image. */
+export type PlatformImageBases = Partial<Record<string, string>>;
+
+/** Bases lues dans le corps (`bases`) ; malformées, refusées (`readImageBases`). */
+export function platformImageBases(body: unknown): PlatformImageBases {
+  return readImageBases((body as { bases?: unknown } | null)?.bases, PLATFORM_IMAGE_KEYS);
+}
+
+/** Valeurs des réglages d'image, lues dans la transaction ; vide si absent. */
+async function platformImageValues(tx: Transaction): Promise<Record<string, string>> {
+  const rows = await tx
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(inArray(settings.key, [...PLATFORM_IMAGE_KEYS]));
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+  return Object.fromEntries(
+    PLATFORM_IMAGE_KEYS.map((key) => {
+      const value = stored.get(key);
+      return [key, typeof value === "string" ? value : ""];
+    }),
+  );
 }
 
 interface CheckedBrandImage {

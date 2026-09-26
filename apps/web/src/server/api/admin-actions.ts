@@ -14,10 +14,31 @@ import type { ResellerQuotaReport } from "./reseller";
  * en flèche. Les mêler obligerait à tout tordre pour satisfaire la directive.
  */
 
+/**
+ * Enregistre des réglages.
+ *
+ * `bases` porte, pour le logo et le favicon, la valeur que le formulaire a vue
+ * en dernier côté serveur : l'API garde une image envoyée depuis au lieu de
+ * l'écraser, et le dit dans `kept`. `images` rend les deux réglages d'image
+ * tels qu'ils sont en base après l'écriture, pour que le formulaire s'y recale.
+ */
 export async function savePlatformSettings(
   values: Record<string, string | number | boolean>,
-): Promise<{ error: string | null }> {
-  return act("/admin/settings", () => apiSend("/api/v1/admin/settings", { values }));
+  bases?: Record<string, string>,
+): Promise<{ error: string | null; kept: string[]; images: Record<string, string> | null }> {
+  try {
+    const { data } = await apiSendFor<{
+      data: { kept?: string[]; images?: Record<string, string> };
+    }>("/api/v1/admin/settings", bases ? { values, bases } : { values });
+    revalidatePath("/admin/settings");
+    return { error: null, kept: data.kept ?? [], images: data.images ?? null };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Action refusée.",
+      kept: [],
+      images: null,
+    };
+  }
 }
 
 /**

@@ -35,7 +35,11 @@ import { SessionRepository } from "../auth/session.repository";
 import { BillingService } from "../billing/billing.service";
 import { ServerResizeService } from "../client/server-resize.service";
 import { MailerService } from "../mail/mailer.service";
-import { BrandImagesService } from "../reseller/brand-images.service";
+import {
+  BrandImagesService,
+  PLATFORM_IMAGE_KEYS,
+  platformImageBases,
+} from "../reseller/brand-images.service";
 import { BrandingService } from "../reseller/branding.service";
 import { ResellerQuotaService } from "../reseller/reseller-quota.service";
 import { ResellerShareService } from "../reseller/reseller-share.service";
@@ -371,22 +375,25 @@ export class AdminController {
     if (!values || typeof values !== "object" || Array.isArray(values)) {
       throw new BadRequestException("Réglages manquants.");
     }
-    const result = await this.platform.save(values as Record<string, unknown>);
+    const input = values as Record<string, unknown>;
+    // Un lot qui touche au logo ou au favicon passe par les images de marque :
+    // écriture conditionnelle à la base du formulaire (`bases`), pour ne pas
+    // écraser une image envoyée depuis, et nettoyage dans la même transaction.
+    const result = PLATFORM_IMAGE_KEYS.some((key) => key in input)
+      ? await this.brandImages.savePlatformSettings(input, platformImageBases(body))
+      : { ...(await this.platform.save(input)), kept: [] as string[] };
     // La marque de la plateforme sert de repli à tous les domaines : sans
     // cette purge, le nouveau logo n'apparaîtrait qu'une minute plus tard, et
     // l'on rechargerait la page en croyant l'enregistrement perdu.
     if (result.saved.some((key) => key.startsWith("brand."))) this.branding.forgetAll();
-    // Un logo envoyé que le réglage ne désigne plus n'a plus rien à faire en base.
-    if (result.saved.some((key) => key === "brand.logoUrl" || key === "brand.faviconUrl")) {
-      await this.brandImages.prune(null);
-    }
 
-    if (result.saved.length > 0) {
-      await this.trace(
-        request,
-        "admin.settings_saved",
-        settingsTrace(result.saved, values as Record<string, unknown>),
-      );
+    // Une image gardée se consigne aussi, même quand rien d'autre n'a changé :
+    // c'est la trace d'un enregistrement dont une partie a été écartée.
+    if (result.saved.length > 0 || result.kept.length > 0) {
+      await this.trace(request, "admin.settings_saved", {
+        ...settingsTrace(result.saved, values as Record<string, unknown>),
+        ...(result.kept.length > 0 ? { keptImages: result.kept } : {}),
+      });
     }
     return { data: result };
   }

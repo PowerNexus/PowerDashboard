@@ -33,10 +33,38 @@ export async function fetchResellerBranding(): Promise<ResellerBranding> {
   return data;
 }
 
+/** Champs d'image, que l'envoi par fichier écrit lui-même côté serveur. */
+export type ResellerImageField = "logoUrl" | "faviconUrl";
+
+/** Ce que l'enregistrement a vraiment laissé en base, et les images gardées. */
+export interface SavedResellerBranding {
+  overrides: BrandingOverrides;
+  keptImages: ResellerImageField[];
+}
+
+/**
+ * Enregistre la marque, avec la **base** de chaque champ d'image : la valeur
+ * que le formulaire a vue en dernier côté serveur. L'API garde une image
+ * envoyée depuis (autre onglet, envoi encore en vol) au lieu de l'écraser, et
+ * le dit dans `keptImages`.
+ */
 export async function saveResellerBranding(
   overrides: BrandingOverrides,
-): Promise<{ error: string | null }> {
-  return await send("/api/v1/reseller/branding", overrides);
+  imageBases: Partial<Record<ResellerImageField, string>>,
+): Promise<{ error: string | null; saved: SavedResellerBranding | null }> {
+  try {
+    const { data } = await apiSendFor<{
+      data: BrandingOverrides & { keptImages?: ResellerImageField[] };
+    }>("/api/v1/reseller/branding", { ...overrides, imageBases });
+    revalidatePath("/", "layout");
+    const { keptImages = [], ...stored } = data;
+    return { error: null, saved: { overrides: stored, keptImages } };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "Opération refusée.",
+      saved: null,
+    };
+  }
 }
 
 export async function setResellerDomain(domain: string): Promise<{ error: string | null }> {

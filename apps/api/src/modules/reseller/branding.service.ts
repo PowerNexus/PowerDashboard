@@ -19,7 +19,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, type SQL, sql } from "drizzle-orm";
 import { DATABASE } from "../../common/database.provider";
 import { PlatformSettingsService } from "../admin/platform-settings.service";
 
@@ -146,6 +146,34 @@ export class BrandingService {
    * `src` est une injection. Seuls `https://` et les chemins internes passent.
    */
   async save(userId: string, input: Partial<BrandingOverrides>): Promise<BrandingOverrides> {
+    return (await this.saveWithBases(userId, input, {})).overrides;
+  }
+
+  /**
+   * Enregistre la personnalisation, **sans écraser une image posée entre-temps**.
+   *
+   * Le formulaire renvoie l'état chargé à l'ouverture de la page. Or un envoi
+   * de fichier (`BrandImagesService.uploadForReseller`) écrit `logoUrl` ou
+   * `faviconUrl` lui-même : depuis un autre onglet, un autre poste, ou un envoi
+   * encore en vol au clic sur « Enregistrer ». Sans garde, l'ancienne adresse
+   * revenait par-dessus, et `prune` effaçait l'image tout juste envoyée.
+   *
+   * Pour chaque champ d'image, le formulaire joint donc sa **base** : la valeur
+   * qu'il a vue en dernier côté serveur. Si la valeur en base n'est plus
+   * celle-là, elle est gardée et la valeur reçue ignorée — pour ce champ
+   * seulement, les autres s'enregistrent. Les champs restent modifiables à la
+   * main : une base à jour laisse poser une adresse externe ou vider le champ.
+   * Sans base, rien ne change (appels existants).
+   *
+   * La condition est **dans l'écriture même** (`CASE` du `ON CONFLICT DO
+   * UPDATE`, évalué sur la ligne verrouillée) : une lecture suivie d'une
+   * écriture laisserait passer un envoi entre les deux.
+   */
+  async saveWithBases(
+    userId: string,
+    input: Partial<BrandingOverrides>,
+    bases: BrandImageBases,
+  ): Promise<{ overrides: BrandingOverrides; keptImages: BrandImageField[] }> {
     const accent = (input.accent ?? "").trim();
     if (accent !== "" && normalizeHex(accent) === null) {
       throw new BadRequestException(
@@ -173,16 +201,41 @@ export class BrandingService {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.db
+    // Une base fournie rend l'écriture du champ conditionnelle. À l'insertion,
+    // la valeur « en base » est vide : une base non vide y est déjà périmée.
+    const guarded = (field: BrandImageField): string | SQL => {
+      const base = bases[field];
+      if (base === undefined) return values[field];
+      const column = resellerBrandings[field];
+      return sql`CASE WHEN coalesce(${column}, '') = ${base} THEN ${values[field]} ELSE ${column} END`;
+    };
+    const atInsert = (field: BrandImageField): string => {
+      const base = bases[field];
+      return base === undefined || base === "" ? values[field] : "";
+    };
+    const inserted = {
+      ...values,
+      logoUrl: atInsert("logoUrl"),
+      faviconUrl: atInsert("faviconUrl"),
+    };
+    const update = { ...values, logoUrl: guarded("logoUrl"), faviconUrl: guarded("faviconUrl") };
+
+    const [stored] = await this.db
       .insert(resellerBrandings)
-      .values({ userId, ...values })
-      .onConflictDoUpdate({ target: resellerBrandings.userId, set: values });
+      .values({ userId, ...inserted })
+      .onConflictDoUpdate({ target: resellerBrandings.userId, set: update })
+      .returning({ logoUrl: resellerBrandings.logoUrl, faviconUrl: resellerBrandings.faviconUrl });
+
+    // Gardé : une base était fournie et la valeur servie n'est pas celle reçue.
+    const keptImages = BRAND_IMAGE_FIELDS.filter(
+      (field) => bases[field] !== undefined && (stored?.[field] ?? "") !== values[field],
+    );
 
     // Le domaine du revendeur sert peut-être déjà l'ancienne marque : sans
     // cette purge, son changement n'apparaîtrait qu'à la minute suivante, et il
     // rechargerait la page en croyant que l'enregistrement a échoué.
     this.forget((await this.domainState(userId)).domain);
-    return this.overridesFor(userId);
+    return { overrides: await this.overridesFor(userId), keptImages };
   }
 
   /** État du domaine, avec ce qu'il reste à publier chez le registraire. */
@@ -697,6 +750,52 @@ export function brandingInput(body: unknown): BrandingOverrides {
   return Object.fromEntries(
     (Object.keys(fields) as (keyof BrandingOverrides)[]).map((key) => [key, text(key)]),
   ) as unknown as BrandingOverrides;
+}
+
+/** Les champs d'image, que l'envoi par fichier écrit lui-même. */
+export const BRAND_IMAGE_FIELDS = ["logoUrl", "faviconUrl"] as const;
+export type BrandImageField = (typeof BRAND_IMAGE_FIELDS)[number];
+
+/** Dernière valeur vue par le formulaire, par champ d'image (voir `saveWithBases`). */
+export type BrandImageBases = Partial<Record<BrandImageField, string>>;
+
+/**
+ * Bases lues dans le corps (`imageBases`). Absentes, rien ne change : un champ
+ * sans base s'enregistre comme avant.
+ */
+export function brandImageBases(body: unknown): BrandImageBases {
+  return readImageBases((body as { imageBases?: unknown } | null)?.imageBases, BRAND_IMAGE_FIELDS);
+}
+
+/**
+ * Bases d'images lues dans un corps de requête, pour les clés données.
+ *
+ * Une base **malformée est refusée** (400), jamais ignorée : l'ignorer rendait
+ * l'écriture du champ inconditionnelle — précisément ce que la base devait
+ * empêcher —, et la traiter comme vide laisserait passer l'écriture chaque
+ * fois que le champ est vide en base. Un client qui joint une base entend une
+ * écriture conditionnelle ; s'il la forme mal, mieux vaut qu'il l'apprenne que
+ * d'écraser une image sans le savoir. Une clé absente (ou `undefined`) reste
+ * « sans base ».
+ */
+export function readImageBases<K extends string>(
+  raw: unknown,
+  keys: readonly K[],
+): Partial<Record<K, string>> {
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new BadRequestException("Bases d'images malformées : un objet de chaînes est attendu.");
+  }
+  const bases: Partial<Record<K, string>> = {};
+  for (const key of keys) {
+    const value = (raw as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string") {
+      throw new BadRequestException(`Base d'image malformée pour « ${key} » : chaîne attendue.`);
+    }
+    bases[key] = value.trim();
+  }
+  return bases;
 }
 
 /** Hôte comparable : sans port, sans casse, sans point final. */

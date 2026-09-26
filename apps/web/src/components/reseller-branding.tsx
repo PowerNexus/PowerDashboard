@@ -17,8 +17,10 @@ import { Palette } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState, useTransition } from "react";
+import { afterSave, afterUpload, openGuard } from "@/lib/brand-image-guard";
 import {
   type ResellerBranding as Branding,
+  type ResellerImageField,
   saveResellerBranding,
   setResellerDomain,
   verifyResellerDomain,
@@ -44,9 +46,46 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  /*
+   * « Base » de chaque image : la dernière valeur vue côté serveur. Jointe à
+   * l'enregistrement, elle empêche d'écraser un logo envoyé depuis un autre
+   * onglet (ou un envoi encore en vol) avec l'état chargé à l'ouverture.
+   */
+  const [guard, setGuard] = useState(() =>
+    openGuard<ResellerImageField>({
+      logoUrl: initial.overrides.logoUrl,
+      faviconUrl: initial.overrides.faviconUrl,
+    }),
+  );
+  const kept = guard.kept;
+
   const state = initial.domain;
   const field = (key: keyof BrandingOverrides) => (value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
+
+  /** Un envoi réussi : nouvelle base, et bandeau « image gardée » effacé. */
+  const uploaded = (key: ResellerImageField) => (url: string) => {
+    field(key)(url);
+    setGuard((current) => afterUpload(current, key, url));
+  };
+
+  /*
+   * Après l'enregistrement, le formulaire se recale sur ce que le serveur a
+   * gardé : `useState(initial)` ne suit pas `router.refresh()`, et un logo
+   * gardé resterait sinon affiché avec l'ancienne adresse — que le clic
+   * suivant renverrait.
+   */
+  const save = () =>
+    run(async () => {
+      const result = await saveResellerBranding(form, guard.bases);
+      if (result.saved) {
+        const stored = result.saved.overrides;
+        setForm(stored);
+        const images = { logoUrl: stored.logoUrl, faviconUrl: stored.faviconUrl };
+        setGuard((current) => afterSave(current, images, result.saved?.keptImages ?? []));
+      }
+      return result;
+    });
 
   const run = (action: () => Promise<{ error: string | null }>) =>
     startTransition(async () => {
@@ -185,7 +224,7 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
             target="reseller"
             kind="logo"
             disabled={pending}
-            onUploaded={field("logoUrl")}
+            onUploaded={uploaded("logoUrl")}
           />
 
           <FormField label={t("favicon")} description={t("faviconHint")}>
@@ -202,7 +241,7 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
             target="reseller"
             kind="favicon"
             disabled={pending}
-            onUploaded={field("faviconUrl")}
+            onUploaded={uploaded("faviconUrl")}
           />
 
           <FormField label={t("accent")} description={t("accentHint")}>
@@ -274,8 +313,16 @@ export function ResellerBranding({ initial }: { initial: Branding }) {
             )}
           </FormField>
 
+          {kept.length > 0 ? (
+            <AlertBanner variant="warning" title={t("imagesKeptTitle")} dismissible>
+              {t("imagesKeptBody", {
+                fields: kept.map((key) => t(key === "logoUrl" ? "logo" : "favicon")).join(", "),
+              })}
+            </AlertBanner>
+          ) : null}
+
           <div>
-            <Button disabled={pending} onClick={() => run(() => saveResellerBranding(form))}>
+            <Button disabled={pending} onClick={save}>
               {tc("save")}
             </Button>
           </div>
